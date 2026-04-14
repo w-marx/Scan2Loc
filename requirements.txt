@@ -1,0 +1,17 @@
+torch==2.7.0
+torchvision
+torchaudio
+numpy==1.26.1
+Pillow
+huggingface_hub
+einops
+safetensors
+open3d
+opencv-python
+transformers
+setuptools==69.5.1
+psutil
+matplotlib
+projectaria_client_sdk
+projectaria-tools
+tqdm
