@@ -61,6 +61,8 @@ def process_data(
     robot_rgb_cam_mtx:np.ndarray = loaded_data["robot_rgb_cam_mtx"]
     robot_rgb_cam_dist_coef:np.ndarray = loaded_data["robot_rgb_dist"]
 
+    robot_base_t_robot_cameras = loaded_data["robot_base_t_cameras"]
+
 
     # TODO choose the image smarter
     print(f"headset_images: {headset_images.shape}")
@@ -88,10 +90,6 @@ def process_data(
     # Use vggt to create image points
     robot_imgs_3d_points, robot_imgs_3d_points_conf, robot_extrinsic, robot_intrinsic, robot_imgs_depth, robot_imgs_depth_conf= use_vggt_on_images(robot_rgb_images)
 
-    # TODO using the real parameters doesnt improve performance
-    #real_intrinsic = np.array([robot_cam_mtx for _ in range(np.shape(robot_intrinsic)[0])])
-    #print(f"Real intrinsics shape: {real_intrinsic.shape}, fake : {robot_intrinsic.shape}")
-
     point_cloud = create_point_cloud_from_image_points(
         method=point_cloud_creation_method,
         images_points_3d_and_conf=(robot_imgs_3d_points, robot_imgs_3d_points_conf),
@@ -101,11 +99,29 @@ def process_data(
         confidence_quantile=confidence_threshhold,
     )
 
+    print("Adjusting the vggt scale...")
+    if robot_base_t_robot_cameras is not None:
+        scale = 1
+        transformation_unscaled = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+
+        print("Adjusting the vggt scale based on the given camera poses")
+        # TODO Add support if when they are actually provided by the Robot
+    else:
+        print("Defaulting to vggt extrinsics which are not scaled")
+        print("ONLY USABLE FOR PROOF OF CONCEPT TESTING")
+        robot_base_t_robot_cameras = [np.append(robot_extrinsic[i], np.array([[0,0,0,1]]), axis=0) for i in range(robot_extrinsic.shape[0])]
+        print(robot_base_t_robot_cameras)
+
+
     print("Generating the labels...")
 
     robot_cams_t_aruco = estimate_camera_aruco_pose(robot_rgb_images, robot_rgb_cam_mtx, robot_rgb_cam_dist_coef, aruco_marker_size)
     # Create RGB-XYZ image pairs and ground truth poses for the robot
-    robot_poses_t_headset = [robot_cam_t_aruco @ np.linalg.inv(headset_t_aruco) for robot_cam_t_aruco in robot_cams_t_aruco]
+
+    robot_cams_t_headset = [robot_cam_t_aruco @ np.linalg.inv(headset_t_aruco) for robot_cam_t_aruco in robot_cams_t_aruco]
+
+    robot_base_t_headsets = [robot_base_t_robot_cameras[i] @ robot_cams_t_headset[i] for i in range(len(robot_cams_t_headset))]
+
 
     print("Saving the data...")
     save_output_data(
@@ -113,11 +129,12 @@ def process_data(
         headset_image=masked_headset_image,
         headset_cam_mtx=headset_cam_mtx,
         robot_image_names=robot_images_names,
-        robot_cam_mtx=robot_rgb_cam_mtx,
+        robot_rgb_cam_mtx=robot_rgb_cam_mtx,
         robot_rgb_images=masked_robot_images,
         robot_xyz_images=robot_imgs_3d_points,
-        robot_cams_t_headset=robot_poses_t_headset,
-        point_cloud = point_cloud
+        point_cloud = point_cloud,
+        robot_base_t_robot_cameras = robot_base_t_robot_cameras,
+        robot_base_t_headsets = robot_base_t_headsets,
     )
 
 

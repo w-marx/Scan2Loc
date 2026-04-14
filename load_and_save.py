@@ -6,7 +6,6 @@ import open3d as o3d
 from projectaria_tools.core import data_provider, calibration
 from open3d.cuda.pybind.geometry import PointCloud
 
-
 def get_images(image_folder:str) -> tuple[np.ndarray, list[str]]:
     """
     :param image_folder: string of the folder where .png images are stored
@@ -88,6 +87,8 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
         robot_depth_cam_mtx: A 3x3 Numpy array with the intrinsic matrix of the depth camera
         robot_depth_dist: A 1D numpy array with the distortion coefficients of the depth camera (mostly just 0s)
         robot_rgb_dist: A 1D numpy array with the distortion coefficients of the rgb camera (mostly just 0s)
+
+        robot_base_t_cameras: A Nx4x4 numpy of transformation matrices or None if those are not provided
     }
     """
 
@@ -118,6 +119,11 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
     robot_rgb_images = np.array([cv2.cvtColor(cv2.imread(f"{input_folder}/robot/{name}/rgb.png"), cv2.COLOR_BGR2RGB) for name in robot_image_names], dtype=np.uint8)
     robot_depth_images = np.array([np.load(f"{input_folder}/robot/{name}/depth.npy") for name in robot_image_names])
 
+    robot_base_t_cameras = np.array([np.load(f"{input_folder}/robot/{name}/base_t_camera.npy") for name in robot_image_names if os.path.exists(f"{input_folder}/robot/{name}/base_t_camera.npy")])
+    if robot_base_t_cameras.shape[0] != len(robot_image_names):
+        print(f"Only {robot_base_t_cameras.shape[0]} / {len(robot_image_names)} base_t_cameras are available, therefore they are not loaded")
+        robot_base_t_cameras = None
+
     # Load Robot calibration
     robot_calibration = json.loads(open(f"{input_folder}/robot_calibration.json").read())
 
@@ -133,6 +139,8 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
         "robot_depth_cam_mtx": np.array(robot_calibration["depth_camera_matrix"]),
         "robot_depth_dist": np.array(robot_calibration["depth_distortion_coefficients"]),
         "robot_rgb_dist":np.array(robot_calibration["rgb_distortion_coefficients"]),
+
+        "robot_base_t_cameras": robot_base_t_cameras,
     }
 
     return ret_dict
@@ -159,8 +167,9 @@ def save_output_data(
         robot_image_names: list[str],
         robot_rgb_images:np.ndarray,
         robot_xyz_images:np.ndarray,
-        robot_cams_t_headset:list[np.ndarray],
-        robot_cam_mtx:np.ndarray,
+        robot_base_t_robot_cameras:list[np.ndarray],
+        robot_base_t_headsets:list[np.ndarray],
+        robot_rgb_cam_mtx:np.ndarray,
         point_cloud:PointCloud,
 ):
     """
@@ -174,11 +183,11 @@ def save_output_data(
     ├── robot
     │   └── filenames (multiple folders)
     │       ├── A xyz.npy file with the world points associated to each pixel
+    │       ├── A robot_base_t_robot_camera.json with the 4x4 transformation matrix between robot base and camera
     │       └── A rgb.png image with possible aruco markers digitally removed
     ├── labels
-    │   └── multiple .json files with the pose estimate based on the aruco marker
+    │   └── multiple .json files with the robot base 2 headset pose estimates based on the aruco marker
     └── point_cloud.ply
-
     """
 
     os.makedirs(output_folder, exist_ok=True)
@@ -187,17 +196,21 @@ def save_output_data(
     cv2.imwrite(f"{output_folder}/headset/headset_image.png", headset_image)
 
     save_cam_properties_as_json(output_folder, "headset_cam_calibration", headset_cam_mtx)
-    save_cam_properties_as_json(output_folder, "robot_cam_calibration", robot_cam_mtx)
+    save_cam_properties_as_json(output_folder, "robot_cam_calibration", robot_rgb_cam_mtx)
 
     os.makedirs(f"{output_folder}/robot", exist_ok=True)
     os.makedirs(f"{output_folder}/label", exist_ok=True)
 
-    for rgb_image, xyz_image, cam_t_headset, name in zip(robot_rgb_images, robot_xyz_images, robot_cams_t_headset, robot_image_names):
+    for rgb_image, xyz_image, robot_base_t_robot_camera, robot_base_t_headset, name in zip(robot_rgb_images, robot_xyz_images, robot_base_t_robot_cameras, robot_base_t_headsets,robot_image_names):
         os.makedirs(f"{output_folder}/robot/{name}", exist_ok=True)
         cv2.imwrite(f"{output_folder}/robot/{name}/rgb.png", rgb_image)
         np.save(f"{output_folder}/robot/{name}/xyz.npy", xyz_image)
+
+        with open(f"{output_folder}/robot/{name}/robot_base_t_robot_camera.json", 'w') as f:
+            json.dump(robot_base_t_robot_camera.tolist(), f, indent=4)
+
         with open(f"{output_folder}/label/{name}.json", 'w') as f:
-            json.dump(cam_t_headset.tolist(), f, indent=4)
+            json.dump(robot_base_t_headset.tolist(), f, indent=4)
 
     o3d.io.write_point_cloud(f"{output_folder}/pointcloud.ply", point_cloud, write_ascii=True)
 
@@ -206,7 +219,6 @@ def load_output_data(load_path:str):
 
     robot_cam_mtx = json.loads(open(f"{load_path}/robot_cam_calibration.json", 'r').read()).get("camera_matrix")
     headset_cam_mtx = json.loads(open(f"{load_path}/headset_cam_calibration.json", 'r').read()).get("camera_matrix")
-
 
     robot_tuples = []
     for folder in os.listdir(f"{load_path}/robot"):

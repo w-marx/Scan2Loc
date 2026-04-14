@@ -22,6 +22,8 @@ def save_intrinsics(rgb_intrinsics, depth_intrinsics, output_folder:str = None, 
 
 
 if __name__ == "__main__":
+    colorizer = rs.colorizer()
+
     pipeline = rs.pipeline()
     pipeline.start()
 
@@ -33,6 +35,10 @@ if __name__ == "__main__":
         print("Old cam not removed")
     os.makedirs(f"rgbd_cam_output", exist_ok=True)
 
+
+    depth_scale = pipeline.get_active_profile().get_device().first_depth_sensor().get_depth_scale()
+    print(f"depth_scale = {depth_scale}")
+
     created_intrinsics = False
 
     try:
@@ -42,6 +48,7 @@ if __name__ == "__main__":
 
             rgb_frame = np.asanyarray(frames.get_color_frame().get_data())
             depth_frame = np.asanyarray(frames.get_depth_frame().get_data())
+            depth_frame_scaled = depth_frame * depth_scale
 
 
             if not created_intrinsics:
@@ -53,16 +60,18 @@ if __name__ == "__main__":
             if not frames.get_depth_frame() or not frames.get_color_frame():
                 continue
 
-            cv2.imshow("RGB", rgb_frame)
+            cv2.imshow("Depth", np.asanyarray(colorizer.colorize(frames.get_depth_frame()).get_data()))
 
             if cv2.waitKey(25) & 0xFF == ord('q'):
                 break
 
             os.makedirs(f"rgbd_cam_output/{frame_idx}", exist_ok=True)
             cv2.imwrite(f"rgbd_cam_output/{frame_idx}/rgb.png", cv2.cvtColor(rgb_frame, cv2.COLOR_BGR2RGB))
-            np.save(f"rgbd_cam_output/{frame_idx}/depth.npy", depth_frame)
+            np.save(f"rgbd_cam_output/{frame_idx}/depth.npy", depth_frame_scaled)
 
-            print(f"rgb_frame_shape = {rgb_frame.shape}, depth_frame_shape = {depth_frame.shape}")
+            print(f"min distance in meters: {np.quantile(depth_frame_scaled, 0.2)}, max: {np.quantile(depth_frame_scaled, 0.8)}")
+
+            #print(f"rgb_frame_shape = {rgb_frame.shape}, depth_frame_shape = {depth_frame.shape}")
 
             frame_idx += 1
     finally:
