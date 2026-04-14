@@ -15,3 +15,4 @@ matplotlib
 projectaria_client_sdk
 projectaria-tools
 tqdm
+pyrealsense2

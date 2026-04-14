@@ -138,3 +138,5 @@ LightGlue/
 checkerboard_radon.webp
 image_masked.png
 
+data_gathering/rgbd_cam_output
+

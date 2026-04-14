@@ -2,7 +2,6 @@ import os
 
 import cv2 as cv
 import numpy as np
-from tqdm import tqdm
 
 DICTIONARY = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_6X6_250)
 DICTIONARY_ID = 33
@@ -70,7 +69,7 @@ def undistort_images(images:np.ndarray, mtx:np.ndarray, dist:np.ndarray)-> tuple
     """
     :param images: A NxWxHx3-uint8 array of RGB images
     :param mtx: the current distortion matrix
-    :param dist: the current distortion coefficecients
+    :param dist: the current distortion coefficients
     :return: The new camera matrix, a zero vector (new distortion coefficients that are now 0) and the undistorted images
     """
     print(f"Old image shape: {np.shape(images)}")
@@ -126,8 +125,6 @@ def estimate_camera_aruco_pose(images: np.ndarray, camera_matrix: np.ndarray, di
         transformation[:3, 3] = tvec.flatten()
         pose_estimates.append(transformation)
     return pose_estimates
-
-
 
 
 
