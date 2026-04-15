@@ -14,6 +14,8 @@ from PIL import Image
 from sam3.model_builder import build_sam3_image_model
 from sam3.model.sam3_image_processor import Sam3Processor
 
+from sklearn.ensemble import IsolationForest
+
 def use_vggt_on_images(images:np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     :param images: NxWxHx3 RGB numpy array of the images
@@ -77,6 +79,7 @@ def create_point_cloud_from_image_points(
         images_depth_maps_and_conf:tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]| None = None,
         masks:np.ndarray = None,
         confidence_quantile:float = 0.1,
+        iforest_quantile:float = 0.05,
         visualize:bool = True
     ) -> PointCloud:
     """
@@ -85,6 +88,7 @@ def create_point_cloud_from_image_points(
     :param images_points_3d_and_conf: An array of the form N x H x W x 3 - float and the confidences in a NxHxW array
     :param images_depth_maps_and_conf: An array of the form N x H x W - float and the confidences in a NxHxW array additionaly the extrinsic and intrinsic camera matrices
     :param confidence_quantile: The quantile of pixels with low confidences to disregard
+    :param iforest_quantile: The quantile of points that are anomalies according to IForest to disregard
     :param masks: what pixels to mask of the form number_images x height x width - boolean
     :param visualize: whether to visualize the resulting point cloud
     :return: nothing
@@ -118,12 +122,14 @@ def create_point_cloud_from_image_points(
     masks = np.reshape(np.array(masks), (-1))
     points = np.reshape(np.array(points), (-1, 3))
     points = points[masks]
+    points = remove_outliers_from_pointcloud(points, contamination=iforest_quantile)
 
     # Generate Ply file
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
+
     if visualize:
-        o3d.visualization.draw_geometries([pcd], window_name="visualize")
+        o3d.visualization.draw_geometries([pcd], window_name = "visualization")
     return pcd
 
 
@@ -151,3 +157,16 @@ def create_foreground_masks(images:np.ndarray) -> np.ndarray:
 
     print(f"masks: {np.shape(np.array(masks))}")
     return np.array(masks)
+
+def remove_outliers_from_pointcloud(points:np.ndarray, contamination:float = 0.05)->np.ndarray:
+    """
+    Uses I-Forest to remove points deemed as outliers
+    :param contamination: The percentage of points to remove
+    :param points: A Nx3-float numpy array of x,y,z points
+    :return: A Mx3-float numpy array of x,y,z points with M <= N
+    """
+
+    forest = IsolationForest(contamination=contamination)
+    forest.fit(points)
+    prediction = forest.predict(points)
+    return points[prediction==1]

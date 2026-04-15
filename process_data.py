@@ -24,6 +24,7 @@ def process_data(
         input_folder: str = "./in_data_vrs",
         output_folder: str = "./out_data",
         confidence_threshhold: float = 0.1,
+        iforest_confidence_threshhold: float = 0.05,
         visualize_pointcloud: bool = True,
         calibration_board_size:tuple[int, int] = (9,6),
         calibration_board_square_size:float = 0.03,
@@ -36,6 +37,7 @@ def process_data(
     :param input_folder: The Folder path from which to load the data
     :param output_folder: The Folder path to which to save the data
     :param confidence_threshhold: The bottom quantile of points that will be discarded when generating the 3D point cloud
+    :param iforest_confidence_threshhold: The percentage of points removed by iforest during point cloud generation
     :param visualize_pointcloud: Wheater to open an tab to visualize the point cloud
     :param calibration_board_size: The dimensions of the calibration board in number of squares
     :param calibration_board_square_size: The size of a square on the calibration board in meters
@@ -97,6 +99,7 @@ def process_data(
         masks= create_foreground_masks(images=robot_rgb_images),
         visualize=visualize_pointcloud,
         confidence_quantile=confidence_threshhold,
+        iforest_quantile=iforest_confidence_threshhold
     )
 
     print("Adjusting the vggt scale...")
