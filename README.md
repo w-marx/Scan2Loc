@@ -30,7 +30,7 @@ Install sam3:
 ```
 git clone https://github.com/facebookresearch/sam3.git
 cd sam3
-pip install -e.
+pip install -e ".[train,dev,notebooks]"
 cd ..
 ```
 
