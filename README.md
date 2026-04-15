@@ -16,13 +16,12 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Now open the project in Pycharm
+
 Install vggt:
 
 ```
 git clone git@github.com:facebookresearch/vggt.git
-cd vggt
-pip install -e .
-cd ..
 ```
 
 Install sam3:
@@ -30,7 +29,7 @@ Install sam3:
 ```
 git clone https://github.com/facebookresearch/sam3.git
 cd sam3
-pip install -e ".[train,dev,notebooks]"
+git checkout 86ed77094094e5cabb16b0414ec60c5ba9ce0a0f
 cd ..
 ```
 
