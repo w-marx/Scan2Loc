@@ -1,14 +1,14 @@
 torch==2.7.0
-torchvision
-torchaudio
+torchvision==0.22.0
+torchaudio==2.11.0
 numpy==1.26.1
 Pillow
-huggingface_hub
+huggingface_hub==1.8.0
 einops
-safetensors
+safetensors==0.7.0
 open3d
 opencv-python
-transformers
+transformers==5.4.0
 setuptools==69.5.1
 psutil
 matplotlib
@@ -16,3 +16,7 @@ projectaria_client_sdk
 projectaria-tools
 tqdm
 pyrealsense2
+iopath
+timm==1.0.26
+pycocotools
+ftfy
