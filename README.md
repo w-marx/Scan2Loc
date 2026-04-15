@@ -22,6 +22,9 @@ Install vggt:
 
 ```
 git clone git@github.com:facebookresearch/vggt.git
+cd vggt
+pip install .
+cd ..
 ```
 
 Install sam3:
@@ -32,6 +35,7 @@ cd sam3
 git checkout 86ed77094094e5cabb16b0414ec60c5ba9ce0a0f
 cd ..
 ```
+Then mark the directory `sam3` as sources root
 
 ### Additional Setup for the Pose prediction:
 ```
