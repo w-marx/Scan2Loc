@@ -174,3 +174,19 @@ def remove_outliers_from_point_cloud(points:np.ndarray, contamination:float = 0.
     forest.fit(points)
     prediction = forest.predict(points)
     return points[prediction==1]
+
+def match_poses(poses1:list[np.ndarray], poses2:list[np.ndarray]) -> np.ndarray:
+    """
+    Solves that vggts center is off and that the scaling might be wrong, therefore solve for:
+
+    For all i:
+    poses2[i] = T @ rescale(poses1[i],s)
+
+    Where T is a 4x4 homogeneous transformation matrix and s scales the translational part of poses1[i]
+
+    :param poses1: The R_t_cam poses estimated by vggt
+    :param poses2: The actual robot_base_t_cam poses
+    :return: the correction matrices
+    """
+
+

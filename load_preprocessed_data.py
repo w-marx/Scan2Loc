@@ -2,8 +2,9 @@ import numpy as np
 import cv2
 import json
 import os
+import open3d as o3d
 
-def load_output_data(load_path:str):
+def load_preprocessed_data(load_path:str):
     """
     Loads by stage 1 of the pipeline processed data to feed into the different localization methods
     Expects a folder of the following format:
@@ -31,6 +32,7 @@ def load_output_data(load_path:str):
     headset_cam_matrix: The intrinsic headset camera matrix as a 3x3 numpy array
     robot_cam_matrix: The intrinsic robot camera matrix as a 3x3 numpy array
     robot_datapoints: A list of dictionaries containing the fields: name, rgb_image, xyz, robot_base_t_camera, label (label may be none)
+    point_cloud: The point cloud as a Nx3-float numpy array
     """
 
     headset_image = cv2.cvtColor(cv2.imread(f"{load_path}/headset/headset_image.png"), cv2.COLOR_BGR2RGB)
@@ -57,13 +59,17 @@ def load_output_data(load_path:str):
             "label": label,
         })
 
+    point_cloud = o3d.io.read_point_cloud(f"{load_path}/pointcloud.ply")
+    point_cloud = np.asanyarray(point_cloud.points)
+
     return {
         "headset_image": headset_image,
         "headset_cam_matrix": np.array(headset_cam_calibration["camera_matrix"]),
         "robot_cam_matrix": np.array(robot_cam_calibration["camera_matrix"]),
         "robot_datapoints": robot_positions,
+        "point_cloud": point_cloud
     }
 
 
 if __name__ == "__main__":
-    print(load_output_data("out_data"))
+    print(load_preprocessed_data("out_data")["point_cloud"].shape)
