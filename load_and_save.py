@@ -8,6 +8,9 @@ from open3d.cuda.pybind.geometry import PointCloud
 
 def get_images(image_folder:str) -> tuple[np.ndarray, list[str]]:
     """
+    Finds all .png files in the given folder and returns a tuple of the images as a NxWxHx3-uint8 numpy array
+    and a list of length N with their filename (includint the .png)
+
     :param image_folder: string of the folder where .png images are stored
     :return: a tuple consisting of the images as an NxWxHx3 RGB image array and a list of the image names
     """
@@ -19,14 +22,15 @@ def get_images(image_folder:str) -> tuple[np.ndarray, list[str]]:
 
 def vrs_to_images_intrinsic(file_location:str) -> tuple[np.ndarray, np.ndarray]:
     """
-    Converts the rgb channel of the file at the location to an array of images (undistorted) and returns the intrinsic camera matrix
+    Converts the rgb channel of the file at the location to an array of images (undistorted) and returns the intrinsic camera matrix.
+    It undistorts them by taking the camera-rgb - fisheye camera and transforming it to a pinhole camera
+    It makes the assumption that the fisheye camera focal length is the average of fx and fy
     :param file_location: The location of the .vrs file
-    :return: NxWxHx3 RGB image array
+    :return: NxWxHx3-uint8 RGB image array
     """
     provider = data_provider.create_vrs_data_provider(file_location)
     stream_id = provider.get_stream_id_from_label("camera-rgb")
     cam_calib = provider.get_device_calibration().get_camera_calib("camera-rgb")
-    print(f"calib: {cam_calib}")
     img_width, img_height = cam_calib.get_image_size()
     focal_length = (cam_calib.get_focal_lengths()[0]+cam_calib.get_focal_lengths()[1])/2
     pinhole = calibration.get_linear_camera_calibration(image_width=img_width, image_height=img_height, focal_length=focal_length, label="camera-rgb")
@@ -35,11 +39,6 @@ def vrs_to_images_intrinsic(file_location:str) -> tuple[np.ndarray, np.ndarray]:
     for i in range(0, provider.get_num_data(stream_id)):
         image_data = provider.get_image_data_by_index(stream_id, i)[0].to_numpy_array()
         undistorted_image = calibration.distort_by_calibration(arraySrc=image_data, dstCalib=pinhole, srcCalib=cam_calib)
-
-        #cv2.imshow("undistorted", undistorted_image)
-        #cv2.waitKey(0)
-        #cv2.destroyAllWindows()
-
         images.append(undistorted_image)
 
     fx, fy = pinhole.get_focal_lengths()
@@ -184,9 +183,8 @@ def save_output_data(
     │   └── filenames (multiple folders)
     │       ├── A xyz.npy file with the world points associated to each pixel
     │       ├── A robot_base_t_robot_camera.json with the 4x4 transformation matrix between robot base and camera
+    │       ├── A label.json file with the robot base 2 headset pose estimates based on the aruco marker (might be missing)
     │       └── A rgb.png image with possible aruco markers digitally removed
-    ├── labels
-    │   └── multiple .json files with the robot base 2 headset pose estimates based on the aruco marker
     └── point_cloud.ply
     """
 
@@ -199,7 +197,6 @@ def save_output_data(
     save_cam_properties_as_json(output_folder, "robot_cam_calibration", robot_rgb_cam_mtx)
 
     os.makedirs(f"{output_folder}/robot", exist_ok=True)
-    os.makedirs(f"{output_folder}/label", exist_ok=True)
 
     for rgb_image, xyz_image, robot_base_t_robot_camera, robot_base_t_headset, name in zip(robot_rgb_images, robot_xyz_images, robot_base_t_robot_cameras, robot_base_t_headsets,robot_image_names):
         os.makedirs(f"{output_folder}/robot/{name}", exist_ok=True)
@@ -209,25 +206,10 @@ def save_output_data(
         with open(f"{output_folder}/robot/{name}/robot_base_t_robot_camera.json", 'w') as f:
             json.dump(robot_base_t_robot_camera.tolist(), f, indent=4)
 
-        with open(f"{output_folder}/label/{name}.json", 'w') as f:
+        with open(f"{output_folder}/robot/{name}/label.json", 'w') as f:
             json.dump(robot_base_t_headset.tolist(), f, indent=4)
 
     o3d.io.write_point_cloud(f"{output_folder}/pointcloud.ply", point_cloud, write_ascii=True)
-
-def load_output_data(load_path:str):
-    headset_image = get_images(f"{load_path}/headset")[0][0]
-
-    robot_cam_mtx = json.loads(open(f"{load_path}/robot_cam_calibration.json", 'r').read()).get("camera_matrix")
-    headset_cam_mtx = json.loads(open(f"{load_path}/headset_cam_calibration.json", 'r').read()).get("camera_matrix")
-
-    robot_tuples = []
-    for folder in os.listdir(f"{load_path}/robot"):
-        print(f"Loading folder:{folder}")
-        img = get_images(f"{load_path}/robot/{folder}")[0][0]
-        xyz = np.load(f"{load_path}/robot/{folder}/xyz.npy", allow_pickle=False)
-
-
-        robot_tuples.append((img,xyz))
 
 
 

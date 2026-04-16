@@ -70,6 +70,11 @@ def use_vggt_on_images(images:np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nd
     return points_np_unpad, confidence_np_unpad, extrinsic, intrinsic, depth_map, depth_map_conf
 
 def get_confidence_masks(confidences:np.ndarray, quantile:float = 0.1) -> np.ndarray:
+    """
+    :param confidences: An array of the form N x H x W - float
+    :param quantile: The quantile of pixels with low confidences to disregard
+    :return: An array of the form N x H x W - boolean
+    """
     confidence_threshhold = np.quantile(confidences, quantile)
     return np.where(confidences > confidence_threshhold, True, False)
 
@@ -122,7 +127,7 @@ def create_point_cloud_from_image_points(
     masks = np.reshape(np.array(masks), (-1))
     points = np.reshape(np.array(points), (-1, 3))
     points = points[masks]
-    points = remove_outliers_from_pointcloud(points, contamination=iforest_quantile)
+    points = remove_outliers_from_point_cloud(points, contamination=iforest_quantile)
 
     # Generate Ply file
     pcd = o3d.geometry.PointCloud()
@@ -158,14 +163,13 @@ def create_foreground_masks(images:np.ndarray) -> np.ndarray:
     print(f"masks: {np.shape(np.array(masks))}")
     return np.array(masks)
 
-def remove_outliers_from_pointcloud(points:np.ndarray, contamination:float = 0.05)->np.ndarray:
+def remove_outliers_from_point_cloud(points:np.ndarray, contamination:float = 0.05)->np.ndarray:
     """
     Uses I-Forest to remove points deemed as outliers
     :param contamination: The percentage of points to remove
     :param points: A Nx3-float numpy array of x,y,z points
     :return: A Mx3-float numpy array of x,y,z points with M <= N
     """
-
     forest = IsolationForest(contamination=contamination)
     forest.fit(points)
     prediction = forest.predict(points)

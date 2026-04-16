@@ -5,6 +5,20 @@ import pyrealsense2 as rs
 import json
 
 def save_intrinsics(rgb_intrinsics, depth_intrinsics, output_folder:str = None, filename:str = None):
+    """
+    Takes the intrinsics of the rgb and depth camera and saves them in a json file at/as output_folder/filename.json
+
+    The json file has the following structure:
+        'rgb_camera_matrix': the rgb camera matrix as a 2D list
+        'rgb_distortion_coefficients': the distortion coefficients of the rgb camera as a 2D list
+        'depth_camera_matrix': the rgb camera matrix as a 2D list
+        'depth_distortion_coefficients': the distortion coefficients of the rgb camera as a 2D list
+
+    :param rgb_intrinsics: An camera intrinsics object with the attributes fx, fy, ppx, ppy
+    :param depth_intrinsics: An camera intrinsics object with the attributes fx, fy, ppx, ppy
+    :param output_folder: The folder to save the json file (has to already exist)
+    :param filename: The name of the json file will have
+    """
     rgb_camera_mat = np.array([[rgb_intrinsics.fx, 0, rgb_intrinsics.ppx], [0, rgb_intrinsics.fy, rgb_intrinsics.ppy], [0,0,1]])
     depth_camera_mat = np.array([[depth_intrinsics.fx, 0, depth_intrinsics.ppx], [0, depth_intrinsics.fy, depth_intrinsics.ppy], [0,0,1]])
 
