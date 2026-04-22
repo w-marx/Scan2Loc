@@ -1,3 +1,4 @@
+from typing import Callable
 import cv2
 import torch
 import os
@@ -175,18 +176,51 @@ def remove_outliers_from_point_cloud(points:np.ndarray, contamination:float = 0.
     prediction = forest.predict(points)
     return points[prediction==1]
 
-def match_poses(poses1:list[np.ndarray], poses2:list[np.ndarray]) -> np.ndarray:
+def match_poses(poses_to_match:np.ndarray, actual_poses:np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
     """
-    Solves that vggts center is off and that the scaling might be wrong, therefore solve for:
+    Solves that vggts center is off and that the scaling might be wrong.
+    To do this the kabsch umeyama algorithm is used (needs at least 3 poses)
 
-    For all i:
-    poses2[i] = T @ rescale(poses1[i],s)
-
-    Where T is a 4x4 homogeneous transformation matrix and s scales the translational part of poses1[i]
-
-    :param poses1: The R_t_cam poses estimated by vggt
-    :param poses2: The actual robot_base_t_cam poses
-    :return: the correction matrices
+    :param poses_to_match: The R_t_cam poses estimated by vggt
+    :param actual_poses: The actual robot_base_t_cam poses
+    :return: a function that maps vggt [x,y,z] points into the real coordinate system
     """
+
+    if poses_to_match.shape != actual_poses.shape or poses_to_match.shape[1:] != (4, 4):
+        raise Exception(f"Cant match poses on pose shapes: {poses_to_match.shape}, {actual_poses.shape}")
+
+    if poses_to_match.shape[0] < 3:
+        raise Exception(f"Not enough poses to correct correctly, only {len(poses_to_match)} provided, need at least 3")
+
+    to_match_points = poses_to_match[:, :3, 3]
+    actual_points = actual_poses[:, :3, 3]
+    R, c, t = kabsch_umeyama(actual_points, to_match_points)
+    return lambda point: t + c * R @ point
+
+
+def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Taken from: https://zpl.fi/aligning-point-patterns-with-kabsch-umeyama-algorithm/
+    :param A: list of 3D points
+    :param B: list of 3D points
+    :return: R, c, t to translate the points B to the points A
+    """
+    assert A.shape == B.shape
+    n, m = A.shape
+
+    EA = np.mean(A, axis=0)
+    EB = np.mean(B, axis=0)
+    VarA = np.mean(np.linalg.norm(A - EA, axis=1) ** 2)
+
+    H = ((A - EA).T @ (B - EB)) / n
+    U, D, VT = np.linalg.svd(H)
+    d = np.sign(np.linalg.det(U) * np.linalg.det(VT))
+    S = np.diag([1] * (m - 1) + [d])
+
+    R = U @ S @ VT
+    c = VarA / np.trace(np.diag(D) @ S)
+    t = EA - c * R @ EB
+
+    return R, c, t
 
 
