@@ -187,16 +187,16 @@ def gather_robot_data(output_folder:str = "data", cam_t_gripper: np.ndarray|None
             if camera_t_aruco is not None:
                 r_gripper_t_base.append(gripper_t_base[:3, :3])
                 t_gripper_t_base.append(gripper_t_base[:3, 3])
-                aruco_t_camera = np.linalg.inv(camera_t_aruco)
-                r_aruco_t_camera.append(aruco_t_camera[:3, :3])
-                t_aruco_t_camera.append(aruco_t_camera[:3, 3])
 
-        if len(r_gripper_t_base) < 3:
+                r_aruco_t_camera.append(camera_t_aruco[:3, :3])
+                t_aruco_t_camera.append(camera_t_aruco[:3, 3])
+
+        if len(r_gripper_t_base) < 5:
             print(f"Dangerously few aruco marker images: {len(r_gripper_t_base)}")
 
         r_cam_t_gripper, t_cam_t_gripper = cv2.calibrateHandEye(r_gripper_t_base, t_gripper_t_base, r_aruco_t_camera, t_aruco_t_camera)
-        cam_t_gripper = assemble_homogeneous_matrix(rvec=r_cam_t_gripper,tvec=t_cam_t_gripper)
-        np.save(f"{output_folder}/cam_t_gripper.npy", cam_t_gripper)
+        cam_t_gripper = np.concatenate((np.concatenate((r_cam_t_gripper, t_cam_t_gripper), axis=1), [[0, 0, 0, 1]]), axis=0)
+
 
 
     for i, (depth_image, rgb_image, gripper_t_base) in enumerate(zip(depth_images, rgb_images, gripper_t_base_s)):
@@ -205,6 +205,10 @@ def gather_robot_data(output_folder:str = "data", cam_t_gripper: np.ndarray|None
         os.makedirs(f"{output_folder}/robot/{i}", exist_ok=True)
         cv2.imwrite(f"{output_folder}/robot/{i}/rgb.png", cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR))
         np.save(f"{output_folder}/robot/{i}/depth.npy", depth_image)
+
+        print(f"gripper_t_base: {gripper_t_base}")
+        print(f"cam_t_gripper:{cam_t_gripper}")
+        print(f"camera_t_robot_base: {cam_t_gripper @ gripper_t_base}")
 
         pose_dict = {
             "robot_base_t_camera": np.linalg.inv(cam_t_gripper @ gripper_t_base).tolist(),
@@ -225,8 +229,11 @@ if __name__ == "__main__":
     parser.add_argument("--output-folder", type=str, default="data", help="Output Folder Location")
     parser.add_argument("--use-precomputed-cam-t-gripper", action="store_true", default=False, help="If a precomputed cam_t_gripper should be used, if not will be estimated")
     parser.add_argument("--cam-t-gripper-path", type=str, default=None, help="Path to cam_t_gripper.npy")
-    parser.add_argument("--aruco-marker-size", type=float, default=0.1, help="Aruco marker size in meters")
+    parser.add_argument("--aruco-marker-size", type=float, default=0.072, help="Aruco marker size in meters")
     args = parser.parse_args()
+
+    print("loaded cam 2 gripper: ")
+    print(np.load("/workspace/franka_pipeline/data/cam_t_gripper.npy"))
 
     cam_t_gripper = None
     if args.use_precomputed_cam_t_gripper and args.cam_t_gripper_path is not None and os.path.exists(args.cam_t_gripper_path):
@@ -250,6 +257,12 @@ if __name__ == "__main__":
 
     avg_translation = np.mean(np.array([pose[:3, 3] for pose in robot_base_t_aruco_s]), axis=0)
     print(f"average translation: {avg_translation}")
+
+    print("positions:")
+    for pose in robot_base_t_aruco_s:
+        print(np.round(pose[:3, 3],3))
+        print("\n")
+
     print(f"average translation error: {np.mean(np.linalg.norm(robot_base_t_aruco_s[:,:3,3]-avg_translation, axis=1))}m")
 
     print("main finished")
