@@ -345,7 +345,7 @@ def visualize_poses(
 
 
 
-def check_output_data(output_folder:str = "data", visualize:bool = True):
+def check_output_data(output_folder:str = "data", visualize:bool = True, aruco_size:float = 0.072):
     print("checking results")
     json_files = []
     for folder in os.listdir(f"{output_folder}/robot"):
@@ -363,7 +363,7 @@ def check_output_data(output_folder:str = "data", visualize:bool = True):
             gripper_t_camera_s = gripper_t_camera_s,
             camera_t_aruco_s = camera_t_aruco_s,
             table_dimensions = (1.5, 1.5, 0.05),
-            aruco_marker_dimensions = (0.072, 0.072, 0.001)
+            aruco_marker_dimensions = (aruco_size, aruco_size, 0.001)
         )
 
 
@@ -395,6 +395,28 @@ def check_output_data(output_folder:str = "data", visualize:bool = True):
     x = np.ones(len(translat_differences))
     axes[0,0].scatter(np.ones(len(translat_differences)), translat_differences, alpha=0.6)
 
+
+    axes[0,1].set_title(f'Estimated translational positions:')
+    x_positions = [b_t_a[0,3] for b_t_a in base_t_aruco_s]
+    y_positions = [b_t_a[1,3] for b_t_a in base_t_aruco_s]
+    z_positions = [b_t_a[2,3] for b_t_a in base_t_aruco_s]
+
+    xyz_pos_plot = axes[0,1].scatter(
+        x_positions,y_positions, 
+        c = z_positions,
+        cmap = 'viridis',
+        s = 50,
+        alpha = 0.6
+    )
+
+
+    axes[0,1].set_xlabel("Estimated x pos in meter")
+    axes[0,1].set_ylabel("Estimated y pos in meter")
+
+
+    cbar = plt.colorbar(xyz_pos_plot, ax=axes[0,1])
+    cbar.set_label('Z position in meters', fontsize=10)
+
     plt.show()
 
 
@@ -405,7 +427,7 @@ if __name__ == "__main__":
     parser.add_argument("--use-precomputed-cam-t-gripper", action="store_true", default=False, help="If a precomputed cam_t_gripper should be used, if not will be estimated")
     parser.add_argument("--cam-t-gripper-path", type=str, default=None, help="Path to cam_t_gripper.npy")
 
-    parser.add_argument("--aruco-marker-size", type=float, default=0.072, help="Aruco marker size in meters")
+    parser.add_argument("--aruco-marker-size", type=float, default=0.146, help="Aruco marker size in meters")
     parser.add_argument("--aruco-marker-id", type=int, default=33, help="Aruco marker ID that will be used in detection")
 
     parser.add_argument("--no-data-gathering", action = "store_false", help = "If used only optimization & evaluation may be done", dest = "gather_data")
@@ -453,6 +475,7 @@ if __name__ == "__main__":
         print(f"analyzing data with 3D pose visualisation: {args.visualize_poses}")
         check_output_data(
             output_folder = args.output_folder,
-            visualize = args.visualize_poses 
+            visualize = args.visualize_poses,
+            aruco_size = args.aruco_marker_size 
         )
     print("main finished")
