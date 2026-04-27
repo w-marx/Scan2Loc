@@ -117,7 +117,13 @@ def estimate_camera_aruco_pose(images: np.ndarray, camera_matrix: np.ndarray, di
     :return: a list of 4x4 Camera^T_ArucoMarker estimates or None if an image has no aruco marker
     """
     detector_params = cv2.aruco.DetectorParameters()
+    detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    detector_params.cornerRefinementWinSize = 10
+    detector_params.cornerRefinementMaxIterations = 100
+    detector_params.cornerRefinementMinAccuracy = 0.01
+
     detector = cv2.aruco.ArucoDetector(DICTIONARY, detector_params)
+
 
     marker_points = np.array([
         [-marker_side_length / 2, marker_side_length / 2, 0],
@@ -142,7 +148,7 @@ def estimate_camera_aruco_pose(images: np.ndarray, camera_matrix: np.ndarray, di
             imagePoints=marker_corners[0][0],
             cameraMatrix=camera_matrix,
             distCoeffs=distortion_coefficients,
-            flags=cv2.SOLVEPNP_ITERATIVE
+            flags=cv2.SOLVEPNP_IPPE_SQUARE
         )
         camera_t_aruco_s.append(assemble_homogeneous_matrix(rvec=rvec,tvec=tvec))
 
