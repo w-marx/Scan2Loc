@@ -182,14 +182,14 @@ def gather_robot_data(output_folder:str = "data"):
     for i, (depth_image, rgb_image, base_t_gripper) in enumerate(zip(depth_images, rgb_images, base_t_gripper_s)):
 
         # save robot images
-        os.makedirs(f"{output_folder}/robot/{i}", exist_ok=True)
-        cv2.imwrite(f"{output_folder}/robot/{i}/rgb.png", cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR))
-        np.save(f"{output_folder}/robot/{i}/depth.npy", depth_image)
+        os.makedirs(f"{output_folder}/robot/{i:06d}", exist_ok=True)
+        cv2.imwrite(f"{output_folder}/robot/{i:06d}/rgb.png", cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR))
+        np.save(f"{output_folder}/robot/{i:06d}/depth.npy", depth_image)
 
         pose_dict = {
             "base_t_gripper": base_t_gripper.tolist(),
         }
-        with open(f"{output_folder}/robot/{i}/poses.json", 'w') as f:
+        with open(f"{output_folder}/robot/{i:06d}/poses.json", 'w') as f:
             json.dump(pose_dict, f, indent=4)
     pipeline.stop()
     print(f"finished data gathering")
@@ -247,14 +247,14 @@ def optimize_robot_data(
 
 
     for i, (rgb_image, base_t_gripper) in enumerate(zip(rgb_images, base_t_gripper_s)):
-        os.makedirs(f"{output_folder}/robot/{i}", exist_ok=True)
+        os.makedirs(f"{output_folder}/robot/{i:06d}", exist_ok=True)
 
         pose_dict = {
             "base_t_gripper": base_t_gripper.tolist(),
             "gripper_t_cam": gripper_t_cam.tolist(),
             # This one may be none, but can be compared for accuracy:
             "camera_t_aruco": camera_t_aruco_s[i].tolist() if camera_t_aruco_s[i] is not None else None,        }
-        with open(f"{output_folder}/robot/{i}/poses.json", 'w') as f:
+        with open(f"{output_folder}/robot/{i:06d}/poses.json", 'w') as f:
             json.dump(pose_dict, f, indent=4)
     print(f"finished data gathering")
 
@@ -348,8 +348,8 @@ def visualize_poses(
 def check_output_data(output_folder:str = "data", visualize:bool = True):
     print("checking results")
     json_files = []
-    for folder in os.listdir(f"{args.output_folder}/robot"):
-        with open(f"{args.output_folder}/robot/{folder}/poses.json", 'r') as f:
+    for folder in os.listdir(f"{output_folder}/robot"):
+        with open(f"{output_folder}/robot/{folder}/poses.json", 'r') as f:
             json_files.append(json.load(f))
 
 
@@ -372,18 +372,28 @@ def check_output_data(output_folder:str = "data", visualize:bool = True):
 
     base_t_aruco_s = [r_t_g @ g_t_c @ c_t_a for r_t_g, g_t_c, c_t_a in zip(base_t_gripper_s, gripper_t_camera_s, camera_t_aruco_s) if c_t_a is not None]
 
-    avg_translat = np.mean(np.array([base_t_aruco[:3, 3] for base_t_aruco in base_t_aruco_s]), axis = 0)
-    print(f"translat: {np.array([base_t_aruco[:3, 3] for base_t_aruco in base_t_aruco_s])}")
-    avg_translat_error = np.mean([np.linalg.norm(base_t_aruco[:3, 3]-avg_translat) for base_t_aruco in base_t_aruco_s])
+    avg_aruco_xyz_position = np.mean(np.array([base_t_aruco[:3, 3] for base_t_aruco in base_t_aruco_s]), axis = 0)
 
-    print(f"Average marker xyz position in frame R: {np.round(avg_translat, 4)}m")
+
+    calc_translat_difference = lambda x,y: np.linalg.norm(x - y)
+    calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T)-1)/2)
+
+
+
+    avg_translat_error = np.mean([np.linalg.norm(base_t_aruco[:3, 3]-avg_aruco_xyz_position) for base_t_aruco in base_t_aruco_s])
+
+    print(f"Average marker xyz position in frame R: {np.round(avg_aruco_xyz_position, 4)}m")
     print(f"Avg translational error: {np.round(avg_translat_error*1000, 2)}mm")
 
     # plot results:
-    fig, axes = plt.subplots(2,2, figsize = (6, 10))
+    fig, axes = plt.subplots(2,2, figsize = (10, 10))
     
-    axes[0,0].boxplot(avg_translat)
-    axes[0,0].set_title(f'Translational error (avg: {np.round(avg_translat_error*1000, 2)})mm')
+    translat_differences = [calc_translat_difference(b_t_a[:3,3],avg_aruco_xyz_position)*1000 for b_t_a in base_t_aruco_s]
+    axes[0,0].boxplot(translat_differences)
+    axes[0,0].set_title(f'Translational error (avg: {np.round(avg_translat_error*1000, 2)} mm)')
+    axes[0,0].set_ylabel(f'Translational deviation from Average in mm')
+    x = np.ones(len(translat_differences))
+    axes[0,0].scatter(np.ones(len(translat_differences)), translat_differences, alpha=0.6)
 
     plt.show()
 
@@ -391,18 +401,58 @@ def check_output_data(output_folder:str = "data", visualize:bool = True):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output-folder", type=str, default="data", help="Output Folder Location")
+    parser.add_argument("--output-folder", type=str, default="my_data", help="Output Folder Location")
     parser.add_argument("--use-precomputed-cam-t-gripper", action="store_true", default=False, help="If a precomputed cam_t_gripper should be used, if not will be estimated")
     parser.add_argument("--cam-t-gripper-path", type=str, default=None, help="Path to cam_t_gripper.npy")
+
     parser.add_argument("--aruco-marker-size", type=float, default=0.072, help="Aruco marker size in meters")
+    parser.add_argument("--aruco-marker-id", type=int, default=33, help="Aruco marker ID that will be used in detection")
+
+    parser.add_argument("--no-data-gathering", action = "store_false", help = "If used only optimization & evaluation may be done", dest = "gather_data")
+    parser.add_argument("--no-3D-visualize", action = "store_false", help = "If used there wont be any 3D pose visualisation", dest = "visualize_poses")
+    parser.add_argument("--no-result-analysation", action = "store_false", help = "If used there wont by any result analysation (pose deviation analysis)", dest = "analyze_results")
+
+    parser.set_defaults(gather_data = True, visualize_poses = True, analyze_results = True)
     args = parser.parse_args()
+
+    print(f"Saving/loading data from: {os.path.abspath(args.output_folder)}")
+
+    DICTIONARY_ID = args.aruco_marker_id
+    print(f"Using Dictionary ID:{DICTIONARY_ID}")
 
     cam_t_gripper = None
     if args.use_precomputed_cam_t_gripper and args.cam_t_gripper_path is not None and os.path.exists(args.cam_t_gripper_path):
         cam_t_gripper = np.load(args.cam_t_gripper_path)
         print(f"Using precomputed cam_t_gripper from {args.cam_t_gripper_path}")
 
-    rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = gather_robot_data(output_folder=args.output_folder)
+
+    rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = None, None, None, None
+    if args.gather_data:
+        print("gathering data using the robot...")
+        rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = gather_robot_data(output_folder=args.output_folder)
+    else:
+        print("loading data from disk for further processing ...")
+        folders = sorted(os.listdir(f"{args.output_folder}/robot"))
+
+        rgb_images = [cv2.imread(f"{args.output_folder}/robot/{folder}/rgb.png") for folder in folders]
+
+        base_t_gripper_s = []
+
+        for folder in folders:
+            with open(f"{args.output_folder}/robot/{folder}/poses.json", 'r') as f:
+                base_t_gripper_s.append(np.array(json.load(f)["base_t_gripper"]))
+
+        with open(f"{args.output_folder}/robot_cam_calibration.json", 'r') as f:
+            json_file = json.load(f)
+            rgb_cam_mat = np.array(json_file["rgb_camera_matrix"])
+            rgb_cam_dist_coef = np.array(json_file["rgb_distortion_coefficients"])
+
     optimize_robot_data(rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef, output_folder=args.output_folder, gripper_t_cam=cam_t_gripper, marker_side_length=args.aruco_marker_size)
-    check_output_data(args.output_folder)
+
+    if args.analyze_results:
+        print(f"analyzing data with 3D pose visualisation: {args.visualize_poses}")
+        check_output_data(
+            output_folder = args.output_folder,
+            visualize = args.visualize_poses 
+        )
     print("main finished")
