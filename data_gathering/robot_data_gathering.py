@@ -7,6 +7,13 @@ import pyrealsense2 as rs
 import cv2
 import json
 import argparse
+import colorsys
+
+import open3d as o3d
+import open3d.visualization.gui as gui
+
+import matplotlib.pyplot as plt
+
 
 positions = [
         [-0.36198, -0.049747, 0.033045, -1.6585, 0.20059, 1.6262, 0.35139],
@@ -77,18 +84,18 @@ def gather_robot_imgs_eefs(robot_interface, image_pipeline, depth_scale:float, p
     :param image_pipeline:
     :param depth_scale:
     :param positions:
-    :return: tuple: list of depth images, list of rgb_images, list of gripper to base homogeneous matrices
+    :return: tuple: list of depth images, list of rgb_images, list of base to gripper homogeneous matrices
     """
     depth_images = []
     rgb_images = []
-    gripper_t_base_s = []
+    base_t_gripper_s = []
 
     for frame_idx, position in enumerate(positions):
         print(f"moving to position: {position}")
 
         reset_joints_to(robot_interface, position)
 
-        gripper_t_base = robot_interface.last_eef_pose
+        base_t_gripper = robot_interface.last_eef_pose
 
         frames = image_pipeline.wait_for_frames()
         rgb_frame = np.asanyarray(frames.get_color_frame().get_data())
@@ -97,8 +104,8 @@ def gather_robot_imgs_eefs(robot_interface, image_pipeline, depth_scale:float, p
 
         depth_images.append(depth_frame_scaled)
         rgb_images.append(cv2.cvtColor(rgb_frame, cv2.COLOR_BGR2RGB))
-        gripper_t_base_s.append(gripper_t_base)
-    return depth_images, rgb_images, gripper_t_base_s
+        base_t_gripper_s.append(base_t_gripper)
+    return depth_images, rgb_images, base_t_gripper_s
 
 
 def estimate_camera_aruco_pose(images: np.ndarray, camera_matrix: np.ndarray, distortion_coefficients: np.ndarray, marker_side_length: float = 0.1) -> list[np.ndarray | None]:
@@ -141,7 +148,8 @@ def estimate_camera_aruco_pose(images: np.ndarray, camera_matrix: np.ndarray, di
 
     return camera_t_aruco_s
 
-def gather_robot_data(output_folder:str = "data", cam_t_gripper: np.ndarray|None = None, marker_side_length:float = 0.1):
+
+def gather_robot_data(output_folder:str = "data"):
     """
     Creates the following output folder format by moving the robot and taking images:
 
@@ -151,7 +159,6 @@ def gather_robot_data(output_folder:str = "data", cam_t_gripper: np.ndarray|None
     │       ├──  A rgb.png image
     │       ├──  A poses.json file
     │       └──  A depth.npy file
-    └── robot_cam_calibration.json
 
     :param output_folder: the name of the output folder
     :return: nothing
@@ -169,58 +176,216 @@ def gather_robot_data(output_folder:str = "data", cam_t_gripper: np.ndarray|None
     depth_intrinsics = pipeline.get_active_profile().get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
     rgb_cam_mat, rgb_cam_dist_coef, _, _ = save_intrinsics(rgb_intrinsics=rgb_intrinsics, depth_intrinsics=depth_intrinsics, output_folder=output_folder, filename="robot_cam_calibration")
     depth_scale = pipeline.get_active_profile().get_device().first_depth_sensor().get_depth_scale()
+    
+    depth_images, rgb_images, base_t_gripper_s = gather_robot_imgs_eefs(robot_interface, pipeline, depth_scale, positions)
 
-    depth_images, rgb_images, gripper_t_base_s = gather_robot_imgs_eefs(robot_interface, pipeline, depth_scale, positions)
-
-    camera_t_aruco_s = [None] * len(rgb_images)
-
-    if cam_t_gripper is None:
-        print("Using aruco markers for cam_T_gripper determination")
-        camera_t_aruco_s = estimate_camera_aruco_pose(np.array(rgb_images), camera_matrix=rgb_cam_mat, distortion_coefficients=np.array(rgb_cam_dist_coef), marker_side_length=marker_side_length)
-
-        r_gripper_t_base = []
-        t_gripper_t_base = []
-        r_aruco_t_camera = []
-        t_aruco_t_camera = []
-
-        for camera_t_aruco, gripper_t_base in zip(camera_t_aruco_s, gripper_t_base_s):
-            if camera_t_aruco is not None:
-                r_gripper_t_base.append(gripper_t_base[:3, :3])
-                t_gripper_t_base.append(gripper_t_base[:3, 3])
-
-                r_aruco_t_camera.append(camera_t_aruco[:3, :3])
-                t_aruco_t_camera.append(camera_t_aruco[:3, 3])
-
-        if len(r_gripper_t_base) < 5:
-            print(f"Dangerously few aruco marker images: {len(r_gripper_t_base)}")
-
-        r_cam_t_gripper, t_cam_t_gripper = cv2.calibrateHandEye(r_gripper_t_base, t_gripper_t_base, r_aruco_t_camera, t_aruco_t_camera)
-        cam_t_gripper = np.concatenate((np.concatenate((r_cam_t_gripper, t_cam_t_gripper), axis=1), [[0, 0, 0, 1]]), axis=0)
-
-
-
-    for i, (depth_image, rgb_image, gripper_t_base) in enumerate(zip(depth_images, rgb_images, gripper_t_base_s)):
+    for i, (depth_image, rgb_image, base_t_gripper) in enumerate(zip(depth_images, rgb_images, base_t_gripper_s)):
 
         # save robot images
         os.makedirs(f"{output_folder}/robot/{i}", exist_ok=True)
         cv2.imwrite(f"{output_folder}/robot/{i}/rgb.png", cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR))
         np.save(f"{output_folder}/robot/{i}/depth.npy", depth_image)
 
-        print(f"gripper_t_base: {gripper_t_base}")
-        print(f"cam_t_gripper:{cam_t_gripper}")
-        print(f"camera_t_robot_base: {cam_t_gripper @ gripper_t_base}")
-
         pose_dict = {
-            "robot_base_t_camera": np.linalg.inv(cam_t_gripper @ gripper_t_base).tolist(),
-            "gripper_t_base": gripper_t_base.tolist(),
-            "camera_t_gripper": cam_t_gripper.tolist(),
-            # This one may be none, but can be compared for accuracy:
-            "robot_base_t_aruco": (np.linalg.inv(cam_t_gripper @ gripper_t_base) @ camera_t_aruco_s[i]).tolist() if camera_t_aruco_s[i] is not None else None
+            "base_t_gripper": base_t_gripper.tolist(),
         }
         with open(f"{output_folder}/robot/{i}/poses.json", 'w') as f:
             json.dump(pose_dict, f, indent=4)
     pipeline.stop()
     print(f"finished data gathering")
+    return rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef
+
+def optimize_robot_data(
+        rgb_images: list[np.ndarray],
+        base_t_gripper_s: list[np.ndarray],
+        rgb_cam_mat: np.ndarray,
+        rgb_cam_dist_coef: list[float],
+        output_folder:str = "data",
+        gripper_t_cam: np.ndarray|None = None,
+        marker_side_length:float = 0.072,
+    ):
+    """
+    Creates the following output folder format by moving the robot and taking images:
+
+    `output_folder`
+    ├── robot
+    │   └── multiple folders with the contents:
+    │       ├──  A rgb.png image
+    │       ├──  A poses.json file
+    │       └──  A depth.npy file
+    └── robot_cam_calibration.json
+
+    :param output_folder: the name of the output folder
+    :return: nothing
+    """
+
+
+    camera_t_aruco_s = [None] * len(rgb_images)
+    if gripper_t_cam is None:
+        print("Using aruco markers for gripper_T_cam determination")
+        camera_t_aruco_s = estimate_camera_aruco_pose(np.array(rgb_images), camera_matrix=rgb_cam_mat, distortion_coefficients=np.array(rgb_cam_dist_coef), marker_side_length=marker_side_length)
+
+        r_base_t_gripper = []
+        t_base_t_gripper = []
+        r_aruco_t_camera = []
+        t_aruco_t_camera = []
+
+        for camera_t_aruco, base_t_gripper in zip(camera_t_aruco_s, base_t_gripper_s):
+            if camera_t_aruco is not None:
+                r_base_t_gripper.append(base_t_gripper[:3, :3])
+                t_base_t_gripper.append(base_t_gripper[:3, 3])
+
+                r_aruco_t_camera.append(camera_t_aruco[:3, :3])
+                t_aruco_t_camera.append(camera_t_aruco[:3, 3])
+
+        if len(r_base_t_gripper) < 5:
+            print(f"Dangerously few aruco marker images: {len(r_base_t_gripper)}")
+
+        r_gripper_t_cam, t_gripper_t_cam = cv2.calibrateHandEye(r_base_t_gripper, t_base_t_gripper, r_aruco_t_camera, t_aruco_t_camera)
+        gripper_t_cam = np.concatenate((np.concatenate((r_gripper_t_cam, t_gripper_t_cam), axis=1), [[0, 0, 0, 1]]), axis=0)
+
+
+
+    for i, (rgb_image, base_t_gripper) in enumerate(zip(rgb_images, base_t_gripper_s)):
+        os.makedirs(f"{output_folder}/robot/{i}", exist_ok=True)
+
+        pose_dict = {
+            "base_t_gripper": base_t_gripper.tolist(),
+            "gripper_t_cam": gripper_t_cam.tolist(),
+            # This one may be none, but can be compared for accuracy:
+            "camera_t_aruco": camera_t_aruco_s[i].tolist() if camera_t_aruco_s[i] is not None else None,        }
+        with open(f"{output_folder}/robot/{i}/poses.json", 'w') as f:
+            json.dump(pose_dict, f, indent=4)
+    print(f"finished data gathering")
+
+
+def visualize_poses(
+        base_t_gripper_s:list[np.ndarray],
+        gripper_t_camera_s:list[np.ndarray],
+        camera_t_aruco_s:list[np.ndarray],
+        table_dimensions:tuple[float, float, float] = (1.5, 1.5, 0.05),
+        aruco_marker_dimensions:tuple[float, float, float]  = (0.072, 0.072, 0.001)
+    ):
+    """
+    Visualizes the poses in O3D
+    """
+
+    app = gui.Application.instance
+    app.initialize()
+
+    vis = o3d.visualization.O3DVisualizer("Pose Visualizer", 1280, 720)
+
+    geometries = []
+
+    # Create table & Robot Base
+    origin_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+    vis.add_geometry("origin", origin_frame)
+    vis.add_3d_label(np.array([0,0,0]), f"Robot Base")
+
+    table = o3d.geometry.TriangleMesh.create_box(width = table_dimensions[0],height=table_dimensions[1],depth=table_dimensions[2])
+    table.translate([-table_dimensions[0]/2, -table_dimensions[1]/2, -table_dimensions[2]])
+    vis.add_geometry("table", table)
+
+
+    for i, (base_t_gripper, gripper_t_camera, camera_t_aruco) in enumerate(zip(base_t_gripper_s, gripper_t_camera_s, camera_t_aruco_s)):
+
+        color = colorsys.hsv_to_rgb(i/(len(base_t_gripper_s)+1), 1.0, 1.0)
+
+        # Add the gripper frame + sphere
+
+        gripper_cord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.02)
+        gripper_cord_frame.transform(base_t_gripper)
+        vis.add_geometry(f"gripper_frame_{i}", gripper_cord_frame)
+
+        gripper_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
+        gripper_sphere.translate(base_t_gripper[:3, 3])
+        gripper_sphere.paint_uniform_color(color)
+        vis.add_geometry(f"gripper_sphere_{i}", gripper_sphere)
+        vis.add_3d_label(base_t_gripper[:3, 3], f"G{i}")
+
+
+        # Add the camera frame + sphere
+
+        base_t_camera = base_t_gripper @ gripper_t_camera
+
+
+        camera_cord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.04)
+        camera_cord_frame.transform(base_t_camera)
+        vis.add_geometry(f"camera_frame{i}", camera_cord_frame)
+
+        camera_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
+        camera_sphere.translate(base_t_camera[:3, 3])
+        camera_sphere.paint_uniform_color(color)
+        vis.add_geometry(f"camera_sphere_{i}", camera_sphere)
+        vis.add_3d_label(base_t_camera[:3, 3], f"C{i}")
+
+
+
+        # --- Aruco Frame ---
+        if camera_t_aruco is not None:
+            base_t_aruco = base_t_camera @ camera_t_aruco
+
+            aruco_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.02)
+            aruco_frame.transform(base_t_aruco)
+            vis.add_geometry(f"aruco_frame{i}", aruco_frame)
+
+            marker = o3d.geometry.TriangleMesh.create_box(
+                width=aruco_marker_dimensions[0],
+                height=aruco_marker_dimensions[1],
+                depth=aruco_marker_dimensions[2]
+            )
+            marker.translate([-aruco_marker_dimensions[0] / 2, -aruco_marker_dimensions[1] / 2, -aruco_marker_dimensions[2]])
+            marker.transform(base_t_aruco)
+            marker.paint_uniform_color(color)
+            vis.add_geometry(f"aruco_marker{i}", marker)
+            vis.add_3d_label(base_t_aruco[:3, 3], f"A{i}")
+
+    app.add_window(vis)
+    app.run()
+
+
+
+def check_output_data(output_folder:str = "data", visualize:bool = True):
+    print("checking results")
+    json_files = []
+    for folder in os.listdir(f"{args.output_folder}/robot"):
+        with open(f"{args.output_folder}/robot/{folder}/poses.json", 'r') as f:
+            json_files.append(json.load(f))
+
+
+    base_t_gripper_s = np.array([pose["base_t_gripper"] for pose in json_files])
+    gripper_t_camera_s = np.array([pose["gripper_t_cam"] for pose in json_files])
+    camera_t_aruco_s = [(np.array(pose["camera_t_aruco"]) if pose["camera_t_aruco"] is not None else None) for pose in json_files]
+
+    if visualize:
+        visualize_poses(
+            base_t_gripper_s = base_t_gripper_s,
+            gripper_t_camera_s = gripper_t_camera_s,
+            camera_t_aruco_s = camera_t_aruco_s,
+            table_dimensions = (1.5, 1.5, 0.05),
+            aruco_marker_dimensions = (0.072, 0.072, 0.001)
+        )
+
+
+    # Evaluating base_T_aruco performance
+    print(f"{len([p for p in camera_t_aruco_s if p is not None])}/{len(camera_t_aruco_s)} positions have aruco pose estimates")
+
+    base_t_aruco_s = [r_t_g @ g_t_c @ c_t_a for r_t_g, g_t_c, c_t_a in zip(base_t_gripper_s, gripper_t_camera_s, camera_t_aruco_s) if c_t_a is not None]
+
+    avg_translat = np.mean(np.array([base_t_aruco[:3, 3] for base_t_aruco in base_t_aruco_s]), axis = 0)
+    print(f"translat: {np.array([base_t_aruco[:3, 3] for base_t_aruco in base_t_aruco_s])}")
+    avg_translat_error = np.mean([np.linalg.norm(base_t_aruco[:3, 3]-avg_translat) for base_t_aruco in base_t_aruco_s])
+
+    print(f"Average marker xyz position in frame R: {np.round(avg_translat, 4)}m")
+    print(f"Avg translational error: {np.round(avg_translat_error*1000, 2)}mm")
+
+    # plot results:
+    fig, axes = plt.subplots(2,2, figsize = (6, 10))
+    
+    axes[0,0].boxplot(avg_translat)
+    axes[0,0].set_title(f'Translational error (avg: {np.round(avg_translat_error*1000, 2)})mm')
+
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -232,37 +397,12 @@ if __name__ == "__main__":
     parser.add_argument("--aruco-marker-size", type=float, default=0.072, help="Aruco marker size in meters")
     args = parser.parse_args()
 
-    print("loaded cam 2 gripper: ")
-    print(np.load("/workspace/franka_pipeline/data/cam_t_gripper.npy"))
-
     cam_t_gripper = None
     if args.use_precomputed_cam_t_gripper and args.cam_t_gripper_path is not None and os.path.exists(args.cam_t_gripper_path):
         cam_t_gripper = np.load(args.cam_t_gripper_path)
         print(f"Using precomputed cam_t_gripper from {args.cam_t_gripper_path}")
 
-    gather_robot_data(
-        output_folder=args.output_folder,
-        cam_t_gripper=cam_t_gripper,
-        marker_side_length=args.aruco_marker_size
-
-    )
-
-    print("checking results")
-    json_files = []
-    for folder in os.listdir(f"{args.output_folder}/robot"):
-        with open(f"{args.output_folder}/robot/{folder}/poses.json", 'r') as f:
-            json_files.append(json.load(f))
-    robot_base_t_aruco_s = np.array([pose["robot_base_t_aruco"] for pose in json_files if pose["robot_base_t_aruco"] is not None])
-    print(f"recovered {len(robot_base_t_aruco_s)} robot_base_t_aruco's estimates")
-
-    avg_translation = np.mean(np.array([pose[:3, 3] for pose in robot_base_t_aruco_s]), axis=0)
-    print(f"average translation: {avg_translation}")
-
-    print("positions:")
-    for pose in robot_base_t_aruco_s:
-        print(np.round(pose[:3, 3],3))
-        print("\n")
-
-    print(f"average translation error: {np.mean(np.linalg.norm(robot_base_t_aruco_s[:,:3,3]-avg_translation, axis=1))}m")
-
+    rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = gather_robot_data(output_folder=args.output_folder)
+    optimize_robot_data(rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef, output_folder=args.output_folder, gripper_t_cam=cam_t_gripper, marker_side_length=args.aruco_marker_size)
+    check_output_data(args.output_folder)
     print("main finished")
