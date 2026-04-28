@@ -72,7 +72,6 @@ positions = [
 [ 0.12667911,  0.77368228, -0.74571669, -0.94008991,  0.43378638,  0.95134418,  0.78013267],
 [-0.07971441,  0.83068791, -0.74761757, -0.94322867,  0.53804526,  0.98845405,  0.78337462],
 [-0.34477032,  0.73351253, -0.83461123, -0.94122882,  0.74159557,  0.90435568,  1.06115485],
-[ 1.83130741,  1.74600634, -1.77109199, -1.94338094,  0.93688989,  1.42963775,  2.04442685],
 [ 1.33406023,  1.74769682, -1.88388773, -1.37111848,  0.98185787,  1.20446507,  2.39218888],
 [ 1.04203811,  1.75249143, -1.99975423, -0.99963038,  1.21306021,  1.04894061,  2.71778564],
 [ 0.9261044 ,  1.75302339, -2.00780353, -1.06652834,  1.42349458,  1.00881587,  2.78927818],
@@ -277,6 +276,14 @@ def estimate_camera_charuco_pose(
             marker_obj_points = np.concatenate([marker_obj_points, marker_obj_corner_s], axis=0)
             marker_img_points = np.concatenate([marker_img_points, marker_img_corner_s], axis=0)
 
+        #img_copy = image.copy()
+        #cv2.aruco.drawDetectedCornersCharuco(img_copy, charuco_corners, charuco_ids, (0, 255, 0))
+        #cv2.aruco.drawDetectedMarkers(img_copy, marker_corners, marker_ids, (0, 0, 255))
+        #cv2.imshow("image",img_copy)
+        #cv2.waitKey(0)
+
+
+
         combined_obj_points = np.concatenate([chessboard_obj_points.reshape(-1,3), marker_obj_points], axis=0)
         combined_img_points = np.concatenate([chessboard_img_points.reshape(-1,2), marker_img_points], axis=0)
 
@@ -314,6 +321,7 @@ def gather_robot_data(output_folder:str = "data", stabilisation_timeout:int = 0)
     pipeline = rs.pipeline()
     config = rs.config()
     config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+    #config.enable_stream(rs.stream.color, 1920, 1080, rs.format.bgr8, 30)
     config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
 
     pipeline.start(config)
