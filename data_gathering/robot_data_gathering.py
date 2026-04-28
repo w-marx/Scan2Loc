@@ -8,6 +8,8 @@ import cv2
 import json
 import argparse
 import colorsys
+import time
+import shutil
 
 import open3d as o3d
 import open3d.visualization.gui as gui
@@ -33,8 +35,12 @@ positions = [
         [0.12325, -0.00228, -0.09325, -2.13569, -0.02817, 2.01549, 0.82194]
     ]
 
-DICTIONARY = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-DICTIONARY_ID = 33
+DICTIONARY_OPTIONS = {
+    "5X5_100":cv2.aruco.DICT_5X5_100,
+    "6X6_250":cv2.aruco.DICT_6X6_250,
+    "7X7_250":cv2.aruco.DICT_7X7_250,
+    "7X7_1000":cv2.aruco.DICT_7X7_1000,
+}
 
 def save_intrinsics(rgb_intrinsics, depth_intrinsics, output_folder:str = None, filename:str = None) -> tuple[np.ndarray,list[float],np.ndarray, list[float]]:
     """
@@ -76,7 +82,7 @@ def assemble_homogeneous_matrix(rvec:np.ndarray, tvec:np.ndarray) -> np.ndarray:
 
 
 
-def gather_robot_imgs_eefs(robot_interface, image_pipeline, depth_scale:float, positions:list[list[float]]) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+def gather_robot_imgs_eefs(robot_interface, image_pipeline, depth_scale:float, positions:list[list[float]], stabilisation_timeout:float = 0.0) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     """
     Takes an robot and image interface and moves the robot to the positions.
     It gathers a rgb and depth image at every position and returns them (depth image scaled)+ the endeffector pose as lists
@@ -94,6 +100,7 @@ def gather_robot_imgs_eefs(robot_interface, image_pipeline, depth_scale:float, p
         print(f"moving to position: {position}")
 
         reset_joints_to(robot_interface, position)
+        time.sleep(stabilisation_timeout)
 
         base_t_gripper = robot_interface.last_eef_pose
 
@@ -108,7 +115,14 @@ def gather_robot_imgs_eefs(robot_interface, image_pipeline, depth_scale:float, p
     return depth_images, rgb_images, base_t_gripper_s
 
 
-def estimate_camera_aruco_pose(images: np.ndarray, camera_matrix: np.ndarray, distortion_coefficients: np.ndarray, marker_side_length: float = 0.1) -> list[np.ndarray | None]:
+def estimate_camera_aruco_pose(
+        images: np.ndarray,
+        camera_matrix: np.ndarray,
+        distortion_coefficients: np.ndarray,
+        aruco_marker_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250),
+        aruco_marker_id:int = 33,
+        aruco_marker_side_length:float = 0.072
+    ) -> list[np.ndarray | None]:
     """
     :param images: NxWxHx3-uint8 RGB images
     :param camera_matrix: 3x3 camera matrix
@@ -118,18 +132,18 @@ def estimate_camera_aruco_pose(images: np.ndarray, camera_matrix: np.ndarray, di
     """
     detector_params = cv2.aruco.DetectorParameters()
     detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-    detector_params.cornerRefinementWinSize = 10
-    detector_params.cornerRefinementMaxIterations = 100
-    detector_params.cornerRefinementMinAccuracy = 0.01
+    #detector_params.cornerRefinementWinSize = 10
+    #detector_params.cornerRefinementMaxIterations = 100
+    #detector_params.cornerRefinementMinAccuracy = 0.01
 
-    detector = cv2.aruco.ArucoDetector(DICTIONARY, detector_params)
+    detector = cv2.aruco.ArucoDetector(aruco_marker_dictionary, detector_params)
 
 
     marker_points = np.array([
-        [-marker_side_length / 2, marker_side_length / 2, 0],
-        [marker_side_length / 2, marker_side_length / 2, 0],
-        [marker_side_length / 2, -marker_side_length / 2, 0],
-        [-marker_side_length / 2, -marker_side_length / 2, 0],
+        [-aruco_marker_side_length / 2, aruco_marker_side_length / 2, 0],
+        [aruco_marker_side_length / 2, aruco_marker_side_length / 2, 0],
+        [aruco_marker_side_length / 2, -aruco_marker_side_length / 2, 0],
+        [-aruco_marker_side_length / 2, -aruco_marker_side_length / 2, 0],
     ])
 
     camera_t_aruco_s = []
@@ -155,7 +169,7 @@ def estimate_camera_aruco_pose(images: np.ndarray, camera_matrix: np.ndarray, di
     return camera_t_aruco_s
 
 
-def gather_robot_data(output_folder:str = "data"):
+def gather_robot_data(output_folder:str = "data", stabilisation_timeout:int = 0):
     """
     Creates the following output folder format by moving the robot and taking images:
 
@@ -183,7 +197,7 @@ def gather_robot_data(output_folder:str = "data"):
     rgb_cam_mat, rgb_cam_dist_coef, _, _ = save_intrinsics(rgb_intrinsics=rgb_intrinsics, depth_intrinsics=depth_intrinsics, output_folder=output_folder, filename="robot_cam_calibration")
     depth_scale = pipeline.get_active_profile().get_device().first_depth_sensor().get_depth_scale()
     
-    depth_images, rgb_images, base_t_gripper_s = gather_robot_imgs_eefs(robot_interface, pipeline, depth_scale, positions)
+    depth_images, rgb_images, base_t_gripper_s = gather_robot_imgs_eefs(robot_interface, pipeline, depth_scale, positions, stabilisation_timeout = stabilisation_timeout)
 
     for i, (depth_image, rgb_image, base_t_gripper) in enumerate(zip(depth_images, rgb_images, base_t_gripper_s)):
 
@@ -208,7 +222,9 @@ def optimize_robot_data(
         rgb_cam_dist_coef: list[float],
         output_folder:str = "data",
         gripper_t_cam: np.ndarray|None = None,
-        marker_side_length:float = 0.072,
+        aruco_marker_side_length:float=0.072,
+        aruco_marker_dictionary=cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250),
+        aruco_marker_id:int=33
     ):
     """
     Creates the following output folder format by moving the robot and taking images:
@@ -229,7 +245,14 @@ def optimize_robot_data(
     camera_t_aruco_s = [None] * len(rgb_images)
     if gripper_t_cam is None:
         print("Using aruco markers for gripper_T_cam determination")
-        camera_t_aruco_s = estimate_camera_aruco_pose(np.array(rgb_images), camera_matrix=rgb_cam_mat, distortion_coefficients=np.array(rgb_cam_dist_coef), marker_side_length=marker_side_length)
+        camera_t_aruco_s = estimate_camera_aruco_pose(
+            images=np.array(rgb_images),
+            camera_matrix=rgb_cam_mat,
+            distortion_coefficients=np.array(rgb_cam_dist_coef),
+            aruco_marker_dictionary = aruco_marker_dictionary,
+            aruco_marker_side_length = aruco_marker_side_length,
+            aruco_marker_id = aruco_marker_id
+        )
 
         r_base_t_gripper = []
         t_base_t_gripper = []
@@ -280,8 +303,6 @@ def visualize_poses(
     app.initialize()
 
     vis = o3d.visualization.O3DVisualizer("Pose Visualizer", 1280, 720)
-
-    geometries = []
 
     # Create table & Robot Base
     origin_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
@@ -434,9 +455,13 @@ if __name__ == "__main__":
     parser.add_argument("--cam-t-gripper-path", type=str, default=None, help="Path to cam_t_gripper.npy")
 
     parser.add_argument("--aruco-marker-size", type=float, default=0.146, help="Aruco marker size in meters")
+    parser.add_argument("--aruco-dictionary", type=str, default="6X6_250", help=f"Aruco dictionary to use, possible options are: {', '.join(DICTIONARY_OPTIONS.keys())}")
     parser.add_argument("--aruco-marker-id", type=int, default=33, help="Aruco marker ID that will be used in detection")
 
+
     parser.add_argument("--no-data-gathering", action = "store_false", help = "If used only optimization & evaluation may be done", dest = "gather_data")
+    parser.add_argument("--stabilisation-timeout", type=float, default=0.0, help="Timeout in seconds between robot moved to position and picture is taken")
+
     parser.add_argument("--no-3D-visualize", action = "store_false", help = "If used there wont be any 3D pose visualisation", dest = "visualize_poses")
     parser.add_argument("--no-result-analysation", action = "store_false", help = "If used there wont by any result analysation (pose deviation analysis)", dest = "analyze_results")
 
@@ -444,9 +469,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(f"Saving/loading data from: {os.path.abspath(args.output_folder)}")
-
-    DICTIONARY_ID = args.aruco_marker_id
-    print(f"Using Dictionary ID:{DICTIONARY_ID}")
 
     cam_t_gripper = None
     if args.use_precomputed_cam_t_gripper and args.cam_t_gripper_path is not None and os.path.exists(args.cam_t_gripper_path):
@@ -457,6 +479,10 @@ if __name__ == "__main__":
     rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = None, None, None, None
     if args.gather_data:
         print("gathering data using the robot...")
+        if os.path.exists(f"{args.output_folder}"):
+            print(f"Output folder already exists, deleting it ...")
+            shutil.rmtree(f"{args.output_folder}")
+
         rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = gather_robot_data(output_folder=args.output_folder)
     else:
         print("loading data from disk for further processing ...")
@@ -473,9 +499,26 @@ if __name__ == "__main__":
         with open(f"{args.output_folder}/robot_cam_calibration.json", 'r') as f:
             json_file = json.load(f)
             rgb_cam_mat = np.array(json_file["rgb_camera_matrix"])
-            rgb_cam_dist_coef = np.array(json_file["rgb_distortion_coefficients"])
+            rgb_cam_dist_coef = json_file["rgb_distortion_coefficients"]
 
-    optimize_robot_data(rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef, output_folder=args.output_folder, gripper_t_cam=cam_t_gripper, marker_side_length=args.aruco_marker_size)
+
+
+
+    dictionary_id = args.aruco_marker_id
+    aruco_marker_dictionary = cv2.aruco.getPredefinedDictionary(DICTIONARY_OPTIONS[args.aruco_dictionary])
+    print(f"Using Dictionary {aruco_marker_dictionary} with ID:{dictionary_id} + ")
+
+    optimize_robot_data(
+        rgb_images=rgb_images,
+        base_t_gripper_s=base_t_gripper_s,
+        rgb_cam_mat=rgb_cam_mat,
+        rgb_cam_dist_coef=rgb_cam_dist_coef,
+        output_folder=args.output_folder,
+        gripper_t_cam=cam_t_gripper,
+        aruco_marker_side_length=args.aruco_marker_size,
+        aruco_marker_dictionary = aruco_marker_dictionary,
+        aruco_marker_id = dictionary_id
+    )
 
     if args.analyze_results:
         print(f"analyzing data with 3D pose visualisation: {args.visualize_poses}")
