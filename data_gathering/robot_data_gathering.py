@@ -11,7 +11,7 @@ import open3d.visualization.gui as gui
 
 import matplotlib.pyplot as plt
 
-from data_gathering.aruco_charuco_detection import ArucoCharucoDetector, ArucoDetector, CharucoDetector
+from aruco_charuco_detection import ArucoCharucoDetector, ArucoDetector, CharucoDetector
 
 DICTIONARY_OPTIONS = {
     "5X5_100":cv2.aruco.DICT_5X5_100,
@@ -184,7 +184,7 @@ def check_output_data(output_folder:str = "data", visualize:bool = True, aruco_s
 
     base_t_gripper_s = np.array([pose["base_t_gripper"] for pose in json_files])
     gripper_t_camera_s = np.array([pose["gripper_t_cam"] for pose in json_files])
-    camera_t_marker_s = [(np.array(pose["camera_t_aruco"]) if pose["camera_t_aruco"] is not None else None) for pose in json_files]
+    camera_t_marker_s = [(np.array(pose["camera_t_marker"]) if pose["camera_t_marker"] is not None else None) for pose in json_files]
 
     if visualize:
         visualize_poses(
@@ -256,7 +256,7 @@ if __name__ == "__main__":
     parser.add_argument("--cam-t-gripper-path", type=str, default=None, help="Path to cam_t_gripper.npy file, if left to None will be estimated")
 
 
-    parser.add_argument("--marker_detection", type = "str", default=None, help = "If Aruco / Charuco marker detection should be used, options: `None`(default), `Aruco`, `Charuco`")
+    parser.add_argument("--marker-detection", type = str, default=None, help = "If Aruco / Charuco marker detection should be used, options: `None`(default), `Aruco`, `Charuco`")
     parser.add_argument("--aruco-marker-side-length", type=float, default=0.072, help="Aruco marker side lengths in meters")
     parser.add_argument("--aruco-marker-dictionary", type=str, default="6X6_250", help=f"Aruco dictionary to use, possible options are: {', '.join(DICTIONARY_OPTIONS.keys())}")
     parser.add_argument("--charuco-square-side-length", type=float, default=0.1, help="Charuco board square side length in meters")
@@ -270,6 +270,8 @@ if __name__ == "__main__":
 
     parser.set_defaults(gather_data = True, visualize_poses = True, analyze_results = True)
     args = parser.parse_args()
+
+    print(f"args.gather_data: {args.gather_data}")
 
     print(f"Saving/loading data from: {os.path.abspath(args.output_folder)}")
 
@@ -286,7 +288,7 @@ if __name__ == "__main__":
             print(f"Output folder already exists, deleting it ...")
             shutil.rmtree(f"{args.output_folder}")
 
-        from data_gathering.robot_interface import gather_robot_data
+        from robot_interface import gather_robot_data
         rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = gather_robot_data(output_folder=args.output_folder)
     else:
         print("loading data from disk for further processing ...")
@@ -311,15 +313,20 @@ if __name__ == "__main__":
     if args.marker_detection is not None and args.marker_detection == "Aruco":
         marker_detector = ArucoDetector(
             aruco_marker_side_length=args.aruco_marker_side_length,
-            aruco_marker_dictionary=DICTIONARY_OPTIONS[args.aruco_dictionary]
+            aruco_marker_dictionary=cv2.aruco.getPredefinedDictionary(DICTIONARY_OPTIONS[args.aruco_marker_dictionary])
         )
     if args.marker_detection is not None and args.marker_detection == "Charuco":
         marker_detector = CharucoDetector(
             board_size=(args.charuco_board_size[0], args.charuco_board_size[1]),
             square_size=args.charuco_square_side_length,
             marker_size=args.aruco_marker_side_length,
-            aruco_dictionary=DICTIONARY_OPTIONS[args.aruco_dictionary]
+            aruco_dictionary=cv2.aruco.getPredefinedDictionary(DICTIONARY_OPTIONS[args.aruco_marker_dictionary])
         )
+    
+    if marker_detector is not None:
+        with open(f"{args.output_folder}/metadata.json", 'w') as f:
+            json.dump(marker_detector.get_meta_data(), f, indent=4)
+
 
     optimize_robot_data(
         rgb_images=rgb_images,
@@ -328,6 +335,7 @@ if __name__ == "__main__":
         rgb_cam_dist_coef=rgb_cam_dist_coef,
         output_folder=args.output_folder,
         gripper_t_cam=cam_t_gripper,
+        marker_detector = marker_detector
     )
 
     if args.analyze_results:
@@ -335,6 +343,6 @@ if __name__ == "__main__":
         check_output_data(
             output_folder = args.output_folder,
             visualize = args.visualize_poses,
-            aruco_size = args.aruco_marker_size 
+            aruco_size = args.aruco_marker_side_length 
         )
     print("main finished")
