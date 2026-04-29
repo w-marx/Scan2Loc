@@ -34,6 +34,12 @@ class ArucoCharucoDetector:
         """
         pass
 
+    def get_meta_data(self):
+        """
+        Returns some metadata about the detection process
+        """
+        return {}
+
 class ArucoDetector(ArucoCharucoDetector):
     def __init__(
             self,
@@ -71,12 +77,24 @@ class ArucoDetector(ArucoCharucoDetector):
                 objectPoints=marker_points,
                 imagePoints=marker_corners[0][0],
                 cameraMatrix=camera_matrix,
-                distCoeffs=distortion_coefficients,
+                distCoeffs=np.array(distortion_coefficients),
                 flags=cv2.SOLVEPNP_IPPE_SQUARE
             )
             camera_t_aruco_s.append(assemble_homogeneous_matrix(rvec=rvec, tvec=tvec))
 
         return camera_t_aruco_s
+
+    def get_meta_data(self):
+        """
+        Returns some metadata about the detection process
+        """
+        return {
+            "Aruco/Charuco Type":"Aruco",
+            "Aruco marker side length": self.aruco_marker_side_length,
+            "Aruco dictionary": f"{self.aruco_marker_dictionary.bytesList.shape[1]}X{self.aruco_marker_dictionary.bytesList.shape[1]}_{self.aruco_marker_dictionary.bytesList.shape[0]}",
+        }
+
+    
 
 
 class CharucoDetector(ArucoCharucoDetector):
@@ -95,6 +113,15 @@ class CharucoDetector(ArucoCharucoDetector):
         detector_params = cv2.aruco.DetectorParameters()
         detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.detector = cv2.aruco.CharucoDetector(board=self.board, charucoParams=cv2.aruco.CharucoParameters(), detectorParams=detector_params)
+
+
+        self.metadata = {
+            "Aruco/Charuco Type":"Charuco",
+            "Aruco marker side length": marker_size,
+            "Charuco square size": square_size,
+            "Aruco dictionary": f"{aruco_dictionary.bytesList.shape[1]}X{aruco_dictionary.bytesList.shape[1]}_{aruco_dictionary.bytesList.shape[0]}",
+            "Min fraction of markers": min_fraction_of_markers
+        }
 
 
     def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float])->list[np.ndarray | None]:
@@ -144,7 +171,7 @@ class CharucoDetector(ArucoCharucoDetector):
                 combined_obj_points,
                 combined_img_points,
                 camera_matrix,
-                distortion_coefficients,
+                np.array(distortion_coefficients),
             )
 
             if valid:
@@ -154,4 +181,9 @@ class CharucoDetector(ArucoCharucoDetector):
 
         return camera_t_charuco_s
 
+    def get_meta_data(self):
+        """
+        Returns some metadata about the detection process
+        """
+        return self.metadata
 
