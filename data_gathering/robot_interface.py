@@ -175,7 +175,6 @@ def gather_robot_data(
     :return: rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef
     """
     robot_interface = FrankaInterface(config_root + "/charmander.yml", use_visualizer=False)
-    print(f"interface type: {type(robot_interface)}")
 
     pipeline = rs.pipeline()
     config = rs.config()
@@ -215,4 +214,3 @@ def gather_robot_data(
             json.dump(pose_dict, f, indent=4)
     pipeline.stop()
     return rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef
-
