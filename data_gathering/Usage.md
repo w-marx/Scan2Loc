@@ -17,3 +17,12 @@ Without data gathering:
 ### Big board:
 
 ## With aruco markers:
+### Small marker:
+```
+/opt/miniconda3/envs/deoxys/bin/python /workspace/franka_pipeline/robot_data_gathering.py --output-folder small_aruco1 --marker-detection Aruco --aruco-marker-side-length 0.072 --aruco-marker-dictionary 6X6_250 
+```
+
+### Big marker:
+```
+/opt/miniconda3/envs/deoxys/bin/python /workspace/franka_pipeline/robot_data_gathering.py --output-folder big_aruco1 --marker-detection Aruco --aruco-marker-side-length 0.146 --aruco-marker-dictionary 6X6_250 
+```
