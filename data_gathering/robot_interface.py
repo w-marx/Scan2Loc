@@ -203,6 +203,7 @@ def gather_robot_data(
 
     for i, (depth_image, rgb_image, base_t_gripper) in enumerate(zip(depth_images, rgb_images, base_t_gripper_s)):
         # save robot images
+        # TODO depth images are not saved (are empty)
         os.makedirs(f"{output_folder}/robot/{i:06d}", exist_ok=True)
         cv2.imwrite(f"{output_folder}/robot/{i:06d}/rgb.png", cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR))
         np.save(f"{output_folder}/robot/{i:06d}/depth.npy", depth_image)

@@ -144,3 +144,6 @@ data_gathering/rgbd_cam_output
 
 input_data_examples
 input_data_examples/
+
+gathered_data_examples
+gathered_data_examples/

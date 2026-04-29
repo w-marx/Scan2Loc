@@ -83,7 +83,7 @@ def create_point_cloud_from_image_points(
         method = "3D points",
         images_points_3d_and_conf:tuple[np.ndarray, np.ndarray] | None = None,
         images_depth_maps_and_conf:tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]| None = None,
-        masks:np.ndarray = None,
+        masks:np.ndarray|None = None,
         confidence_quantile:float = 0.1,
         iforest_quantile:float = 0.05,
         visualize:bool = True
@@ -124,7 +124,7 @@ def create_point_cloud_from_image_points(
         conf_masks = get_confidence_masks(images_depth_maps_conf, confidence_quantile)
         points = unproject_depth_map_to_point_map(images_depth_maps, extrinsics_cam=extrinsic, intrinsics_cam=intrinsic)
 
-    masks = conf_masks & masks
+    masks = conf_masks & masks if masks is not None else conf_masks
     masks = np.reshape(np.array(masks), (-1))
     points = np.reshape(np.array(points), (-1, 3))
     points = points[masks]

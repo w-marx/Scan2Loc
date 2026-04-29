@@ -49,12 +49,11 @@ class ArucoDetector(ArucoCharucoDetector):
         super().__init__()
         self.aruco_marker_side_length = aruco_marker_side_length
         self.aruco_marker_dictionary = aruco_marker_dictionary
-
-    def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float])->list[np.ndarray | None]:
         detector_params = cv2.aruco.DetectorParameters()
         detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        self.detector = cv2.aruco.ArucoDetector(self.aruco_marker_dictionary, detector_params)
 
-        detector = cv2.aruco.ArucoDetector(self.aruco_marker_dictionary, detector_params)
+    def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float])->list[np.ndarray | None]:
 
         marker_points = np.array([
             [-self.aruco_marker_side_length / 2, self.aruco_marker_side_length / 2, 0],
@@ -65,7 +64,7 @@ class ArucoDetector(ArucoCharucoDetector):
 
         camera_t_aruco_s = []
         for index, image in enumerate(images):
-            marker_corners, marker_ids, reject_candidates = detector.detectMarkers(image)
+            marker_corners, marker_ids, reject_candidates = self.detector.detectMarkers(image)
 
             if len(marker_corners) > 1:
                 raise Exception("More then one aruco marker detected, single pose is not calculatable")
@@ -83,6 +82,20 @@ class ArucoDetector(ArucoCharucoDetector):
             camera_t_aruco_s.append(assemble_homogeneous_matrix(rvec=rvec, tvec=tvec))
 
         return camera_t_aruco_s
+
+    def remove_markers(self, images:list[np.ndarray]) ->list[np.ndarray]:
+        masked_images = []
+        for image in images:
+            marker_corners, marker_ids, reject_candidates = self.detector.detectMarkers(image)
+            mask = np.full(image.shape[:2], fill_value=True, dtype="bool")
+
+            for polygon in marker_corners:
+                for x in range(len(mask)):
+                    for y in range(len(mask[x])):
+                        mask[x][y] = mask[x][y] and cv2.pointPolygonTest(polygon, (y, x), False) <= 0
+            aruco_mask = np.stack([mask, mask, mask], axis=2)
+            masked_images.append(image * aruco_mask)
+        return masked_images
 
     def get_meta_data(self):
         """
@@ -187,3 +200,33 @@ class CharucoDetector(ArucoCharucoDetector):
         """
         return self.metadata
 
+
+def build_aruco_charuco_detector(metadata_dict:dict)->ArucoCharucoDetector:
+    """
+    Builds an aruco charuco detector from the metadata dict
+    :param metadata_dict:
+    :return:
+    """
+    dictionary_options = {
+        "5X5_100": cv2.aruco.DICT_5X5_100,
+        "5X5_250": cv2.aruco.DICT_5X5_250,
+        "6X6_250": cv2.aruco.DICT_6X6_250,
+        "7X7_250": cv2.aruco.DICT_7X7_250,
+        "7X7_1000": cv2.aruco.DICT_7X7_1000,
+    }
+
+    if metadata_dict["Aruco/Charuco Type"] == "Aruco":
+        return ArucoDetector(
+            aruco_marker_side_length=metadata_dict["Aruco marker side length"],
+            aruco_marker_dictionary=cv2.aruco.getPredefinedDictionary(dictionary_options[metadata_dict["Aruco dictionary"]])
+        )
+    elif metadata_dict["Aruco/Charuco Type"] == "Charuco":
+        return CharucoDetector(
+            board_size=(metadata_dict["Charuco board size"], metadata_dict["Charuco board size"]),
+            square_size=metadata_dict["Charuco square size"],
+            marker_size=metadata_dict["Aruco marker side length"],
+            aruco_dictionary=cv2.aruco.getPredefinedDictionary(dictionary_options[metadata_dict["Aruco dictionary"]]),
+            min_fraction_of_markers=metadata_dict["Min fraction of markers"]
+        )
+    else:
+        raise Exception("Unknown aruco charuco type")

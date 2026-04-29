@@ -5,6 +5,7 @@ import numpy as np
 import open3d as o3d
 from projectaria_tools.core import data_provider, calibration
 from open3d.cuda.pybind.geometry import PointCloud
+from data_gathering.aruco_charuco_detection import *
 
 def get_images(image_folder:str) -> tuple[np.ndarray, list[str]]:
     """
@@ -56,27 +57,29 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
     Input data folder should have the following structure:
 
     `input_folder`
-    ├── headset
-    │    └── a .png image
-    ├── headset_calibration
-    │   └── multiple .png with an chessboard on it
+    ├── headset.vrs
     ├── robot
     │   └── multiple folders
-    │       ├──  A .png image
-    │       └──  A depth image as a .npy file
-    └── robot_calibration.json
+    │       ├──  rgb.png
+    │       ├──  depth.npy
+    │       └──  poses.json
+    ├── metadata.json
+    └── robot_cam_calibration.json
 
-    Instead of the headset_calibration folder a .vrs file with the name `headset_calibration.vrs` may be provided
-    Alternatively only a headset.vrs file is enough
-
-    The robot_calibration.json file should contain the fields:
+    The robot_cam_calibration.json file should contain the fields:
     `rgb_camera_matrix`, `depth_camera_matrix`, `rgb_distortion_coefficients` and `depth_distortion_coefficients`.`
+
+    The `poses.json` files should contain the field:
+        -`base_t_cam`
+    And may contain the field:
+        -`camera_t_marker`
+
+    The metadata.json file should contain the fields to build an aruco marker detector.
 
     :param input_folder: the location of the input data folder
     :return: A Dictionary:
     {
         headset_images: headset_images (NxWxHx3-uint8 numpy array),
-        headset_calibration_images: numpy array of headset_calibration_images (NxWxHx3) or None,
         headset_cam_mtx: 3x3 numpy array of the cam_mtx or None (either headset_calibration_images or robot_cam_mtx is not none)
 
         robot_rgb_images:  (NxWxHx3-uint8 numpy array),
@@ -87,26 +90,13 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
         robot_depth_dist: A 1D numpy array with the distortion coefficients of the depth camera (mostly just 0s)
         robot_rgb_dist: A 1D numpy array with the distortion coefficients of the rgb camera (mostly just 0s)
 
-        robot_base_t_cameras: A Nx4x4 numpy of transformation matrices or None if those are not provided
+        robot_base_t_camera_s: A list of Nx4x4 numpy of transformation matrices or None if those are not provided
+        robot_camera_t_marker_s: A list of Nx4x4 numpy of transformation matrices or None if those are not provided
+        aruco_marker_detector: A ArucoMarkerDetector object or None if the aruco marker detector was not provided
     }
     """
 
-    headset_images = None
-    # either headset mtx or headset_calibration_images will remain None
-    headset_calibration_images = None
-    headset_mtx = None
-
-    if os.path.exists(f"{input_folder}/headset.vrs"):
-        headset_images, headset_mtx = vrs_to_images_intrinsic(f"{input_folder}/headset.vrs")
-    elif os.path.exists(f"{input_folder}/headset") and os.path.exists(f"{input_folder}/headset_calibration.vrs"):
-        headset_images, _ = get_images(f"{input_folder}/headset")
-        _, headset_mtx = vrs_to_images_intrinsic(f"{input_folder}/headset_calibration.vrs")
-    elif os.path.exists(f"{input_folder}/headset") and os.path.exists(f"{input_folder}/headset_calibration"):
-        headset_images, _ = get_images(f"{input_folder}/headset")
-        headset_calibration_images, _ = get_images(f"{input_folder}/headset_calibration")
-    else:
-        raise Exception("Headset input files are not valid")
-
+    headset_images, headset_mtx = vrs_to_images_intrinsic(f"{input_folder}/headset.vrs")
 
     # Load Robot images
     robot_image_names = [f"{folder_name}" for folder_name in os.listdir(f"{input_folder}/robot")]
@@ -115,31 +105,46 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
     except Exception:
         print("could not sort robot images as numbers")
 
-    robot_rgb_images = np.array([cv2.cvtColor(cv2.imread(f"{input_folder}/robot/{name}/rgb.png"), cv2.COLOR_BGR2RGB) for name in robot_image_names], dtype=np.uint8)
-    robot_depth_images = np.array([np.load(f"{input_folder}/robot/{name}/depth.npy") for name in robot_image_names])
 
-    robot_base_t_cameras = np.array([np.load(f"{input_folder}/robot/{name}/base_t_camera.npy") for name in robot_image_names if os.path.exists(f"{input_folder}/robot/{name}/base_t_camera.npy")])
-    if robot_base_t_cameras.shape[0] != len(robot_image_names):
-        print(f"Only {robot_base_t_cameras.shape[0]} / {len(robot_image_names)} base_t_cameras are available, therefore they are not loaded")
-        robot_base_t_cameras = None
+    robot_rgb_images, robot_depth_images, robot_base_t_cameras, robot_camera_t_marker = [], [], [], []
+
+
+    for folder in robot_image_names:
+        location = f"{input_folder}/robot/{folder}"
+
+        robot_rgb_images.append(cv2.cvtColor(cv2.imread(f"{location}/rgb.png"), cv2.COLOR_BGR2RGB))
+        #robot_depth_images.append(np.load(f"{location}/depth.npy"))
+        robot_depth_images.append(None)
+
+        poses_dict = json.load(open(f"{location}/poses.json"))
+
+        robot_base_t_cameras.append(np.array(poses_dict["base_t_cam"]) if poses_dict["base_t_cam"] is not None else None)
+        robot_camera_t_marker.append(np.array(poses_dict["camera_t_marker"]) if poses_dict["camera_t_marker"] is not None else None)
+
 
     # Load Robot calibration
-    robot_calibration = json.loads(open(f"{input_folder}/robot_calibration.json").read())
+    robot_calibration = json.loads(open(f"{input_folder}/robot_cam_calibration.json").read())
+
+    aruco_marker_detector = None
+    if os.path.exists(f"{input_folder}/metadata.json"):
+        aruco_marker_detector = build_aruco_charuco_detector(json.load(open(f"{input_folder}/metadata.json")))
+
 
     ret_dict = {
         "headset_images": headset_images,
-        "headset_calibration_images": headset_calibration_images,
         "headset_cam_mtx": headset_mtx,
 
         "robot_rgb_images": robot_rgb_images,
         "robot_depth_images": robot_depth_images,
         "robot_images_names": robot_image_names,
+        "robot_base_t_camera_s": robot_base_t_cameras,
+        "robot_camera_t_marker_s": robot_camera_t_marker,
+
         "robot_rgb_cam_mtx": np.array(robot_calibration["rgb_camera_matrix"]),
         "robot_depth_cam_mtx": np.array(robot_calibration["depth_camera_matrix"]),
         "robot_depth_dist": np.array(robot_calibration["depth_distortion_coefficients"]),
         "robot_rgb_dist":np.array(robot_calibration["rgb_distortion_coefficients"]),
-
-        "robot_base_t_cameras": robot_base_t_cameras,
+        "marker_detector": aruco_marker_detector
     }
 
     return ret_dict
@@ -167,7 +172,7 @@ def save_output_data(
         robot_rgb_images:np.ndarray,
         robot_xyz_images:np.ndarray,
         robot_base_t_robot_cameras:list[np.ndarray],
-        robot_base_t_headsets:list[np.ndarray],
+        robot_base_t_headsets:list[np.ndarray | None],
         robot_rgb_cam_mtx:np.ndarray,
         point_cloud:PointCloud,
 ):
@@ -205,9 +210,9 @@ def save_output_data(
 
         with open(f"{output_folder}/robot/{name}/robot_base_t_robot_camera.json", 'w') as f:
             json.dump(robot_base_t_robot_camera.tolist(), f, indent=4)
-
-        with open(f"{output_folder}/robot/{name}/label.json", 'w') as f:
-            json.dump(robot_base_t_headset.tolist(), f, indent=4)
+        if robot_base_t_headset is not None:
+            with open(f"{output_folder}/robot/{name}/label.json", 'w') as f:
+                json.dump(robot_base_t_headset.tolist(), f, indent=4)
 
     o3d.io.write_point_cloud(f"{output_folder}/pointcloud.ply", point_cloud, write_ascii=True)
 

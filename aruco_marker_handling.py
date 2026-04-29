@@ -14,23 +14,6 @@ def generate_marker_image(outpath: str = "marker.png"):
     marker_image = cv.aruco.generateImageMarker(DICTIONARY, DICTIONARY_ID, 200)
     cv.imwrite(outpath, marker_image)
 
-
-def get_marker_mask(image:np.ndarray) -> np.ndarray:
-    """
-    :param image: WxHx3-uint8 RGB image as an numpy array
-    :return: WxH-bool mask which is True where the marker is
-    """
-    detector_params = cv.aruco.DetectorParameters()
-    detector = cv.aruco.ArucoDetector(DICTIONARY, detector_params)
-    marker_corners, marker_ids, reject_candidates = detector.detectMarkers(image)
-    mask = np.full(image.shape[:2], fill_value=True,dtype="bool")
-
-    for polygon in marker_corners:
-        for x in range(len(mask)):
-            for y in range(len(mask[x])):
-                mask[x][y] = mask[x][y] and cv.pointPolygonTest(polygon, (y,x), False) <= 0
-    return mask
-
 def calculate_camera_params_from_images(images: np.ndarray, pattern_size:tuple[int,int] = (9,6), square_size:float = 0.03, visualize_corners:bool = False) -> tuple[np.ndarray, np.ndarray]:
     """
     :param images: NxWxHx3-uint8 RGB images
