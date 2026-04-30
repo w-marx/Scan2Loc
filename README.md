@@ -43,3 +43,13 @@ git clone https://github.com/cvg/LightGlue.git && cd LightGlue
 python -m pip install -e .
 cd ..
 ```
+
+# Setup V2
+
+```
+git clone git@github.com:w-marx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline.git
+cd AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline
+cd data_preprocessing
+conda env create -f environment_1080.yml
+conda activate env
+```
