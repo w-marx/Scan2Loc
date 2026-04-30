@@ -101,6 +101,8 @@ env/
 .venv
 venv/
 data_preprocessing/conda_env
+data_gathering/data_gather_env
+data_preprocessing/data_prep_env
 
 
 # PyCharm

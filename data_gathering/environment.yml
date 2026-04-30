@@ -1,0 +1,14 @@
+name: ar-headset-localization
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - numpy
+  - opencv
+  - matplotlib
+  - pip
+  - pip:
+    - open3d
+    - pyrealsense2
+    - opencv-contrib-python
