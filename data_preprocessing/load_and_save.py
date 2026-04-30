@@ -1,3 +1,4 @@
+import sys
 import os
 import json
 import cv2
@@ -5,6 +6,9 @@ import numpy as np
 import open3d as o3d
 from projectaria_tools.core import data_provider, calibration
 from open3d.cuda.pybind.geometry import PointCloud
+
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_gathering.aruco_charuco_detection import *
 
 def get_images(image_folder:str) -> tuple[np.ndarray, list[str]]:

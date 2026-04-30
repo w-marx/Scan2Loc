@@ -1,7 +1,11 @@
 import numpy as np
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from data_gathering.aruco_charuco_detection import *
 
 from image_to_pointcloud import *
-from aruco_marker_handling import *
 from load_and_save import *
 import argparse
 
@@ -13,7 +17,7 @@ def process_data(
         iforest_confidence_threshhold: float = 0.05,
         visualize_pointcloud: bool = True,
         point_cloud_creation_method:str = "3D points",
-        robot_image_limit:int = 2
+        robot_image_limit:int = 1
     ):
     """
 
@@ -68,7 +72,7 @@ def process_data(
         method=point_cloud_creation_method,
         images_points_3d_and_conf=(robot_imgs_3d_points, robot_imgs_3d_points_conf),
         images_depth_maps_and_conf=(robot_imgs_depth, robot_imgs_depth_conf, robot_extrinsic, robot_intrinsic),
-#        masks= create_foreground_masks(images=np.array(robot_rgb_images[:robot_image_limit])),
+        masks= create_foreground_masks(images=np.array(robot_rgb_images[:robot_image_limit])),
         visualize=visualize_pointcloud,
         confidence_quantile=confidence_threshhold,
         iforest_quantile=iforest_confidence_threshhold
@@ -106,7 +110,7 @@ def process_data(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input-folder", type=str, default="./input_data_examples/Example1_w_aruco", help="Input Folder Location")
+    parser.add_argument("--input-folder", type=str, default="../gathered_data_examples/aruco1", help="Input Folder Location")
     parser.add_argument("--output-folder", type=str, default="./out_data", help="Output Folder Location")
     parser.add_argument("--confidence-threshhold", type=float, default=0.1, help="Confidence threshold for points in the 3D point cloud")
     parser.add_argument("--visualize-pointcloud", type=bool, default=True, help="If the point cloud is to be visualized in a window")

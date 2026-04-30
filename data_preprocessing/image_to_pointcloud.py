@@ -140,8 +140,10 @@ def create_foreground_masks(images:np.ndarray) -> np.ndarray:
     :param images: NxWxHx3 numpy array for the images (RGB)
     :return: NxWxH boolean numpy array of the masks
     """
-    from sam3 import build_sam3_image_model
-    from sam3 import Sam3Processor
+
+    from sam3.model_builder import build_sam3_image_model
+    from sam3.model.sam3_image_processor import Sam3Processor
+
     masks = []
     model = build_sam3_image_model()
     processor = Sam3Processor(model)
