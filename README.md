@@ -50,6 +50,14 @@ cd ..
 git clone git@github.com:w-marx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline.git
 cd AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline
 cd data_preprocessing
-conda env create -f environment_1080.yml
+conda env create -f environment_1080.yml -p ./conda_env
 conda activate env
 ```
+
+
+```
+git clone git@github.com:facebookresearch/vggt.git
+cd vggt
+pip install .
+cd ..
+``
