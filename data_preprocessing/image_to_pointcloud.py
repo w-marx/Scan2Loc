@@ -3,15 +3,7 @@ import torch
 import numpy as np
 import open3d as o3d
 from open3d.cuda.pybind.geometry import PointCloud
-
-from vggt.models.vggt import VGGT
-
-from vggt.utils.pose_enc import pose_encoding_to_extri_intri
-from vggt.utils.geometry import unproject_depth_map_to_point_map
-
 from PIL import Image
-from sam3 import build_sam3_image_model
-from sam3 import Sam3Processor
 
 from sklearn.ensemble import IsolationForest
 
@@ -26,6 +18,11 @@ def use_vggt_on_images(images:np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nd
     5. The depth map
     6. The depth map confidences
     """
+
+    from vggt.models.vggt import VGGT
+    from vggt.utils.pose_enc import pose_encoding_to_extri_intri
+    from vggt.utils.geometry import unproject_depth_map_to_point_map
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # bfloat16 is supported on Ampere GPUs (Compute Capability 8.0+)
@@ -143,6 +140,8 @@ def create_foreground_masks(images:np.ndarray) -> np.ndarray:
     :param images: NxWxHx3 numpy array for the images (RGB)
     :return: NxWxH boolean numpy array of the masks
     """
+    from sam3 import build_sam3_image_model
+    from sam3 import Sam3Processor
     masks = []
     model = build_sam3_image_model()
     processor = Sam3Processor(model)
