@@ -8,13 +8,19 @@ cd AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline
 ```
 
 ## For data gathering:
+```
+cd data_gathering
+conda env create -f environment.yml -p ./data_gather_env
+conda activate ./data_gather_env
+```
+
 
 ## For Data preprocessing
 
 ```
 cd data_preprocessing
-conda env create -f environment_1080.yml -p ./conda_env
-conda activate ./conda_env
+conda env create -f environment_1080.yml -p ./data_prep_env
+conda activate ./data_prep_env
 ```
 
 ```
