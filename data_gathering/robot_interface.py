@@ -138,7 +138,7 @@ def gather_robot_imgs_eefs(
         rgb_frame = np.asanyarray(frames.get_color_frame().get_data())
         depth_frame = np.asanyarray(frames.get_depth_frame().get_data())
         depth_frame_scaled = depth_frame * depth_scale
-
+        print(f"depth_frame: {depth_frame_scaled.shape}")
         depth_images.append(depth_frame_scaled)
         rgb_images.append(cv2.cvtColor(rgb_frame, cv2.COLOR_BGR2RGB))
         base_t_gripper_s.append(base_t_gripper)

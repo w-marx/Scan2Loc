@@ -131,8 +131,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Custom additions
-sam3/
-vggt/
+data_preprocessing/sam3/
+data_preprocessing/vggt/
 out_data/
 in_data/
 in_data_vrs/

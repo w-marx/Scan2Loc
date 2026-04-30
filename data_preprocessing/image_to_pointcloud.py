@@ -1,7 +1,5 @@
 from typing import Callable
-import cv2
 import torch
-import os
 import numpy as np
 import open3d as o3d
 from open3d.cuda.pybind.geometry import PointCloud
@@ -12,8 +10,8 @@ from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from vggt.utils.geometry import unproject_depth_map_to_point_map
 
 from PIL import Image
-from sam3.model_builder import build_sam3_image_model
-from sam3.model.sam3_image_processor import Sam3Processor
+from sam3 import build_sam3_image_model
+from sam3 import Sam3Processor
 
 from sklearn.ensemble import IsolationForest
 
