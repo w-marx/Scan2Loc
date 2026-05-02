@@ -55,12 +55,7 @@ class ArucoDetector(ArucoCharucoDetector):
 
     def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float])->list[np.ndarray | None]:
 
-        marker_points = np.array([
-            [-self.aruco_marker_side_length / 2, self.aruco_marker_side_length / 2, 0],
-            [self.aruco_marker_side_length / 2, self.aruco_marker_side_length / 2, 0],
-            [self.aruco_marker_side_length / 2, -self.aruco_marker_side_length / 2, 0],
-            [-self.aruco_marker_side_length / 2, -self.aruco_marker_side_length / 2, 0],
-        ])
+        marker_points = np.array([[-1,1,0], [1,1,0], [1,-1,0], [-1,-1,0]])*0.5*self.aruco_marker_side_length
 
         camera_t_aruco_s = []
         for index, image in enumerate(images):
@@ -80,6 +75,12 @@ class ArucoDetector(ArucoCharucoDetector):
                 flags=cv2.SOLVEPNP_IPPE_SQUARE
             )
             camera_t_aruco_s.append(assemble_homogeneous_matrix(rvec=rvec, tvec=tvec))
+
+            #img_copy = image.copy()
+            #cv2.aruco.drawDetectedMarkers(img_copy, marker_corners, marker_ids, (0, 0, 255))
+            #cv2.imshow(f"image: {index}",img_copy)
+            #cv2.waitKey(0)
+            #cv2.destroyAllWindows()
 
         return camera_t_aruco_s
 
@@ -171,11 +172,12 @@ class CharucoDetector(ArucoCharucoDetector):
                 marker_obj_points = np.concatenate([marker_obj_points, marker_obj_corner_s], axis=0)
                 marker_img_points = np.concatenate([marker_img_points, marker_img_corner_s], axis=0)
 
-            # img_copy = image.copy()
-            # cv2.aruco.drawDetectedCornersCharuco(img_copy, charuco_corners, charuco_ids, (0, 255, 0))
-            # cv2.aruco.drawDetectedMarkers(img_copy, marker_corners, marker_ids, (0, 0, 255))
-            # cv2.imshow("image",img_copy)
-            # cv2.waitKey(0)
+            #img_copy = image.copy()
+            #cv2.aruco.drawDetectedCornersCharuco(img_copy, charuco_corners, charuco_ids, (0, 255, 0))
+            #cv2.aruco.drawDetectedMarkers(img_copy, marker_corners, marker_ids, (0, 0, 255))
+            #cv2.imshow(f"image: {index}",img_copy)
+            #cv2.waitKey(0)
+            #cv2.destroyAllWindows()
 
             combined_obj_points = np.concatenate([chessboard_obj_points.reshape(-1, 3), marker_obj_points], axis=0)
             combined_img_points = np.concatenate([chessboard_img_points.reshape(-1, 2), marker_img_points], axis=0)
