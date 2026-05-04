@@ -11,6 +11,24 @@ from scipy.spatial.transform import RigidTransform
 
 from aruco_charuco_detection import ArucoCharucoDetector, ArucoDetector, CharucoDetector
 
+calc_translat_difference = lambda x, y: np.linalg.norm(x - y)
+calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2)
+calc_sum_difference = lambda x, y: calc_translat_difference(x[:3, 3], y[:3, 3])*1000 + calc_rotational_difference(x, y)*180/np.pi
+
+def compute_pose_pseudo_median(poses:list[np.ndarray])->np.ndarray:
+    """
+    Takes a numpy array of poses and computes the median pose.
+    To compute the median pose the median rotation and the geometric median of the translation are combined.
+    Therefore, the returned pose may not be in poses
+    :param poses: Nx4x4 numpy array of poses
+    :return: median pose, as a 4x4 numpy array
+    """
+    median_pose = min(poses, key = lambda x: sum([np.linalg.norm(x[:3,3]-y[:3,3]) for y in poses]))
+    median_pose[:3,:3] = min(poses, key = lambda x: sum([calc_rotational_difference(x,y) for y in poses]))[:3,:3]
+    return median_pose
+
+
+
 def optimize_robot_data(
         rgb_images: list[np.ndarray],
         base_t_gripper_s: list[np.ndarray],
@@ -19,7 +37,7 @@ def optimize_robot_data(
         output_folder:str = "data",
         marker_detector: ArucoCharucoDetector | None = None,
         gripper_t_cam: np.ndarray|None = None,
-        base_t_gripper_outlier_quantile:float = 0.0
+        base_t_gripper_outlier_quantiles:tuple[float, float] = (0.2, 0.2)
     ):
     """
     Creates the following output folder format by moving the robot and taking images:
@@ -40,10 +58,9 @@ def optimize_robot_data(
     :param rgb_cam_mat: intrinsic camera matrix
     :param base_t_gripper_s: list of 4x4 transformation matrices for the robot base^T_gripper
     :param output_folder: the name of the output folder
-    :param base_t_gripper_outlier_quantile the quantile of base_t_gripper estimates to remove (based on only translation with iForest)
+    :param base_t_gripper_outlier_quantiles the quantiles of base_t_gripper estimates to remove, first float for translation and second for rotation
     :return: nothing
     """
-    #TODO outlier removal
 
     if gripper_t_cam is None and marker_detector is None:
         raise ValueError("Either gripper_t_cam or marker_detector must be provided")
@@ -69,6 +86,23 @@ def optimize_robot_data(
 
         r_gripper_t_cam, t_gripper_t_cam = cv2.calibrateHandEye(r_base_t_gripper, t_base_t_gripper, r_marker_t_camera, t_marker_t_camera, method=cv2.CALIB_HAND_EYE_DANIILIDIS)
         gripper_t_cam = np.concatenate((np.concatenate((r_gripper_t_cam, t_gripper_t_cam), axis=1), [[0, 0, 0, 1]]), axis=0)
+
+    # Remove camera_t_marker estimates that lead to outliers
+    b_t_m_s = [b_t_g @ gripper_t_cam @ c_t_m for b_t_g, c_t_m in zip(base_t_gripper_s, camera_t_marker_s) if
+               c_t_m is not None]
+    base_t_marker_median = compute_pose_pseudo_median(b_t_m_s)
+
+    t_err_quant = np.quantile([np.linalg.norm(b_t_m[:3,3]-base_t_marker_median[:3,3]) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[0])
+    r_err_quant = np.quantile([calc_rotational_difference(b_t_m, base_t_marker_median) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[1])
+
+    for idx, (b_t_g, c_t_m) in enumerate(zip(base_t_gripper_s, camera_t_marker_s)):
+        not_None:bool = c_t_m is not None
+        low_t_err:bool = not_None and np.linalg.norm((b_t_g @ gripper_t_cam @ c_t_m)[:3,3] - base_t_marker_median[:3,3]) <= t_err_quant
+        low_r_err:bool = not_None and calc_rotational_difference(b_t_g @ gripper_t_cam @ c_t_m, base_t_marker_median) <= r_err_quant
+
+        if not low_t_err or not low_r_err:
+            camera_t_marker_s[idx] = None
+
 
     for i, (rgb_image, base_t_gripper) in enumerate(zip(rgb_images, base_t_gripper_s)):
         os.makedirs(f"{output_folder}/robot/{i:06d}", exist_ok=True)
@@ -106,13 +140,8 @@ def check_output_data(
     camera_t_marker_s = [(np.array(pose["camera_t_marker"]) if pose["camera_t_marker"] is not None else None) for pose in json_files]
 
     base_t_marker_s = [r_t_g @ g_t_c @ c_t_a for r_t_g, g_t_c, c_t_a in zip(base_t_gripper_s, gripper_t_camera_s, camera_t_marker_s) if c_t_a is not None]
-
-    calc_translat_difference = lambda x,y: np.linalg.norm(x - y)
-    calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T)-1)/2)
-    calc_sum_difference = lambda x,y: calc_translat_difference(x[:3,3],y[:3,3]) + calc_rotational_difference(x,y)
-
     avg_base_t_marker = RigidTransform.from_matrix(np.array(base_t_marker_s)).mean().as_matrix()
-    median_base_t_marker = min(base_t_marker_s, key = lambda x:sum([calc_sum_difference(x,y) for y in base_t_marker_s]))
+    median_base_t_marker = compute_pose_pseudo_median(np.array(base_t_marker_s))
 
     actual_base_t_marker = avg_base_t_marker if use_mean else median_base_t_marker
 
@@ -145,13 +174,13 @@ Translation in mm cov & corr matrix:\n
 
     # Translational errors
     t_err_plt = fig.add_subplot(gs[3,0:2])
-    t_err_plt.hist(translational_errors_mm, bins = 10)
+    t_err_plt.hist(translational_errors_mm, bins = np.arange(int(min(translational_errors_mm)), int(max(translational_errors_mm)))+1)
     t_err_plt.set_xlabel(f"Distance to {"mean" if use_mean else "median" } in mm")
     t_err_plt.set_ylabel("Frequency")
 
     # Rotational errors
     r_err_plt = fig.add_subplot(gs[3,2:4])
-    r_err_plt.hist(rotational_errors_deg, bins = 10)
+    r_err_plt.hist(rotational_errors_deg, bins = np.arange(int(min(translational_errors_mm)), int(max(translational_errors_mm)+1)))
     r_err_plt.set_xlabel(f"Rotational distance to {"mean" if use_mean else "median" } in degrees")
     r_err_plt.set_ylabel("Frequency")
 
@@ -160,11 +189,6 @@ Translation in mm cov & corr matrix:\n
     pos_3d_plot = fig.add_subplot(gs[0:3,2:4], projection='3d')
 
     np_base_t_marker_s = np.array(base_t_marker_s)
-    pos_3d_plot.scatter(
-        np_base_t_marker_s[:,0,3]*1000,
-        np_base_t_marker_s[:,1,3]*1000,
-        np_base_t_marker_s[:,2,3]*1000
-    )
 
     for idx, color in enumerate(['red', 'green', 'blue']):
         pos_3d_plot.quiver(
@@ -172,10 +196,11 @@ Translation in mm cov & corr matrix:\n
             U = np_base_t_marker_s[:,0,idx], V = np_base_t_marker_s[:,1,idx], W = np_base_t_marker_s[:,2,idx],
             color = color
         )
+    pos_3d_plot.scatter(actual_base_t_marker[0,3]*1000,actual_base_t_marker[1,3]*1000,actual_base_t_marker[2,3]*1000,color = "red", s = 50)
 
-    pos_3d_plot.set_xlim(np_base_t_marker_s[:,0,3].min()*1000+1, np_base_t_marker_s[:,0,3].max()*1000-1)
-    pos_3d_plot.set_ylim(np_base_t_marker_s[:,1,3].min()*1000+1, np_base_t_marker_s[:,1,3].max()*1000-1)
-    pos_3d_plot.set_zlim(np_base_t_marker_s[:,2,3].min()*1000+1, np_base_t_marker_s[:,2,3].max()*1000-1)
+    pos_3d_plot.set_xlim(np_base_t_marker_s[:,0,3].min()*1000, np_base_t_marker_s[:,0,3].max()*1000)
+    pos_3d_plot.set_ylim(np_base_t_marker_s[:,1,3].min()*1000, np_base_t_marker_s[:,1,3].max()*1000)
+    pos_3d_plot.set_zlim(np_base_t_marker_s[:,2,3].min()*1000, np_base_t_marker_s[:,2,3].max()*1000)
 
     pos_3d_plot.view_init(20,45)
     pos_3d_plot.set_xlabel("x-pos mm")
@@ -200,6 +225,8 @@ if __name__ == "__main__":
     parser.add_argument("--output-folder", type=str, default="my_data", help="Output Folder Location")
     parser.add_argument("--cam-t-gripper-path", type=str, default=None, help="Path to cam_t_gripper.npy file, if left to None will be estimated")
 
+    parser.add_argument("--no-data-gathering", action = "store_false", help = "If used only optimization & evaluation may be done", dest = "gather_data")
+    parser.add_argument("--stabilisation-timeout", type=float, default=0.0, help="Timeout in seconds between robot moved to position and picture is taken")
 
     parser.add_argument("--marker-detection", type = str, default=None, help = "If Aruco / Charuco marker detection should be used, options: `None`(default), `Aruco`, `Charuco`")
     parser.add_argument("--aruco-marker-side-length", type=float, default=0.072, help="Aruco marker side lengths in meters")
@@ -207,8 +234,7 @@ if __name__ == "__main__":
     parser.add_argument("--charuco-square-side-length", type=float, default=0.1, help="Charuco board square side length in meters")
     parser.add_argument("--charuco-board-size", type=int, default=[14,9], nargs=2, help="Size of the charuco board in squares")
 
-    parser.add_argument("--no-data-gathering", action = "store_false", help = "If used only optimization & evaluation may be done", dest = "gather_data")
-    parser.add_argument("--stabilisation-timeout", type=float, default=0.0, help="Timeout in seconds between robot moved to position and picture is taken")
+    parser.add_argument("--pose-outlier-quants", type=float, default=[0.2,0.2], nargs=2, help="The quantiles of base_t_marker estimates to remove 1st arg: translation, 2nd arg: rotation")
 
     parser.add_argument("--no-result-analysation", action = "store_false", help = "If used there wont by any result analysation (pose deviation analysis)", dest = "analyze_results")
     parser.add_argument("--no-pdf-store", action = "store_false", help = "If used the analysis wont be stored into the dataset", dest = "save_analysis_results")
@@ -281,7 +307,8 @@ if __name__ == "__main__":
         rgb_cam_dist_coef=rgb_cam_dist_coef,
         output_folder=args.output_folder,
         gripper_t_cam=cam_t_gripper,
-        marker_detector = marker_detector
+        marker_detector = marker_detector,
+        base_t_gripper_outlier_quantiles=(args.pose_outlier_quants[0], args.pose_outlier_quants[1]),
     )
 
     if args.analyze_results:
