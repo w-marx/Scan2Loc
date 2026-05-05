@@ -7,7 +7,6 @@ import shutil
 
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
-from scipy.spatial.transform import RigidTransform
 
 from aruco_charuco_detection import ArucoCharucoDetector, ArucoDetector, CharucoDetector
 
@@ -138,7 +137,12 @@ def check_output_data(
     camera_t_marker_s = [(np.array(pose["camera_t_marker"]) if pose["camera_t_marker"] is not None else None) for pose in json_files]
 
     base_t_marker_s = [r_t_g @ g_t_c @ c_t_a for r_t_g, g_t_c, c_t_a in zip(base_t_gripper_s, gripper_t_camera_s, camera_t_marker_s) if c_t_a is not None]
-    avg_base_t_marker = RigidTransform.from_matrix(np.array(base_t_marker_s)).mean().as_matrix()
+
+
+    avg_base_t_marker = np.eye(4)
+    if use_mean:
+        from scipy.spatial.transform import RigidTransform
+        avg_base_t_marker = RigidTransform.from_matrix(np.array(base_t_marker_s)).mean().as_matrix()
     median_base_t_marker = compute_pose_pseudo_median(np.array(base_t_marker_s))
 
     actual_base_t_marker = avg_base_t_marker if use_mean else median_base_t_marker
@@ -160,26 +164,31 @@ def check_output_data(
     cor_text = np.char.mod('%7.3f', np.round(np.corrcoef(np.array(base_t_marker_s)[:,:3,3]*1000, rowvar = False), 3))
 
     text = f"""
-{len([p for p in camera_t_marker_s if p is not None])}/{len(camera_t_marker_s)} positions have marker pose estimates\n
+{len([p for p in camera_t_marker_s if p is not None])}/{len(camera_t_marker_s)} positions have marker pose estimates
+
 Avg translational error: {np.round(np.mean(translational_errors_mm), 3)}mm
-Avg rotational error: {np.round(np.mean(rotational_errors_deg), 3)}° \n
-Reference Mat, decided by {"mean" if use_mean else "median" }: \n
-{"\n".join(["│"+"".join(row)+" │" for row in np.char.mod('%7.3f', np.round(actual_base_t_marker, 3))])} \n
-Translation in mm cov & corr matrix:\n
-{"\n".join(["│"+"".join(row1)+" │  │"+" ".join(row2)+" │" for row1, row2 in zip(cov_text, cor_text)])} \n     
+Avg rotational error: {np.round(np.mean(rotational_errors_deg), 3)}°
+Reference Mat, decided by {"mean" if use_mean else "median" }:
+
+{chr(10).join(["│"+"".join(row)+" │" for row in np.char.mod('%7.3f', np.round(actual_base_t_marker, 3))])}
+
+Translation in mm cov & corr matrix:
+
+{chr(10).join(["│"+"".join(row1)+" │  │"+" ".join(row2)+" │" for row1, row2 in zip(cov_text, cor_text)])}
+
     """
     text_plt.text(0.0, 1.0,text, verticalalignment = "top", horizontalalignment = "left", fontfamily='monospace')
 
     # Translational errors
     t_err_plt = fig.add_subplot(gs[3,0:2])
     t_err_plt.hist(translational_errors_mm, bins = np.arange(int(min(translational_errors_mm)), int(max(translational_errors_mm)))+1)
-    t_err_plt.set_xlabel(f"Distance to {"mean" if use_mean else "median" } in mm")
+    t_err_plt.set_xlabel(f"Distance to {'mean' if use_mean else 'median' } in mm")
     t_err_plt.set_ylabel("Frequency")
 
     # Rotational errors
     r_err_plt = fig.add_subplot(gs[3,2:4])
     r_err_plt.hist(rotational_errors_deg, bins = np.arange(int(min(translational_errors_mm)), int(max(translational_errors_mm)+1)))
-    r_err_plt.set_xlabel(f"Rotational distance to {"mean" if use_mean else "median" } in degrees")
+    r_err_plt.set_xlabel(f"Rotational distance to {'mean' if use_mean else 'median' } in degrees")
     r_err_plt.set_ylabel("Frequency")
 
 
