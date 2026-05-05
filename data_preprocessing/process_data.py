@@ -13,11 +13,11 @@ import argparse
 def process_data(
         input_folder: str = "./in_data_vrs",
         output_folder: str = "./out_data",
-        confidence_threshhold: float = 0.1,
-        iforest_confidence_threshhold: float = 0.05,
+        confidence_threshhold: float = 0.0,
+        iforest_confidence_threshhold: float = 0.001,
         visualize_pointcloud: bool = True,
         point_cloud_creation_method:str = "3D points",
-        robot_image_limit:int = 1
+        robot_image_limit:int = 6
     ):
     """
 
@@ -66,13 +66,13 @@ def process_data(
     #### create and Fill Robot folder
     print("Generating point cloud...")
     # Use vggt to create image points
-    robot_imgs_3d_points, robot_imgs_3d_points_conf, robot_extrinsic, robot_intrinsic, robot_imgs_depth, robot_imgs_depth_conf= use_vggt_on_images(np.array(robot_rgb_images[:robot_image_limit]))
+    robot_imgs_3d_points, robot_imgs_3d_points_conf, robot_extrinsic, robot_intrinsic, robot_imgs_depth, robot_imgs_depth_conf= use_vggt_on_images(np.array(robot_rgb_images[40:44]))
 
     point_cloud = create_point_cloud_from_image_points(
         method=point_cloud_creation_method,
         images_points_3d_and_conf=(robot_imgs_3d_points, robot_imgs_3d_points_conf),
         images_depth_maps_and_conf=(robot_imgs_depth, robot_imgs_depth_conf, robot_extrinsic, robot_intrinsic),
-        masks= create_foreground_masks(images=np.array(robot_rgb_images[:robot_image_limit])),
+        #masks= create_foreground_masks(images=np.array(robot_rgb_images[:robot_image_limit])),
         visualize=visualize_pointcloud,
         confidence_quantile=confidence_threshhold,
         iforest_quantile=iforest_confidence_threshhold

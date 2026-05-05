@@ -21,7 +21,17 @@ def use_vggt_on_images(images:np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nd
 
     from vggt.models.vggt import VGGT
     from vggt.utils.pose_enc import pose_encoding_to_extri_intri
-    from vggt.utils.geometry import unproject_depth_map_to_point_map
+
+    import cv2
+
+    resized_images = []
+    for img in images:
+        new_width = int(img.shape[1] * 0.3)
+        new_height = int(img.shape[0] * 0.3)
+        resized = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+        resized_images.append(resized)
+    images = np.array(resized_images)
+
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -38,6 +48,11 @@ def use_vggt_on_images(images:np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nd
     padding_w = (14-orig_w%14)%14
 
     padded_images = np.pad(images, ((0,0),(0,padding_h), (0,padding_w), (0,0)), mode="constant", constant_values=0)
+
+    for idx, image in enumerate(padded_images):
+        cv2.imshow(f"image {idx}",image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
     #transform to image tensor
     image_tensor = torch.from_numpy(padded_images).to(device, dtype=dtype)
@@ -114,6 +129,7 @@ def create_point_cloud_from_image_points(
         points = images_points_3d
 
     if method == "Depth":
+        from vggt.utils.geometry import unproject_depth_map_to_point_map
         print("Generating the 3D Point Cloud by unprojecting the depth map")
         images_depth_maps, images_depth_maps_conf, extrinsic, intrinsic = images_depth_maps_and_conf
         conf_masks = get_confidence_masks(images_depth_maps_conf, confidence_quantile)
@@ -223,3 +239,8 @@ def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> tuple[np.ndarray, np.ndarray, 
     return R, c, t
 
 
+
+def create_point_cloud(
+        images:np.ndarray,
+):
+    pass
