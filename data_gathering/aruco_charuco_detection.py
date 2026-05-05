@@ -24,7 +24,7 @@ class ArucoCharucoDetector:
         :param distortion_coefficients: the distortion coefficients of the camera
         :return: list of 4x4 homogeneous matrices
         """
-        pass
+        raise Exception("ArucoCharucoDetector is no concrete class - pose estimation function not implemented")
 
     def remove_markers(self, images:list[np.ndarray])->list[np.ndarray]:
         """
@@ -32,7 +32,7 @@ class ArucoCharucoDetector:
         :param images: list of WxHx3 RGB images
         :return: list of WxHx3 RGB images without the aruco markers
         """
-        pass
+        raise Exception("ArucoCharucoDetector is no concrete class - marker removal function not implemented")
 
     def get_meta_data(self):
         """
@@ -99,16 +99,11 @@ class ArucoDetector(ArucoCharucoDetector):
         return masked_images
 
     def get_meta_data(self):
-        """
-        Returns some metadata about the detection process
-        """
         return {
             "Aruco/Charuco Type":"Aruco",
             "Aruco marker side length": self.aruco_marker_side_length,
             "Aruco dictionary": f"{self.aruco_marker_dictionary.bytesList.shape[1]}X{self.aruco_marker_dictionary.bytesList.shape[1]}_{self.aruco_marker_dictionary.bytesList.shape[0]}",
         }
-
-    
 
 
 class CharucoDetector(ArucoCharucoDetector):
@@ -121,6 +116,8 @@ class CharucoDetector(ArucoCharucoDetector):
             min_fraction_of_markers:float = 1.0
     ):
         super().__init__()
+        self.square_size = square_size
+        self.marker_size = marker_size
         self.board = cv2.aruco.CharucoBoard(board_size, square_size, marker_size, aruco_dictionary)
         self.min_number_of_markers = min_fraction_of_markers * (board_size[0] * board_size[1]) * 0.5
 
@@ -196,11 +193,43 @@ class CharucoDetector(ArucoCharucoDetector):
 
         return camera_t_charuco_s
 
+    def remove_markers(self, images:list[np.ndarray])->list[np.ndarray]:
+
+        edited_images = []
+
+        for image in images:
+            charuco_corners, charuco_ids, marker_corners, marker_ids = self.detector.detectBoard(image)
+
+            marker_squares = []
+            for marker in marker_corners:
+                marker = marker[0]
+                marker_avg = np.mean(marker, axis=0)
+                marker_square = marker_avg+((marker-marker_avg)*self.square_size/self.marker_size)*2
+                marker_squares.append(marker_square)
+            marker_square_points = np.vstack(marker_squares)
+
+            from scipy.spatial import ConvexHull
+            hull = ConvexHull(marker_square_points)
+            hull_points = marker_square_points[hull.vertices]
+
+            img_copy = image.copy()
+            cv2.fillPoly(img_copy, [hull_points.astype(np.int32)], color=(0, 0, 0))
+
+            edited_images.append(img_copy)
+        return edited_images
+
     def get_meta_data(self):
-        """
-        Returns some metadata about the detection process
-        """
         return self.metadata
+
+if __name__ == "__main__":
+    import os
+    image_folder = "../datasets/charuco1/robot"
+    if not os.path.exists(image_folder):
+        Exception("Folder {image_folder} does not exist")
+    image_paths = [f"{image_folder}/{folder}/rgb.png" for folder in os.listdir(image_folder)]
+    images = [cv2.imread(name) for name in image_paths]
+    charuco_detector = CharucoDetector()
+    charuco_detector.remove_markers(images)
 
 
 def build_aruco_charuco_detector(metadata_dict:dict)->ArucoCharucoDetector:
@@ -210,6 +239,7 @@ def build_aruco_charuco_detector(metadata_dict:dict)->ArucoCharucoDetector:
     :return:
     """
     dictionary_options = {
+        "4X4_250": cv2.aruco.DICT_4X4_250,
         "5X5_100": cv2.aruco.DICT_5X5_100,
         "5X5_250": cv2.aruco.DICT_5X5_250,
         "6X6_250": cv2.aruco.DICT_6X6_250,

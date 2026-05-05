@@ -11,9 +11,7 @@ from scipy.spatial.transform import RigidTransform
 
 from aruco_charuco_detection import ArucoCharucoDetector, ArucoDetector, CharucoDetector
 
-calc_translat_difference = lambda x, y: np.linalg.norm(x - y)
 calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2)
-calc_sum_difference = lambda x, y: calc_translat_difference(x[:3, 3], y[:3, 3])*1000 + calc_rotational_difference(x, y)*180/np.pi
 
 def compute_pose_pseudo_median(poses:list[np.ndarray])->np.ndarray:
     """
@@ -146,7 +144,7 @@ def check_output_data(
     actual_base_t_marker = avg_base_t_marker if use_mean else median_base_t_marker
 
 
-    translational_errors_mm = [calc_translat_difference(b_t_a[:3,3],actual_base_t_marker[:3,3])*1000 for b_t_a in base_t_marker_s]
+    translational_errors_mm = [np.linalg.norm(b_t_a[:3,3]-actual_base_t_marker[:3,3])*1000 for b_t_a in base_t_marker_s]
     rotational_errors_deg = [calc_rotational_difference(b_t_a[:3,:3], actual_base_t_marker[:3,:3])*360 for b_t_a in base_t_marker_s]
 
     # plot results:
@@ -214,6 +212,7 @@ Translation in mm cov & corr matrix:\n
 
 if __name__ == "__main__":
     dictionary_options = {
+        "4X4_250": cv2.aruco.DICT_4X4_250,
         "5X5_100": cv2.aruco.DICT_5X5_100,
         "5X5_250": cv2.aruco.DICT_5X5_250,
         "6X6_250": cv2.aruco.DICT_6X6_250,
