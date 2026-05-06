@@ -241,6 +241,89 @@ def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> tuple[np.ndarray, np.ndarray, 
 
 
 def create_point_cloud(
-        images:np.ndarray,
+        rgb_images:np.ndarray,
+        base_t_cam_s: np.ndarray,
+        depth_images:np.ndarray | None = None,
+        camera_intrinsics:np.ndarray | None = None,
+        confidence_threshhold_percent:int = 10,
+        image_masks:np.ndarray | None = None,
+
 ):
-    pass
+    import os
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+    from mapanything.models import Mapanything
+    from mapanything.utils.image import preprocess_inputs
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = MapAnything.from_pretrained("facebook/map-anything").to(device)
+
+    views = []
+    for image, base_t_cam in zip(rgb_images, base_t_cam_s):
+        views.append({
+            "img":image,
+        #    "camera_poses":base_t_cam,
+        })
+
+    if camera_intrinsics is not None:
+        for view in views:
+            view.update({'intrinsics': camera_intrinsics})
+
+    if depth_images is not None:
+        for view, depth_image in zip(views, depth_images):
+            view.update({
+                'depth_z': depth_image,
+                'is_metric_scale': torch.tensor([True], device=device),
+            })
+
+    print(f"created mapanything dictionary: {views}")
+
+    processed_views = preprocess_inputs(views)
+    predictions = model.infer(
+        processed_views,
+        memory_efficient_inference=True,
+        minibatch_size = None,
+        use_amp = True,
+        amp_dtype = "bf16",
+        apply_mask=True,                  # Apply masking to dense geometry outputs
+        mask_edges=True,                  # Remove edge artifacts by using normals and depth
+        apply_confidence_mask=False,      # Filter low-confidence regions
+        confidence_percentile=confidence_threshhold_percent,         # Remove bottom 10 percentile confidence pixels
+        use_multiview_confidence=False,
+        ignore_calibration_inputs=False,
+        ignore_depth_inputs=False,
+        ignore_pose_inputs=False,
+        ignore_depth_scale_inputs=False,
+        ignore_pose_scale_inputs=False,
+    )
+
+    world_points = predictions['pts3d'].cpu().numpy()
+    print(f"world points shape: {world_points.shape}")
+
+    camera_points = predictions['pts3d_cam'].cpu().numpy()
+    print(f"camera points shape: {camera_points.shape}")
+
+
+    world_points_masked = world_points.copy().reshape(-1, 3)
+
+    if image_masks is not None:
+        world_points_masked = world_points_masked[image_masks.reshape(-1)]
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(world_points_masked)
+
+
+    if True:
+        o3d.visualization.draw_geometries([pcd], window_name = "visualization")
+    return pcd
+
+
+
+
+
+
+
+
+
+
+
