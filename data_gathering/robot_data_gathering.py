@@ -45,6 +45,7 @@ def optimize_robot_data(
     │       ├──  A rgb.png image
     │       ├──  A poses.json file
     │       └──  A depth.npy file
+    ├── cam_t_gripper.npy
     └── robot_cam_calibration.json
 
     :param rgb_images: list of WxHx3-uint8 rgb images
@@ -87,18 +88,20 @@ def optimize_robot_data(
     # Remove camera_t_marker estimates that lead to outliers
     b_t_m_s = [b_t_g @ gripper_t_cam @ c_t_m for b_t_g, c_t_m in zip(base_t_gripper_s, camera_t_marker_s) if
                c_t_m is not None]
-    base_t_marker_median = compute_pose_pseudo_median(b_t_m_s)
+    
+    if len(b_t_m_s) > 1:
+        base_t_marker_median = compute_pose_pseudo_median(b_t_m_s)
 
-    t_err_quant = np.quantile([np.linalg.norm(b_t_m[:3,3]-base_t_marker_median[:3,3]) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[0])
-    r_err_quant = np.quantile([calc_rotational_difference(b_t_m, base_t_marker_median) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[1])
+        t_err_quant = np.quantile([np.linalg.norm(b_t_m[:3,3]-base_t_marker_median[:3,3]) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[0])
+        r_err_quant = np.quantile([calc_rotational_difference(b_t_m, base_t_marker_median) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[1])
 
-    for idx, (b_t_g, c_t_m) in enumerate(zip(base_t_gripper_s, camera_t_marker_s)):
-        not_None:bool = c_t_m is not None
-        low_t_err:bool = not_None and np.linalg.norm((b_t_g @ gripper_t_cam @ c_t_m)[:3,3] - base_t_marker_median[:3,3]) <= t_err_quant
-        low_r_err:bool = not_None and calc_rotational_difference(b_t_g @ gripper_t_cam @ c_t_m, base_t_marker_median) <= r_err_quant
+        for idx, (b_t_g, c_t_m) in enumerate(zip(base_t_gripper_s, camera_t_marker_s)):
+            not_None:bool = c_t_m is not None
+            low_t_err:bool = not_None and np.linalg.norm((b_t_g @ gripper_t_cam @ c_t_m)[:3,3] - base_t_marker_median[:3,3]) <= t_err_quant
+            low_r_err:bool = not_None and calc_rotational_difference(b_t_g @ gripper_t_cam @ c_t_m, base_t_marker_median) <= r_err_quant
 
-        if not low_t_err or not low_r_err:
-            camera_t_marker_s[idx] = None
+            if not low_t_err or not low_r_err:
+                camera_t_marker_s[idx] = None
 
 
     for i, (rgb_image, base_t_gripper) in enumerate(zip(rgb_images, base_t_gripper_s)):
@@ -112,6 +115,10 @@ def optimize_robot_data(
         }
         with open(f"{output_folder}/robot/{i:06d}/poses.json", 'w') as f:
             json.dump(pose_dict, f, indent=4)
+    
+    np.save(f"{output_folder}/gripper_t_cam.npy", gripper_t_cam)
+    
+
 
 
 def check_output_data(
@@ -138,6 +145,8 @@ def check_output_data(
 
     base_t_marker_s = [r_t_g @ g_t_c @ c_t_a for r_t_g, g_t_c, c_t_a in zip(base_t_gripper_s, gripper_t_camera_s, camera_t_marker_s) if c_t_a is not None]
 
+    if len(base_t_marker_s) < 1:
+        return
 
     avg_base_t_marker = np.eye(4)
     if use_mean:
@@ -231,9 +240,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-folder", type=str, default="my_data", help="Output Folder Location")
-    parser.add_argument("--cam-t-gripper-path", type=str, default=None, help="Path to cam_t_gripper.npy file, if left to None will be estimated")
+    parser.add_argument("--gripper-t-cam-path", type=str, default=None, help="Path to gripper_t_cam.npy file, if left to None will be estimated")
 
     parser.add_argument("--no-data-gathering", action = "store_false", help = "If used only optimization & evaluation may be done", dest = "gather_data")
+    parser.add_argument("--max-number-positions", type=int, default=None, help="Maximum number of positions to gather data by the robot")
+
     parser.add_argument("--stabilisation-timeout", type=float, default=0.0, help="Timeout in seconds between robot moved to position and picture is taken")
 
     parser.add_argument("--marker-detection", type = str, default=None, help = "If Aruco / Charuco marker detection should be used, options: `None`(default), `Aruco`, `Charuco`")
@@ -253,10 +264,10 @@ if __name__ == "__main__":
 
     print(f"Saving/loading data from: {os.path.abspath(args.output_folder)}")
 
-    cam_t_gripper = None
-    if args.cam_t_gripper_path is not None and os.path.exists(args.cam_t_gripper_path):
-        cam_t_gripper = np.load(args.cam_t_gripper_path)
-        print(f"Using precomputed cam_t_gripper: \n {np.round(cam_t_gripper, 3)} \n from {args.cam_t_gripper_path}")
+    gripper_t_cam = None
+    if args.gripper_t_cam_path is not None and os.path.exists(args.gripper_t_cam_path):
+        gripper_t_cam = np.load(args.gripper_t_cam_path)
+        print(f"Using precomputed cam_t_gripper: \n {np.round(gripper_t_cam, 3)} \n from {args.gripper_t_cam_path}")
 
 
     rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = None, None, None, None
@@ -267,7 +278,7 @@ if __name__ == "__main__":
             shutil.rmtree(f"{args.output_folder}")
 
         from robot_interface import gather_robot_data
-        rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = gather_robot_data(output_folder=args.output_folder)
+        rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = gather_robot_data(output_folder=args.output_folder, number_of_positions = args.max_number_positions)
     else:
         if not os.path.exists(f"{args.output_folder}"):
             raise FileNotFoundError(f"{args.output_folder} does not exist")
@@ -293,19 +304,22 @@ if __name__ == "__main__":
     if args.marker_detection is not None and args.marker_detection == "Aruco":
         marker_detector = ArucoDetector(
             aruco_marker_side_length=args.aruco_marker_side_length,
-            aruco_marker_dictionary=cv2.aruco.getPredefinedDictionary(dictionary_options[args.aruco_marker_dictionary])
+            aruco_marker_dictionary=args.aruco_marker_dictionary
         )
     if args.marker_detection is not None and args.marker_detection == "Charuco":
         marker_detector = CharucoDetector(
             board_size=(args.charuco_board_size[0], args.charuco_board_size[1]),
             square_size=args.charuco_square_side_length,
             marker_size=args.aruco_marker_side_length,
-            aruco_dictionary=cv2.aruco.getPredefinedDictionary(dictionary_options[args.aruco_marker_dictionary])
+            aruco_dictionary=args.aruco_marker_dictionary
         )
     
     if marker_detector is not None:
         with open(f"{args.output_folder}/metadata.json", 'w') as f:
             json.dump(marker_detector.get_meta_data(), f, indent=4)
+    else:
+        with open(f"{args.output_folder}/metadata.json", 'w') as f:
+            json.dump({"Aruco/Charuco Type":None}, f, indent=4)
 
 
     optimize_robot_data(
@@ -314,7 +328,7 @@ if __name__ == "__main__":
         rgb_cam_mat=rgb_cam_mat,
         rgb_cam_dist_coef=rgb_cam_dist_coef,
         output_folder=args.output_folder,
-        gripper_t_cam=cam_t_gripper,
+        gripper_t_cam=gripper_t_cam,
         marker_detector = marker_detector,
         base_t_gripper_outlier_quantiles=(args.pose_outlier_quants[0], args.pose_outlier_quants[1]),
     )
