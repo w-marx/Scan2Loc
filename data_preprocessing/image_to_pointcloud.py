@@ -249,6 +249,23 @@ def create_point_cloud(
         image_masks:np.ndarray | None = None,
 
 ):
+    """
+    :param rgb_images: A NxHxWx3-uint8/float32 numpy array of RGB images
+    :param base_t_cam_s: A Nx4x4-float numpy array of base_t_cam homogeneous transformation matrices
+    :param depth_images: A NxHxW-float numpy array of depth images or None
+    :param camera_intrinsics: A 3x3-float numpy-matrix of the camera intrinsics
+    :param confidence_threshhold_percent: Percentage of low confidence points to be removed (between 0 and 100)
+    :param image_masks: A NxHxW-bool numpy array of masks
+    """
+
+    # Check for valid input:
+    assert rgb_images.shape[0] == base_t_cam_s.shape[0] , f"Number of rgb images and poses dont match: {rgb_images.shape}, {base_t_cam_s.shape}"
+    assert depth_images is None or depth_images.shape[:3] == rgb_images.shape[:3], f"RGB: {rgb_images.shape}, Depth: {depth_images.shape} image dims dont match"
+    assert image_masks is None or image_masks.shape[:3] == rgb_images.shape[:3], f"Mask {image_masks.shape} and Images {rgb_images.shape} dims dont match"
+    assert camera_intrinsics is None or camera_intrinsics.shape == (3,3), f"Camera intrinsics shape is not 3x3: {camera_intrinsics.shape}"
+    assert 0 <= confidence_threshhold_percent <= 100, f"confidence_threshhold_percent should be between 0 and 100 is {confidence_threshhold_percent}"
+
+
     import os
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -257,6 +274,9 @@ def create_point_cloud(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = MapAnything.from_pretrained("facebook/map-anything").to(device)
+
+    if rgb_images.dtype == np.uint8:
+        rgb_images = rgb_images.astype(np.float32)/255.0
 
     views = []
     for image, base_t_cam in zip(rgb_images, base_t_cam_s):
