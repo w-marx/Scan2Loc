@@ -2,6 +2,15 @@ import numpy as np
 import cv2
 
 
+DICTIONARY_OPTIONS = {
+    "4X4_250": cv2.aruco.DICT_4X4_250,
+    "5X5_100": cv2.aruco.DICT_5X5_100,
+    "5X5_250": cv2.aruco.DICT_5X5_250,
+    "6X6_250": cv2.aruco.DICT_6X6_250,
+    "7X7_250": cv2.aruco.DICT_7X7_250,
+    "7X7_1000": cv2.aruco.DICT_7X7_1000,
+}
+
 def assemble_homogeneous_matrix(rvec:np.ndarray, tvec:np.ndarray) -> np.ndarray:
     """
     Takes an rotation and translation vector and returns the homogeneous transformation matrix
@@ -44,11 +53,17 @@ class ArucoDetector(ArucoCharucoDetector):
     def __init__(
             self,
             aruco_marker_side_length:float,
-            aruco_marker_dictionary,
+            aruco_marker_dictionary:str = "5X5_250",
     ):
         super().__init__()
+        self.meta_data = {
+            "Aruco/Charuco Type":"Aruco",
+            "Aruco marker side length": aruco_marker_side_length,
+            "Aruco dictionary": aruco_marker_dictionary,
+        }
+
         self.aruco_marker_side_length = aruco_marker_side_length
-        self.aruco_marker_dictionary = aruco_marker_dictionary
+        self.aruco_marker_dictionary = cv2.aruco.getPredefinedDictionary(DICTIONARY_OPTIONS[aruco_marker_dictionary])
         detector_params = cv2.aruco.DetectorParameters()
         detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.detector = cv2.aruco.ArucoDetector(self.aruco_marker_dictionary, detector_params)
@@ -99,11 +114,7 @@ class ArucoDetector(ArucoCharucoDetector):
         return masked_images
 
     def get_meta_data(self):
-        return {
-            "Aruco/Charuco Type":"Aruco",
-            "Aruco marker side length": self.aruco_marker_side_length,
-            "Aruco dictionary": f"{self.aruco_marker_dictionary.bytesList.shape[1]}X{self.aruco_marker_dictionary.bytesList.shape[1]}_{self.aruco_marker_dictionary.bytesList.shape[0]}",
-        }
+        return self.meta_data
 
 
 class CharucoDetector(ArucoCharucoDetector):
@@ -112,13 +123,13 @@ class CharucoDetector(ArucoCharucoDetector):
             board_size:tuple[int,int] = (14, 9),
             square_size:float = 0.0188,
             marker_size:float = 0.0146,
-            aruco_dictionary= cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_250),
+            aruco_dictionary:str = "5X5_250",
             min_fraction_of_markers:float = 1.0
     ):
         super().__init__()
         self.square_size = square_size
         self.marker_size = marker_size
-        self.board = cv2.aruco.CharucoBoard(board_size, square_size, marker_size, aruco_dictionary)
+        self.board = cv2.aruco.CharucoBoard(board_size, square_size, marker_size, cv2.aruco.getPredefinedDictionary(DICTIONARY_OPTIONS[aruco_dictionary]))
         self.min_number_of_markers = min_fraction_of_markers * (board_size[0] * board_size[1]) * 0.5
 
         detector_params = cv2.aruco.DetectorParameters()
@@ -130,8 +141,9 @@ class CharucoDetector(ArucoCharucoDetector):
             "Aruco/Charuco Type":"Charuco",
             "Aruco marker side length": marker_size,
             "Charuco square size": square_size,
-            "Aruco dictionary": f"{aruco_dictionary.bytesList.shape[1]}X{aruco_dictionary.bytesList.shape[1]}_{aruco_dictionary.bytesList.shape[0]}",
-            "Min fraction of markers": min_fraction_of_markers
+            "Aruco dictionary": aruco_dictionary,
+            "Min fraction of markers": min_fraction_of_markers,
+            "Charuco board size": [board_size[0], board_size[1]]
         }
 
 
@@ -238,26 +250,18 @@ def build_aruco_charuco_detector(metadata_dict:dict)->ArucoCharucoDetector:
     :param metadata_dict:
     :return:
     """
-    dictionary_options = {
-        "4X4_250": cv2.aruco.DICT_4X4_250,
-        "5X5_100": cv2.aruco.DICT_5X5_100,
-        "5X5_250": cv2.aruco.DICT_5X5_250,
-        "6X6_250": cv2.aruco.DICT_6X6_250,
-        "7X7_250": cv2.aruco.DICT_7X7_250,
-        "7X7_1000": cv2.aruco.DICT_7X7_1000,
-    }
 
     if metadata_dict["Aruco/Charuco Type"] == "Aruco":
         return ArucoDetector(
             aruco_marker_side_length=metadata_dict["Aruco marker side length"],
-            aruco_marker_dictionary=cv2.aruco.getPredefinedDictionary(dictionary_options[metadata_dict["Aruco dictionary"]])
+            aruco_marker_dictionary=metadata_dict["Aruco dictionary"]
         )
     elif metadata_dict["Aruco/Charuco Type"] == "Charuco":
         return CharucoDetector(
-            board_size=(metadata_dict["Charuco board size"], metadata_dict["Charuco board size"]),
+            board_size=(metadata_dict["Charuco board size"][0], metadata_dict["Charuco board size"][1]),
             square_size=metadata_dict["Charuco square size"],
             marker_size=metadata_dict["Aruco marker side length"],
-            aruco_dictionary=cv2.aruco.getPredefinedDictionary(dictionary_options[metadata_dict["Aruco dictionary"]]),
+            aruco_dictionary=metadata_dict["Aruco dictionary"],
             min_fraction_of_markers=metadata_dict["Min fraction of markers"]
         )
     else:
