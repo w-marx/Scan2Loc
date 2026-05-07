@@ -157,8 +157,8 @@ def create_foreground_masks(images:np.ndarray) -> np.ndarray:
     :return: NxWxH boolean numpy array of the masks
     """
 
-    from sam3.model_builder import build_sam3_image_model
-    from sam3.model.sam3_image_processor import Sam3Processor
+    from sam3.sam3.model_builder import build_sam3_image_model
+    from sam3.sam3.model.sam3_image_processor import Sam3Processor
 
     masks = []
     model = build_sam3_image_model()
@@ -246,22 +246,21 @@ def create_point_cloud(
         depth_images:np.ndarray | None = None,
         camera_intrinsics:np.ndarray | None = None,
         confidence_threshhold_percent:int = 10,
-        image_masks:np.ndarray | None = None,
+        image_mask_generator:None = None,
 
-):
+)-> tuple[list[np.ndarray], list[np.ndarray], np.ndarray]:
     """
     :param rgb_images: A NxHxWx3-uint8/float32 numpy array of RGB images
     :param base_t_cam_s: A Nx4x4-float numpy array of base_t_cam homogeneous transformation matrices
     :param depth_images: A NxHxW-float numpy array of depth images or None
     :param camera_intrinsics: A 3x3-float numpy-matrix of the camera intrinsics
     :param confidence_threshhold_percent: Percentage of low confidence points to be removed (between 0 and 100)
-    :param image_masks: A NxHxW-bool numpy array of masks
+    :param image_mask_generator: A Funcion that takes a NxHxW-uint8 image array and returns a NxHxW-bool numpy array of masks
     """
 
     # Check for valid input:
     assert rgb_images.shape[0] == base_t_cam_s.shape[0] , f"Number of rgb images and poses dont match: {rgb_images.shape}, {base_t_cam_s.shape}"
-    assert depth_images is None or depth_images.shape[:3] == rgb_images.shape[:3], f"RGB: {rgb_images.shape}, Depth: {depth_images.shape} image dims dont match"
-    assert image_masks is None or image_masks.shape[:3] == rgb_images.shape[:3], f"Mask {image_masks.shape} and Images {rgb_images.shape} dims dont match"
+    assert depth_images is None or depth_images.shape[:3] == rgb_images.shape[:3], f"RGB: {rgb_images.shape}, Depth: {depth_images.shape} image dims dont match"    
     assert camera_intrinsics is None or camera_intrinsics.shape == (3,3), f"Camera intrinsics shape is not 3x3: {camera_intrinsics.shape}"
     assert 0 <= confidence_threshhold_percent <= 100, f"confidence_threshhold_percent should be between 0 and 100 is {confidence_threshhold_percent}"
 
@@ -269,8 +268,9 @@ def create_point_cloud(
     import os
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    from mapanything.models import Mapanything
+    from mapanything.models import MapAnything
     from mapanything.utils.image import preprocess_inputs
+    from mapanything.utils.image import rgb
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = MapAnything.from_pretrained("facebook/map-anything").to(device)
@@ -279,6 +279,7 @@ def create_point_cloud(
         rgb_images = rgb_images.astype(np.float32)/255.0
 
     views = []
+    import cv2
     for image, base_t_cam in zip(rgb_images, base_t_cam_s):
         views.append({
             "img":image,
@@ -296,9 +297,22 @@ def create_point_cloud(
                 'is_metric_scale': torch.tensor([True], device=device),
             })
 
-    print(f"created mapanything dictionary: {views}")
-
     processed_views = preprocess_inputs(views)
+
+
+    rgb_images = [rgb(view['img'], view['data_norm_type'][0])[0] for view in processed_views]
+
+    import matplotlib.pyplot as plt
+    for idx, image in enumerate(rgb_images):
+        plt.figure(figsize=(10, 10))
+        plt.imshow(image)
+        plt.title(f"image {idx}")
+        plt.show()
+
+    print(len(processed_views))
+    for view in processed_views:
+        print(view)
+
     predictions = model.infer(
         processed_views,
         memory_efficient_inference=True,
@@ -317,25 +331,22 @@ def create_point_cloud(
         ignore_pose_scale_inputs=False,
     )
 
-    world_points = predictions['pts3d'].cpu().numpy()
-    print(f"world points shape: {world_points.shape}")
 
-    camera_points = predictions['pts3d_cam'].cpu().numpy()
-    print(f"camera points shape: {camera_points.shape}")
+    world_xyz_images = [view['pts3d'].cpu().numpy() for view in predictions]
+    camera_points_for_views = [view['pts3d_cam'].cpu().numpy() for view in predictions]
 
+    all_world_points = np.array(world_xyz_images).reshape(-1, 3)
 
-    world_points_masked = world_points.copy().reshape(-1, 3)
+    if image_mask_generator is not None:
+        all_world_points = all_world_points[image_mask_generator(np.array(rgb_images)).reshape(-1)]
 
-    if image_masks is not None:
-        world_points_masked = world_points_masked[image_masks.reshape(-1)]
-
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(world_points_masked)
-
+    pointcloud = o3d.geometry.PointCloud()
+    pointcloud.points = o3d.utility.Vector3dVector(all_world_points)
 
     if True:
-        o3d.visualization.draw_geometries([pcd], window_name = "visualization")
-    return pcd
+        o3d.visualization.draw_geometries([pointcloud], window_name = "visualization")
+    
+    return rgb_images, world_xyz_images, pointcloud
 
 
 

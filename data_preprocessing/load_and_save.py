@@ -100,7 +100,10 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
     }
     """
 
-    headset_images, headset_mtx = vrs_to_images_intrinsic(f"{input_folder}/headset.vrs")
+    vrs_files = [file for file in os.listdir(f"{input_folder}") if file.endswith('.vrs')]
+    if len(vrs_files) > 1:
+        print(f"Found multiple .vrs files, using {vrs_files[0]}")
+    headset_images, headset_mtx = vrs_to_images_intrinsic(f"{input_folder}/{vrs_files[0]}")
 
     # Load Robot images
     robot_image_names = [f"{folder_name}" for folder_name in os.listdir(f"{input_folder}/robot")]

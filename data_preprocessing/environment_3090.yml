@@ -8,25 +8,27 @@ dependencies:
   - python=3.12
   - pip
   - pip:
-    - --extra-index-url https://download.pytorch.org/whl/cu121
-    - torch==2.7.0
-    - torchvision==0.22.0
-    - numpy==1.26.1
+    - --index-url https://download.pytorch.org/whl/cu121
+    - --extra-index-url https://pypi.org/simple
+    - torch==2.5.1
+    - torchvision==0.20.1
+    - numpy>=2
     - Pillow
-    - huggingface_hub==1.8.0
+    - huggingface_hub
     - einops
-    - safetensors==0.7.0
+    - safetensors
     - open3d
     - opencv-python
-    - transformers==5.4.0
-    - setuptools==69.5.1
+    - transformers
+    - setuptools<81
     - psutil
     - matplotlib
     - tqdm
     - pyrealsense2
     - iopath
-    - timm==1.0.26
+    - timm
     - pycocotools
     - ftfy
     - projectaria-tools
     - projectaria_client_sdk
+    - rerun-sdk==0.26.2

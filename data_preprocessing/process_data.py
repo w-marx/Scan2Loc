@@ -65,21 +65,13 @@ def process_data(
 
     #### create and Fill Robot folder
     print("Generating point cloud...")
-    # Use vggt to create image points
-    robot_imgs_3d_points, robot_imgs_3d_points_conf, robot_extrinsic, robot_intrinsic, robot_imgs_depth, robot_imgs_depth_conf= use_vggt_on_images(np.array(robot_rgb_images[40:44]))
-
-    point_cloud = create_point_cloud_from_image_points(
-        method=point_cloud_creation_method,
-        images_points_3d_and_conf=(robot_imgs_3d_points, robot_imgs_3d_points_conf),
-        images_depth_maps_and_conf=(robot_imgs_depth, robot_imgs_depth_conf, robot_extrinsic, robot_intrinsic),
-        #masks= create_foreground_masks(images=np.array(robot_rgb_images[:robot_image_limit])),
-        visualize=visualize_pointcloud,
-        confidence_quantile=confidence_threshhold,
-        iforest_quantile=iforest_confidence_threshhold
+    rgb_images, robot_base_xyz_imgs, point_cloud = create_point_cloud(
+        rgb_images=np.array(robot_rgb_images[40:44]),
+        base_t_cam_s=np.array(robot_base_t_robot_cameras[40:44]),
+        image_mask_generator=lambda x: create_foreground_masks(x)
     )
+    print(f"rgb-images-shape: {rgb_images}, xyz-images-shape: {robot_base_xyz_imgs}")
 
-    print("Adjusting the vggt scale...")
-    #TODO Add support for rescaling the vggt extrinsics
 
     print("Generating the labels...")
     robot_base_t_headsets = [None] * len(robot_rgb_images)
@@ -100,7 +92,7 @@ def process_data(
         robot_image_names=robot_images_names,
         robot_rgb_cam_mtx=robot_rgb_cam_mtx,
         robot_rgb_images=np.array(masked_robot_images),
-        robot_xyz_images=robot_imgs_3d_points,
+        robot_xyz_images=robot_base_xyz_imgs,
         point_cloud = point_cloud,
         robot_base_t_robot_cameras = robot_base_t_robot_cameras,
         robot_base_t_headsets = robot_base_t_headsets,
@@ -114,9 +106,6 @@ if __name__ == "__main__":
     parser.add_argument("--output-folder", type=str, default="./out_data", help="Output Folder Location")
     parser.add_argument("--confidence-threshhold", type=float, default=0.1, help="Confidence threshold for points in the 3D point cloud")
     parser.add_argument("--visualize-pointcloud", type=bool, default=True, help="If the point cloud is to be visualized in a window")
-    parser.add_argument("--calibration-board-size", type=tuple[int, int], default=(9,6), help="Calibration Board size in meters")
-    parser.add_argument("--calibration-board-square-size", type=float, default=0.03, help="Calibration Board square size in meters")
-    parser.add_argument("--aruco-marker-size", type=float, default=0.1, help="Aruco marker size in meters")
 
     args = parser.parse_args()
 
