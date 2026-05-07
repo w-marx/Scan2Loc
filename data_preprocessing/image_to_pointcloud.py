@@ -8,16 +8,6 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from sklearn.ensemble import IsolationForest
 
-
-def get_confidence_masks(confidences:np.ndarray, quantile:float = 0.1) -> np.ndarray:
-    """
-    :param confidences: An array of the form N x H x W - float
-    :param quantile: The quantile of pixels with low confidences to disregard
-    :return: An array of the form N x H x W - boolean
-    """
-    confidence_threshhold = np.quantile(confidences, quantile)
-    return np.where(confidences > confidence_threshhold, True, False)
-
 def create_foreground_masks(
         images:np.ndarray,
         threshhold:float = 0.5,
@@ -79,6 +69,12 @@ def remove_outliers_from_point_cloud(points:np.ndarray, contamination:float = 0.
     :param points: A Nx3-float numpy array of x,y,z points
     :return: A Mx3-float numpy array of x,y,z points with M <= N
     """
+    assert 0 <= contamination <= 1.0
+    if contamination == 0:
+        return points
+    if contamination == 1.0:
+        return np.empty((0,3))
+
     forest = IsolationForest(contamination=contamination)
     forest.fit(points)
     prediction = forest.predict(points)
@@ -138,16 +134,16 @@ def create_point_cloud(
         base_t_cam_s: np.ndarray,
         depth_images:np.ndarray | None = None,
         camera_intrinsics:np.ndarray | None = None,
-        confidence_threshhold_percent:int = 10,
+        confidence_threshold_percent:int = 10,
         image_mask_generator:None = None,
-
+        visualize_pointcloud:bool = False,
 )-> tuple[list[np.ndarray], list[np.ndarray], np.ndarray]:
     """
     :param rgb_images: A NxHxWx3-uint8/float32 numpy array of RGB images
     :param base_t_cam_s: A Nx4x4-float numpy array of base_t_cam homogeneous transformation matrices
     :param depth_images: A NxHxW-float numpy array of depth images or None
     :param camera_intrinsics: A 3x3-float numpy-matrix of the camera intrinsics
-    :param confidence_threshhold_percent: Percentage of low confidence points to be removed (between 0 and 100)
+    :param confidence_threshold_percent: Percentage of low confidence points to be removed (between 0 and 100)
     :param image_mask_generator: A Funcion that takes a NxHxW-uint8 image array and returns a NxHxW-bool numpy array of masks
     """
 
@@ -155,7 +151,7 @@ def create_point_cloud(
     assert rgb_images.shape[0] == base_t_cam_s.shape[0] , f"Number of rgb images and poses dont match: {rgb_images.shape}, {base_t_cam_s.shape}"
     assert depth_images is None or depth_images.shape[:3] == rgb_images.shape[:3], f"RGB: {rgb_images.shape}, Depth: {depth_images.shape} image dims dont match"    
     assert camera_intrinsics is None or camera_intrinsics.shape == (3,3), f"Camera intrinsics shape is not 3x3: {camera_intrinsics.shape}"
-    assert 0 <= confidence_threshhold_percent <= 100, f"confidence_threshhold_percent should be between 0 and 100 is {confidence_threshhold_percent}"
+    assert 0 <= confidence_threshold_percent <= 100, f"confidence_threshhold_percent should be between 0 and 100 is {confidence_threshold_percent}"
 
 
     import os
@@ -204,7 +200,7 @@ def create_point_cloud(
         apply_mask=True,
         mask_edges=True,
         apply_confidence_mask=False,
-        confidence_percentile=confidence_threshhold_percent,
+        confidence_percentile=confidence_threshold_percent,
         use_multiview_confidence=False,
         ignore_calibration_inputs=False,
         ignore_depth_inputs=False,
@@ -225,7 +221,8 @@ def create_point_cloud(
     pointcloud = o3d.geometry.PointCloud()
     pointcloud.points = o3d.utility.Vector3dVector(all_world_points)
 
-    if True:
-        o3d.visualization.draw_geometries([pointcloud], window_name = "visualization")
-    
-    return rgb_images, world_xyz_images, pointcloud
+    if visualize_pointcloud:
+        o3d.visualization.draw_geometries([pointcloud], window_name = "3D Point cloud visualization")
+
+
+    return rgb_images, world_xyz_images, np.asanyarray(pointcloud.points)
