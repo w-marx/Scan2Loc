@@ -83,7 +83,7 @@ def process_data(
 
 
     # Choose the robot images smartly
-    robot_image_indices_w_base_t_marker = [idx for idx, _ in robot_camera_t_marker_s if robot_base_t_robot_camera_s is not None]
+    robot_image_indices_w_base_t_marker = [idx for idx, _ in enumerate(robot_camera_t_marker_s) if robot_base_t_robot_camera_s is not None]
 
     chosen_indices = [idx for idx, _ in enumerate(robot_rgb_images)]
 
@@ -111,7 +111,7 @@ def process_data(
         confidence_threshold_percent=est3d_xyz_img_confidence_threshold,
         image_mask_generator=lambda imgs: create_foreground_masks(
             images=imgs,
-            threshhold=est3d_pointcloud_foreground_object_detection_threshold,
+            threshold=est3d_pointcloud_foreground_object_detection_threshold,
             mask_threshold = est3d_pointcloud_foreground_masks_conf_threshold,
             visualize_masks=est3d_debug_visualize_foreground_masks
         ),
@@ -133,6 +133,8 @@ def process_data(
 
 
     print("Saving the data...")
+    pointcloud = o3d.geometry.PointCloud()
+    pointcloud.points = o3d.utility.Vector3dVector(point_cloud)
     save_output_data(
         output_folder=output_folder,
         headset_image=headset_image,
@@ -141,7 +143,7 @@ def process_data(
         robot_rgb_cam_mtx=robot_rgb_cam_mtx,
         robot_rgb_images=np.array(robot_rgb_images),
         robot_xyz_images=robot_base_xyz_imgs,
-        point_cloud = point_cloud,
+        point_cloud = pointcloud,
         robot_base_t_robot_cameras = robot_base_t_robot_camera_s,
         robot_base_t_headsets = robot_base_t_headsets,
     )

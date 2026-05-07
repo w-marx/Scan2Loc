@@ -10,8 +10,8 @@ from sklearn.ensemble import IsolationForest
 
 def create_foreground_masks(
         images:np.ndarray,
-        threshhold:float = 0.5,
-        mask_threshhold:float = 0.5,
+        threshold:float = 0.5,
+        mask_threshold:float = 0.5,
         visualize_masks:bool = False
     ) -> np.ndarray:
     """
@@ -41,8 +41,8 @@ def create_foreground_masks(
         
         results = processor.post_process_instance_segmentation(
             outputs,
-            threshold=threshhold,
-            mask_threshold=mask_threshhold,
+            threshold=threshold,
+            mask_threshold=mask_threshold,
             target_sizes=inputs.get("original_sizes").tolist()
         )[0]
 
@@ -177,12 +177,12 @@ def create_point_cloud(
 
     if camera_intrinsics is not None:
         for view in views:
-            view.update({'intrinsics': camera_intrinsics})
+            view.update({'intrinsics': camera_intrinsics.astype(np.float32)})
 
     if depth_images is not None:
         for view, depth_image in zip(views, depth_images):
             view.update({
-                'depth_z': depth_image,
+                'depth_z': depth_image.astype(np.float32),
                 'is_metric_scale': torch.tensor([True], device=device),
             })
 

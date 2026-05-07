@@ -120,8 +120,7 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
         location = f"{input_folder}/robot/{folder}"
 
         robot_rgb_images.append(cv2.cvtColor(cv2.imread(f"{location}/rgb.png"), cv2.COLOR_BGR2RGB))
-        #robot_depth_images.append(np.load(f"{location}/depth.npy"))
-        robot_depth_images.append(None)
+        robot_depth_images.append(np.load(f"{location}/depth.npy"))
 
         poses_dict = json.load(open(f"{location}/poses.json"))
 

@@ -153,3 +153,6 @@ gathered_data_examples
 gathered_data_examples/
 
 map-anything/
+data_preprocessing/sam3.pt
+data_preprocessing/runs
+runs/

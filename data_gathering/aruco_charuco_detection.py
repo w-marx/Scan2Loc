@@ -103,14 +103,12 @@ class ArucoDetector(ArucoCharucoDetector):
         masked_images = []
         for image in images:
             marker_corners, marker_ids, reject_candidates = self.detector.detectMarkers(image)
-            mask = np.full(image.shape[:2], fill_value=True, dtype="bool")
+            image_copy = image.copy()
+            if marker_corners:
+                for corners in marker_corners:
+                    cv2.fillPoly(image_copy, [corners.reshape(4,2).astype(np.int32)], color=(0, 0, 0))
 
-            for polygon in marker_corners:
-                for x in range(len(mask)):
-                    for y in range(len(mask[x])):
-                        mask[x][y] = mask[x][y] and cv2.pointPolygonTest(polygon, (y, x), False) <= 0
-            aruco_mask = np.stack([mask, mask, mask], axis=2)
-            masked_images.append(image * aruco_mask)
+            masked_images.append(image_copy)
         return masked_images
 
     def get_meta_data(self):
@@ -250,7 +248,8 @@ def build_aruco_charuco_detector(metadata_dict:dict)->ArucoCharucoDetector:
     :param metadata_dict:
     :return:
     """
-
+    if metadata_dict["Aruco/Charuco Type"] is None:
+        return None
     if metadata_dict["Aruco/Charuco Type"] == "Aruco":
         return ArucoDetector(
             aruco_marker_side_length=metadata_dict["Aruco marker side length"],
