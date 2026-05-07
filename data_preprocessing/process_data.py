@@ -17,7 +17,7 @@ def process_data(
         iforest_confidence_threshhold: float = 0.001,
         visualize_pointcloud: bool = True,
         point_cloud_creation_method:str = "3D points",
-        robot_image_limit:int = 6
+        robot_image_limit:int = 70
     ):
     """
 
@@ -66,12 +66,10 @@ def process_data(
     #### create and Fill Robot folder
     print("Generating point cloud...")
     rgb_images, robot_base_xyz_imgs, point_cloud = create_point_cloud(
-        rgb_images=np.array(robot_rgb_images[40:44]),
-        base_t_cam_s=np.array(robot_base_t_robot_cameras[40:44]),
+        rgb_images=np.array(masked_robot_images[:robot_image_limit]),
+        base_t_cam_s=np.array(robot_base_t_robot_cameras[:robot_image_limit]),
         image_mask_generator=lambda x: create_foreground_masks(x)
     )
-    print(f"rgb-images-shape: {rgb_images}, xyz-images-shape: {robot_base_xyz_imgs}")
-
 
     print("Generating the labels...")
     robot_base_t_headsets = [None] * len(robot_rgb_images)
@@ -102,7 +100,7 @@ def process_data(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input-folder", type=str, default="../gathered_data_examples/aruco1", help="Input Folder Location")
+    parser.add_argument("--input-folder", type=str, default="../in_folder", help="Input Folder Location")
     parser.add_argument("--output-folder", type=str, default="./out_data", help="Output Folder Location")
     parser.add_argument("--confidence-threshhold", type=float, default=0.1, help="Confidence threshold for points in the 3D point cloud")
     parser.add_argument("--visualize-pointcloud", type=bool, default=True, help="If the point cloud is to be visualized in a window")

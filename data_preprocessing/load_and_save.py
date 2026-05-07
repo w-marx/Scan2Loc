@@ -23,7 +23,7 @@ def get_images(image_folder:str) -> tuple[np.ndarray, list[str]]:
         Exception("Folder {image_folder} does not exist")
     image_paths = [f"{image_folder}/{filename}" for filename in os.listdir(image_folder) if filename.endswith('.png')]
     image_names = [f"{filename}" for filename in os.listdir(image_folder) if filename.endswith('.png')]
-    return np.array([cv2.cvtColor(cv2.imread(name), cv2.COLOR_BGR2RGB) for name in image_paths], dtype=np.uint8), image_names
+    return np.array([cv2.imread(name) for name in image_paths], dtype=np.uint8), image_names
 
 def vrs_to_images_intrinsic(file_location:str) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -203,7 +203,7 @@ def save_output_data(
     os.makedirs(output_folder, exist_ok=True)
 
     os.makedirs(f"{output_folder}/headset", exist_ok=True)
-    cv2.imwrite(f"{output_folder}/headset/headset_image.png", headset_image)
+    cv2.imwrite(f"{output_folder}/headset/headset_image.png", cv2.cvtColor(headset_image, cv2.COLOR_BGR2RGB))
 
     save_cam_properties_as_json(output_folder, "headset_cam_calibration", headset_cam_mtx)
     save_cam_properties_as_json(output_folder, "robot_cam_calibration", robot_rgb_cam_mtx)
@@ -212,7 +212,7 @@ def save_output_data(
 
     for rgb_image, xyz_image, robot_base_t_robot_camera, robot_base_t_headset, name in zip(robot_rgb_images, robot_xyz_images, robot_base_t_robot_cameras, robot_base_t_headsets,robot_image_names):
         os.makedirs(f"{output_folder}/robot/{name}", exist_ok=True)
-        cv2.imwrite(f"{output_folder}/robot/{name}/rgb.png", rgb_image)
+        cv2.imwrite(f"{output_folder}/robot/{name}/rgb.png", cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB))
         np.save(f"{output_folder}/robot/{name}/xyz.npy", xyz_image)
 
         with open(f"{output_folder}/robot/{name}/robot_base_t_robot_camera.json", 'w') as f:
