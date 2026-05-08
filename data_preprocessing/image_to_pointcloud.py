@@ -133,11 +133,11 @@ def create_point_cloud(
         rgb_images:np.ndarray,
         base_t_cam_s: np.ndarray,
         depth_images:np.ndarray | None = None,
-        camera_intrinsics:np.ndarray | None = None,
+        camera_intrinsics:np.ndarray = None,
         confidence_threshold_percent:int = 10,
         image_mask_generator:None = None,
         visualize_pointcloud:bool = False,
-)-> tuple[list[np.ndarray], list[np.ndarray], np.ndarray]:
+)-> tuple[list[np.ndarray], list[np.ndarray], np.ndarray, np.ndarray]:
     """
     :param rgb_images: A NxHxWx3-uint8/float32 numpy array of RGB images
     :param base_t_cam_s: A Nx4x4-float numpy array of base_t_cam homogeneous transformation matrices
@@ -145,12 +145,18 @@ def create_point_cloud(
     :param camera_intrinsics: A 3x3-float numpy-matrix of the camera intrinsics
     :param confidence_threshold_percent: Percentage of low confidence points to be removed (between 0 and 100)
     :param image_mask_generator: A Funcion that takes a NxHxW-uint8 image array and returns a NxHxW-bool numpy array of masks
+    :param visualize_pointcloud: Wheather to visualize the generated pointcloud
+    :return 
+    1. a list of RGB images as numpy array
+    2. a list of xyz world point images as numpy array
+    3. a pointcloud as a Nx3 numpy array
+    4. the updated camera matrix (3x3 numpy array)
     """
 
     # Check for valid input:
     assert rgb_images.shape[0] == base_t_cam_s.shape[0] , f"Number of rgb images and poses dont match: {rgb_images.shape}, {base_t_cam_s.shape}"
     assert depth_images is None or depth_images.shape[:3] == rgb_images.shape[:3], f"RGB: {rgb_images.shape}, Depth: {depth_images.shape} image dims dont match"    
-    assert camera_intrinsics is None or camera_intrinsics.shape == (3,3), f"Camera intrinsics shape is not 3x3: {camera_intrinsics.shape}"
+    assert camera_intrinsics.shape == (3,3), f"Camera intrinsics shape is not 3x3: {camera_intrinsics.shape}"
     assert 0 <= confidence_threshold_percent <= 100, f"confidence_threshhold_percent should be between 0 and 100 is {confidence_threshold_percent}"
 
 
@@ -163,7 +169,6 @@ def create_point_cloud(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = MapAnything.from_pretrained("facebook/map-anything").to(device)
-
     if rgb_images.dtype == np.uint8:
         rgb_images = rgb_images.astype(np.float32)/255.0
 
@@ -173,11 +178,8 @@ def create_point_cloud(
         views.append({
             "img":image,
             "camera_poses":base_t_cam,
+            "intrinsics": camera_intrinsics.astype(np.float32)
         })
-
-    if camera_intrinsics is not None:
-        for view in views:
-            view.update({'intrinsics': camera_intrinsics.astype(np.float32)})
 
     if depth_images is not None:
         for view, depth_image in zip(views, depth_images):
@@ -190,6 +192,9 @@ def create_point_cloud(
 
 
     rgb_images = [rgb(view['img'], view['data_norm_type'][0])[0] for view in processed_views]
+    rgb_images = [((img*255).astype(np.uint8) if img.dtype in [np.float16, np.float32, np.float64] else img) for img in rgb_images]
+
+    camera_intrinsics = [view['intrinsics'].cpu().numpy() for view in processed_views][0]
 
     predictions = model.infer(
         processed_views,
@@ -218,11 +223,10 @@ def create_point_cloud(
     if image_mask_generator is not None:
         all_world_points = all_world_points[image_mask_generator(np.array(rgb_images)).reshape(-1)]
 
-    pointcloud = o3d.geometry.PointCloud()
-    pointcloud.points = o3d.utility.Vector3dVector(all_world_points)
-
     if visualize_pointcloud:
-        o3d.visualization.draw_geometries([pointcloud], window_name = "3D Point cloud visualization")
+        vis_pc = o3d.geometry.PointCloud()
+        vis_pc.points = o3d.utility.Vector3dVector(all_world_points)
+        o3d.visualization.draw_geometries([vis_pc], window_name = "3D Point cloud visualization")
 
 
-    return rgb_images, world_xyz_images, np.asanyarray(pointcloud.points)
+    return rgb_images, world_xyz_images,all_world_points, camera_intrinsics

@@ -17,7 +17,6 @@ def process_data(
         number_of_sampled_datapoints: int = 10,
         only_sample_robot_datapoints_w_marker_estimates: bool = False,
         markers_use_advanced_removal: bool = False, #TODO
-        est3d_xyz_pointcloud: bool = True, # TODO
         est3d_xyz_img_custom_assymetric_downscaling:bool = False, # TODO
         est3d_xyz_img_upscaling:bool = False, #TODO
         est3d_xyz_img_confidence_threshold: int = 10,
@@ -37,7 +36,7 @@ def process_data(
     """
 
     # Check that the parameters are valid
-    assert number_of_sampled_datapoints > 0, "Negative number of datapoints cant be sampled"
+    assert number_of_sampled_datapoints > 0, "Non positive number of datapoints cant be sampled"
     assert 0 <= est3d_xyz_img_confidence_threshold <= 100, "est3d_xyz_img_confidence_threshold out of range: 0-100"
     assert 0.0 <= est3d_pointcloud_foreground_object_detection_threshold <= 1.0, "est3d_pointcloud_foreground_object_detection_threshold out of range: 0.0-1.0"
     assert 0.0 <= est3d_pointcloud_foreground_masks_conf_threshold <= 1.0, "est3d_pointcloud_foreground_masks_conf_threshold out of range: 0.0-1.0"
@@ -87,12 +86,13 @@ def process_data(
 
     chosen_indices = [idx for idx, _ in enumerate(robot_rgb_images)]
 
-    if number_of_sampled_datapoints < len(robot_image_indices_w_base_t_marker) or only_sample_robot_datapoints_w_marker_estimates:
+    if number_of_sampled_datapoints <= len(robot_image_indices_w_base_t_marker) or only_sample_robot_datapoints_w_marker_estimates:
         chosen_indices = robot_image_indices_w_base_t_marker[:number_of_sampled_datapoints]
-
-    if number_of_sampled_datapoints > len(robot_image_indices_w_base_t_marker):
+    else:
         indices_no_marker_pose = set(chosen_indices) - set(robot_image_indices_w_base_t_marker)
         chosen_indices = robot_image_indices_w_base_t_marker + indices_no_marker_pose[:number_of_sampled_datapoints-len(robot_image_indices_w_base_t_marker)]
+
+    print(f"length of chosen indices {len(chosen_indices)}")
 
     robot_rgb_images = [robot_rgb_images[i] for i in chosen_indices]
     robot_depth_images = [robot_depth_images[i] for i in chosen_indices]
@@ -103,7 +103,7 @@ def process_data(
     # Generate 3D Point cloud
     print("Generating point cloud...")
     # TODO has to return updated camera matrices
-    robot_rgb_images, robot_base_xyz_imgs, point_cloud = create_point_cloud(
+    robot_rgb_images, robot_base_xyz_imgs, point_cloud, robot_rgb_cam_mtx = create_point_cloud(
         rgb_images=np.array(robot_rgb_images),
         base_t_cam_s=np.array(robot_base_t_robot_cameras_s),
         depth_images=np.array(robot_depth_images) if est3d_use_Depth_images else None,
@@ -133,8 +133,8 @@ def process_data(
 
 
     print("Saving the data...")
-    pointcloud = o3d.geometry.PointCloud()
-    pointcloud.points = o3d.utility.Vector3dVector(point_cloud)
+    point_cloud_o3d = o3d.geometry.PointCloud()
+    point_cloud_o3d.points = o3d.utility.Vector3dVector(point_cloud)
     save_output_data(
         output_folder=output_folder,
         headset_image=headset_image,
@@ -143,7 +143,7 @@ def process_data(
         robot_rgb_cam_mtx=robot_rgb_cam_mtx,
         robot_rgb_images=np.array(robot_rgb_images),
         robot_xyz_images=robot_base_xyz_imgs,
-        point_cloud = pointcloud,
+        point_cloud = point_cloud_o3d,
         robot_base_t_robot_cameras = robot_base_t_robot_camera_s,
         robot_base_t_headsets = robot_base_t_headsets,
     )
@@ -162,6 +162,10 @@ if __name__ == "__main__":
     process_data(
         input_folder=args.input_folder,
         output_folder=args.output_folder,
+        est3d_debug_pointcloud_visualize_result = False,
+        number_of_sampled_datapoints = 50,
+        est3d_pointcloud_iforest_confidence_threshold = 0.1,
+        est3d_use_Depth_images= False,
     )
     print(f"Data processing took {(time.perf_counter() - start_time):.6f} seconds")
 

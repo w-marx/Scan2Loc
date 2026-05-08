@@ -220,7 +220,7 @@ def save_output_data(
             with open(f"{output_folder}/robot/{name}/label.json", 'w') as f:
                 json.dump(robot_base_t_headset.tolist(), f, indent=4)
 
-    o3d.io.write_point_cloud(f"{output_folder}/pointcloud.ply", point_cloud, write_ascii=True)
+    o3d.io.write_point_cloud(f"{output_folder}/pointcloud.ply", point_cloud, write_ascii=False)
 
 
 
