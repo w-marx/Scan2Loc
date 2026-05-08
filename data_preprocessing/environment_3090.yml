@@ -31,5 +31,5 @@ dependencies:
     - pycocotools
     - ftfy
     - projectaria-tools
-    - projectaria_client_sdk
+    - scikit-learn
     - rerun-sdk==0.26.2

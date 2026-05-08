@@ -1,38 +1,25 @@
 import sys
 import os
 import json
-import cv2
-import numpy as np
+import shutil
 import open3d as o3d
 from projectaria_tools.core import data_provider, calibration
-from open3d.cuda.pybind.geometry import PointCloud
-
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_gathering.aruco_charuco_detection import *
 
-def get_images(image_folder:str) -> tuple[np.ndarray, list[str]]:
-    """
-    Finds all .png files in the given folder and returns a tuple of the images as a NxWxHx3-uint8 numpy array
-    and a list of length N with their filename (includint the .png)
-
-    :param image_folder: string of the folder where .png images are stored
-    :return: a tuple consisting of the images as an NxWxHx3 RGB image array and a list of the image names
-    """
-    if not os.path.exists(image_folder):
-        Exception("Folder {image_folder} does not exist")
-    image_paths = [f"{image_folder}/{filename}" for filename in os.listdir(image_folder) if filename.endswith('.png')]
-    image_names = [f"{filename}" for filename in os.listdir(image_folder) if filename.endswith('.png')]
-    return np.array([cv2.imread(name) for name in image_paths], dtype=np.uint8), image_names
-
-def vrs_to_images_intrinsic(file_location:str) -> tuple[np.ndarray, np.ndarray]:
+def vrs_to_images_intrinsic(file_location:str) -> tuple[np.ndarray, np.ndarray, list[float]]:
     """
     Converts the rgb channel of the file at the location to an array of images (undistorted) and returns the intrinsic camera matrix.
     It undistorts them by taking the camera-rgb - fisheye camera and transforming it to a pinhole camera
-    It makes the assumption that the fisheye camera focal length is the average of fx and fy
-    :param file_location: The location of the .vrs file
-    :return: NxWxHx3-uint8 RGB image array
+    It makes the assumption that the fisheye camera focal length is the average of fx and fy.
+    The distortion coefficients are assumed to be 0
+    :param file_location: The location of the .vrs file including the filename
+    :return: an NxWxHx3-uint8 RGB image array, the camera intrinsic matrix, the camera distortion coefficients
     """
+    if not os.path.isfile(file_location):
+        raise FileNotFoundError(f"No .vrs file found at {file_location}")
+
     provider = data_provider.create_vrs_data_provider(file_location)
     stream_id = provider.get_stream_id_from_label("camera-rgb")
     cam_calib = provider.get_device_calibration().get_camera_calib("camera-rgb")
@@ -50,12 +37,12 @@ def vrs_to_images_intrinsic(file_location:str) -> tuple[np.ndarray, np.ndarray]:
     cx, cy = pinhole.get_principal_point()
     mtx = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
 
-    return np.array(images), mtx
+    return np.array(images), mtx, [0,0,0,0,0]
 
 
 
 
-def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]]:
+def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str] | list[float] | list[np.ndarray]]:
     """
     Takes the location of a input data folder and loads it into memory
     Input data folder should have the following structure:
@@ -85,14 +72,15 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
     {
         headset_images: headset_images (NxWxHx3-uint8 numpy array),
         headset_cam_mtx: 3x3 numpy array of the cam_mtx or None (either headset_calibration_images or robot_cam_mtx is not none)
+        headset_list_coefficients: A list of floats and with the headset cam distortion coefficients
 
         robot_rgb_images:  (NxWxHx3-uint8 numpy array),
         robot_depth_images: (NxWxH numpy array)
         robot_images_names: robot_image_names list of strings of length number of robot images,
         robot_rgb_cam_mtx: A 3x3 Numpy array with the intrinsic matrix of the rgb camera
         robot_depth_cam_mtx: A 3x3 Numpy array with the intrinsic matrix of the depth camera
-        robot_depth_dist: A 1D numpy array with the distortion coefficients of the depth camera (mostly just 0s)
-        robot_rgb_dist: A 1D numpy array with the distortion coefficients of the rgb camera (mostly just 0s)
+        robot_depth_dist: A list of floats and with the robot rgb cam distortion coefficients
+        robot_rgb_dist: A list of floats and with the robot_rgb cam distortion coefficients
 
         robot_base_t_camera_s: A list of Nx4x4 numpy of transformation matrices or None if those are not provided
         robot_camera_t_marker_s: A list of Nx4x4 numpy of transformation matrices or None if those are not provided
@@ -100,91 +88,99 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
     }
     """
 
+    # vrs file handling
     vrs_files = [file for file in os.listdir(f"{input_folder}") if file.endswith('.vrs')]
+    if len(vrs_files) == 0:
+        raise Exception(f"No VRS files found at {input_folder}", FileNotFoundError)
     if len(vrs_files) > 1:
         print(f"Found multiple .vrs files, using {vrs_files[0]}")
-    headset_images, headset_mtx = vrs_to_images_intrinsic(f"{input_folder}/{vrs_files[0]}")
+    headset_images, headset_mtx, headset_dist_coef = vrs_to_images_intrinsic(f"{input_folder}/{vrs_files[0]}")
 
     # Load Robot images
-    robot_image_names = [f"{folder_name}" for folder_name in os.listdir(f"{input_folder}/robot")]
+    robot_folder_names = [f"{folder_name}" for folder_name in os.listdir(f"{input_folder}/robot")]
     try:
-        robot_image_names = sorted(robot_image_names, key=lambda x: int(x))
+        robot_folder_names = sorted(robot_folder_names, key=lambda x: int(x))
     except Exception:
         print("could not sort robot images as numbers")
 
 
     robot_rgb_images, robot_depth_images, robot_base_t_cameras, robot_camera_t_marker = [], [], [], []
 
-
-    for folder in robot_image_names:
+    for folder in robot_folder_names:
         location = f"{input_folder}/robot/{folder}"
 
         robot_rgb_images.append(cv2.cvtColor(cv2.imread(f"{location}/rgb.png"), cv2.COLOR_BGR2RGB))
         robot_depth_images.append(np.load(f"{location}/depth.npy"))
 
         poses_dict = json.load(open(f"{location}/poses.json"))
-
-        robot_base_t_cameras.append(np.array(poses_dict["base_t_cam"]) if poses_dict["base_t_cam"] is not None else None)
+        robot_base_t_cameras.append(np.array(poses_dict["base_t_cam"]))
         robot_camera_t_marker.append(np.array(poses_dict["camera_t_marker"]) if poses_dict["camera_t_marker"] is not None else None)
 
 
     # Load Robot calibration
     robot_calibration = json.loads(open(f"{input_folder}/robot_cam_calibration.json").read())
 
+    # Load aruco marker
     aruco_marker_detector = None
     if os.path.exists(f"{input_folder}/metadata.json"):
         aruco_marker_detector = build_aruco_charuco_detector(json.load(open(f"{input_folder}/metadata.json")))
 
-
     ret_dict = {
         "headset_images": headset_images,
         "headset_cam_mtx": headset_mtx,
+        "headset_dist_coef": headset_dist_coef,
 
         "robot_rgb_images": robot_rgb_images,
         "robot_depth_images": robot_depth_images,
-        "robot_images_names": robot_image_names,
+        "robot_folder_names": robot_folder_names,
         "robot_base_t_camera_s": robot_base_t_cameras,
         "robot_camera_t_marker_s": robot_camera_t_marker,
 
         "robot_rgb_cam_mtx": np.array(robot_calibration["rgb_camera_matrix"]),
         "robot_depth_cam_mtx": np.array(robot_calibration["depth_camera_matrix"]),
-        "robot_depth_dist": np.array(robot_calibration["depth_distortion_coefficients"]),
-        "robot_rgb_dist":np.array(robot_calibration["rgb_distortion_coefficients"]),
+        "robot_depth_dist": robot_calibration["depth_distortion_coefficients"],
+        "robot_rgb_dist": robot_calibration["rgb_distortion_coefficients"],
         "marker_detector": aruco_marker_detector
     }
 
     return ret_dict
 
 
-def save_cam_properties_as_json(output_folder:str, output_file_name:str, cam_mtx:np.ndarray):
+def save_cam_properties_as_json(output_folder:str, output_file_name:str, cam_mtx:np.ndarray,cam_dist_coeffs:list[float]):
     """
-    Saves the camera properties into a json file
+    Saves the camera properties under the keys: `intrinsic_camera_matrix` and `distortion_coefficients` into a json file
     :param output_folder: The folder to save the json file into
     :param output_file_name: The name of the json file
     :param cam_mtx: A 3x3 camera Matrix
-    :param cam_dist_coef: An array of distortion coefficients
-    :return:
+    :param cam_dist_coeffs: An array of distortion coefficients
+    :return: Nothing
     """
-    headset_camera_data = {'camera_matrix': cam_mtx.tolist()}
+    assert cam_mtx.shape == (3, 3)
+    headset_camera_data = {
+        'intrinsic_camera_matrix': cam_mtx.tolist(),
+        'distortion_coefficients': cam_dist_coeffs
+    }
     if output_folder is not None and output_file_name is not None:
         with open(f"{output_folder}/{output_file_name}.json", 'w') as f:
             json.dump(headset_camera_data, f, indent=4)
+
 
 def save_output_data(
         output_folder:str,
         headset_image:np.ndarray,
         headset_cam_mtx:np.ndarray,
-        robot_image_names: list[str],
+        headset_cam_dist_coeffs:list[float],
+        robot_folder_names: list[str],
         robot_rgb_images:np.ndarray,
         robot_xyz_images:np.ndarray,
-        robot_base_t_robot_cameras:list[np.ndarray],
+        robot_base_t_robot_camera_s:list[np.ndarray],
         robot_base_t_headsets:list[np.ndarray | None],
         robot_rgb_cam_mtx:np.ndarray,
-        point_cloud:PointCloud,
+        robot_rgb_cam_dist_coeffs:list[float],
+        point_cloud:np.ndarray,
 ):
     """
     Outputs a Folder of the structure:
-
     `output_folder`
     ├── headset
     │   └── a .png image with possible aruco markers digitally removed
@@ -198,29 +194,40 @@ def save_output_data(
     │       └── A rgb.png image with possible aruco markers digitally removed
     └── point_cloud.ply
     """
+    assert headset_image.ndim == 3 and headset_image.shape[-1] == 3
+    assert headset_cam_mtx.shape == (3, 3)
+    n_datapoints = len(robot_folder_names)
+    assert n_datapoints == robot_rgb_images.shape[0] and robot_rgb_images.shape[-1] == 3
+    assert n_datapoints == robot_xyz_images.shape[0] and robot_xyz_images.shape == robot_rgb_images.shape
+    assert n_datapoints == robot_base_t_robot_camera_s
+    assert n_datapoints == robot_base_t_headsets
+    assert robot_rgb_cam_mtx.shape == (3, 3)
+    assert point_cloud.ndim == 2 and point_cloud.shape[-1] == 3
 
-    os.makedirs(output_folder, exist_ok=True)
+    if os.path.exists(f"{output_folder}"):
+        print(f"Output folder already exists, deleting it ...")
+        shutil.rmtree(f"{output_folder}")
 
-    os.makedirs(f"{output_folder}/headset", exist_ok=True)
+    os.makedirs(name = f"{output_folder}/headset", exist_ok=True)
     cv2.imwrite(f"{output_folder}/headset/headset_image.png", cv2.cvtColor(headset_image, cv2.COLOR_BGR2RGB))
 
-    save_cam_properties_as_json(output_folder, "headset_cam_calibration", headset_cam_mtx)
-    save_cam_properties_as_json(output_folder, "robot_cam_calibration", robot_rgb_cam_mtx)
+    save_cam_properties_as_json(output_folder, "headset_cam_calibration", headset_cam_mtx, headset_cam_dist_coeffs)
+    save_cam_properties_as_json(output_folder, "robot_cam_calibration", robot_rgb_cam_mtx, robot_rgb_cam_dist_coeffs)
 
-    os.makedirs(f"{output_folder}/robot", exist_ok=True)
 
-    for rgb_image, xyz_image, robot_base_t_robot_camera, robot_base_t_headset, name in zip(robot_rgb_images, robot_xyz_images, robot_base_t_robot_cameras, robot_base_t_headsets,robot_image_names):
+    for rgb_image, xyz_image, robot_base_t_robot_camera, robot_base_t_headset, name in zip(robot_rgb_images, robot_xyz_images, robot_base_t_robot_camera_s, robot_base_t_headsets,robot_image_names):
         os.makedirs(f"{output_folder}/robot/{name}", exist_ok=True)
         cv2.imwrite(f"{output_folder}/robot/{name}/rgb.png", cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB))
         np.save(f"{output_folder}/robot/{name}/xyz.npy", xyz_image)
 
         with open(f"{output_folder}/robot/{name}/robot_base_t_robot_camera.json", 'w') as f:
-            json.dump(robot_base_t_robot_camera.tolist(), f, indent=4)
-        if robot_base_t_headset is not None:
-            with open(f"{output_folder}/robot/{name}/label.json", 'w') as f:
-                json.dump(robot_base_t_headset.tolist(), f, indent=4)
+            json.dump({"robot_base_t_robot_camera",robot_base_t_robot_camera.tolist()}, f, indent=4)
+        with open(f"{output_folder}/robot/{name}/label.json", 'w') as f:
+            json.dump({"robot_base_t_headset":robot_base_t_headset.tolist() if robot_base_t_headset is not None else None}, f, indent=4)
 
-    o3d.io.write_point_cloud(f"{output_folder}/pointcloud.ply", point_cloud, write_ascii=False)
+    point_cloud_o3d = o3d.geometry.PointCloud()
+    point_cloud_o3d.points = o3d.utility.Vector3dVector(point_cloud)
+    o3d.io.write_point_cloud(f"{output_folder}/pointcloud.ply", point_cloud_o3d, write_ascii=False)
 
 
 

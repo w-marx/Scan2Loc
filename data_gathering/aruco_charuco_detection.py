@@ -28,7 +28,7 @@ class ArucoCharucoDetector:
     def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float])->list[np.ndarray | None]:
         """
         Returns the pose camera_t_marker or for each image in the list as a list of 4x4 homogeneous matrices
-        :param images: list of WxHx3 RGB images
+        :param images: list of HxWx3 RGB images
         :param camera_matrix: the 3x3 intrinsic camera matrix
         :param distortion_coefficients: the distortion coefficients of the camera
         :return: list of 4x4 homogeneous matrices
@@ -38,7 +38,7 @@ class ArucoCharucoDetector:
     def remove_markers(self, images:list[np.ndarray])->list[np.ndarray]:
         """
         Returns the images with the markers digitally removed (pixels set to 0)
-        :param images: list of WxHx3 RGB images
+        :param images: list of HxWx3 RGB images
         :return: list of WxHx3 RGB images without the aruco markers
         """
         raise Exception("ArucoCharucoDetector is no concrete class - marker removal function not implemented")

@@ -17,7 +17,9 @@ def process_data(
         number_of_sampled_datapoints: int = 10,
         only_sample_robot_datapoints_w_marker_estimates: bool = False,
         markers_use_advanced_removal: bool = False, #TODO
-        est3d_xyz_img_custom_assymetric_downscaling:bool = False, # TODO
+        est3d_use_map_anything: bool = True,
+        est3d_use_sam3_for_foreground_seg: bool = True,
+        est3d_xyz_img_custom_downscaling:bool = False, # TODO
         est3d_xyz_img_upscaling:bool = False, #TODO
         est3d_xyz_img_confidence_threshold: int = 10,
         est3d_pointcloud_foreground_masks_conf_threshold: float = 0.5,
@@ -48,15 +50,17 @@ def process_data(
 
     headset_images:np.ndarray = loaded_data["headset_images"]
     headset_cam_mtx:np.ndarray = loaded_data["headset_cam_mtx"]
+    headset_cam_dist_coeffs:list[float] = loaded_data["headset_dist_coef"]
 
-    robot_images_names:list[str] = loaded_data["robot_images_names"]
+    robot_images_names:list[str] = loaded_data["robot_folder_names"]
     robot_rgb_images:list[np.ndarray] = loaded_data["robot_rgb_images"]
     robot_depth_images:list[np.ndarray] = loaded_data["robot_depth_images"]
     robot_camera_t_marker_s:list[np.ndarray | None] = loaded_data["robot_camera_t_marker_s"]
     robot_base_t_robot_camera_s:list[np.ndarray] = loaded_data["robot_base_t_camera_s"]
 
     robot_rgb_cam_mtx:np.ndarray = loaded_data["robot_rgb_cam_mtx"]
-    robot_rgb_cam_dist_coef:np.ndarray = loaded_data["robot_rgb_dist"]
+    robot_rgb_cam_dist_coef:list[float] = loaded_data["robot_rgb_dist"]
+    robot_depth_cam_mtx:np.ndarray = loaded_data["robot_depth_cam_mtx"]
 
 
     # Marker handling
@@ -67,9 +71,9 @@ def process_data(
     if marker_detector is not None:
         # Select better headset image
         headset_t_markers = marker_detector.get_camera_t_marker(
-            images=headset_images,
+            images=list(headset_images),
             camera_matrix=headset_cam_mtx,
-            distortion_coefficients = [0,0,0,0,0]
+            distortion_coefficients = robot_rgb_cam_dist_coef
         )
         headset_t_markers_idx_none_filtered = [idx for idx, h_t_m in enumerate(headset_t_markers) if h_t_m is not None]
         if len(headset_t_markers_idx_none_filtered) > 0:
@@ -102,27 +106,39 @@ def process_data(
 
     # Generate 3D Point cloud
     print("Generating point cloud...")
-    # TODO has to return updated camera matrices
-    robot_rgb_images, robot_base_xyz_imgs, point_cloud, robot_rgb_cam_mtx = create_point_cloud(
-        rgb_images=np.array(robot_rgb_images),
-        base_t_cam_s=np.array(robot_base_t_robot_cameras_s),
-        depth_images=np.array(robot_depth_images) if est3d_use_Depth_images else None,
-        camera_intrinsics=robot_rgb_cam_mtx if est3d_use_intrinsic_cam_mtx else None,
-        confidence_threshold_percent=est3d_xyz_img_confidence_threshold,
-        image_mask_generator=lambda imgs: create_foreground_masks(
-            images=imgs,
-            threshold=est3d_pointcloud_foreground_object_detection_threshold,
-            mask_threshold = est3d_pointcloud_foreground_masks_conf_threshold,
-            visualize_masks=est3d_debug_visualize_foreground_masks
-        ),
-        visualize_pointcloud=est3d_debug_pointcloud_visualize_result
-    )
+    robot_base_xyz_imgs = None
+    point_cloud = None
+    image_mask_generator = lambda imgs: create_foreground_masks(
+                images=imgs,
+                threshold=est3d_pointcloud_foreground_object_detection_threshold,
+                mask_threshold = est3d_pointcloud_foreground_masks_conf_threshold,
+                visualize_masks=est3d_debug_visualize_foreground_masks
+    ) if est3d_use_sam3_for_foreground_seg else None
 
-    # Use Iforest on pointcloud
-    point_cloud = remove_outliers_from_point_cloud(
-        points=point_cloud,
-        contamination=est3d_pointcloud_iforest_confidence_threshold
-    )
+    if est3d_use_map_anything:
+        robot_rgb_images, robot_base_xyz_imgs, point_cloud, robot_rgb_cam_mtx = create_point_cloud(
+            rgb_images=np.array(robot_rgb_images),
+            base_t_cam_s=np.array(robot_base_t_robot_cameras_s),
+            depth_images=np.array(robot_depth_images) if est3d_use_Depth_images else None,
+            camera_intrinsics=robot_rgb_cam_mtx if est3d_use_intrinsic_cam_mtx else None,
+            confidence_threshold_percent=est3d_xyz_img_confidence_threshold,
+            image_mask_generator=image_mask_generator,
+            visualize_point_cloud=est3d_debug_pointcloud_visualize_result
+        )
+        # Use Iforest on pointcloud
+        point_cloud = remove_outliers_from_point_cloud(
+            points=point_cloud,
+            contamination=est3d_pointcloud_iforest_confidence_threshold
+        )
+    else:
+        robot_base_xyz_imgs, point_cloud = create_point_cloud_simple(
+            depth_images=np.array(robot_depth_images),
+            depth_cam_mtx=np.array(robot_depth_cam_mtx),
+            base_t_camera_s=np.array(robot_base_t_robot_cameras_s),
+            image_masks=image_mask_generator(np.array(robot_rgb_images)) if image_mask_generator else None,
+            distance_cutoff=1.0,
+            visualize_point_cloud=True
+        )
 
     print("Generating the labels...")
     robot_base_t_headsets = [None] * len(robot_rgb_images)
@@ -133,19 +149,19 @@ def process_data(
 
 
     print("Saving the data...")
-    point_cloud_o3d = o3d.geometry.PointCloud()
-    point_cloud_o3d.points = o3d.utility.Vector3dVector(point_cloud)
     save_output_data(
         output_folder=output_folder,
         headset_image=headset_image,
         headset_cam_mtx=headset_cam_mtx,
-        robot_image_names=robot_images_names,
+        robot_folder_names=robot_images_names,
         robot_rgb_cam_mtx=robot_rgb_cam_mtx,
         robot_rgb_images=np.array(robot_rgb_images),
         robot_xyz_images=robot_base_xyz_imgs,
-        point_cloud = point_cloud_o3d,
-        robot_base_t_robot_cameras = robot_base_t_robot_camera_s,
+        point_cloud = point_cloud,
+        robot_base_t_robot_camera_s = robot_base_t_robot_camera_s,
         robot_base_t_headsets = robot_base_t_headsets,
+        headset_cam_dist_coeffs = headset_cam_dist_coeffs,
+        robot_rgb_cam_dist_coeffs = robot_rgb_cam_dist_coef
     )
 
 
@@ -163,9 +179,10 @@ if __name__ == "__main__":
         input_folder=args.input_folder,
         output_folder=args.output_folder,
         est3d_debug_pointcloud_visualize_result = False,
-        number_of_sampled_datapoints = 50,
+        number_of_sampled_datapoints = 10,
         est3d_pointcloud_iforest_confidence_threshold = 0.1,
         est3d_use_Depth_images= False,
+        est3d_use_map_anything = False,
     )
     print(f"Data processing took {(time.perf_counter() - start_time):.6f} seconds")
 
