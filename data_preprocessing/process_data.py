@@ -101,7 +101,7 @@ def process_data(
     robot_rgb_images = [robot_rgb_images[i] for i in chosen_indices]
     robot_depth_images = [robot_depth_images[i] for i in chosen_indices]
     robot_camera_t_marker_s = [robot_camera_t_marker_s[i] for i in chosen_indices]
-    robot_base_t_robot_cameras_s = [robot_base_t_robot_camera_s[i] for i in chosen_indices]
+    robot_base_t_robot_camera_s = [robot_base_t_robot_camera_s[i] for i in chosen_indices]
     robot_images_names = [robot_images_names[i] for i in chosen_indices]
 
     # Generate 3D Point cloud
@@ -118,7 +118,7 @@ def process_data(
     if est3d_use_map_anything:
         robot_rgb_images, robot_base_xyz_imgs, point_cloud, robot_rgb_cam_mtx = create_point_cloud(
             rgb_images=np.array(robot_rgb_images),
-            base_t_cam_s=np.array(robot_base_t_robot_cameras_s),
+            base_t_cam_s=np.array(robot_base_t_robot_camera_s),
             depth_images=np.array(robot_depth_images) if est3d_use_Depth_images else None,
             camera_intrinsics=robot_rgb_cam_mtx if est3d_use_intrinsic_cam_mtx else None,
             confidence_threshold_percent=est3d_xyz_img_confidence_threshold,
@@ -134,7 +134,7 @@ def process_data(
         robot_base_xyz_imgs, point_cloud = create_point_cloud_simple(
             depth_images=np.array(robot_depth_images),
             depth_cam_mtx=np.array(robot_depth_cam_mtx),
-            base_t_camera_s=np.array(robot_base_t_robot_cameras_s),
+            base_t_camera_s=np.array(robot_base_t_robot_camera_s),
             image_masks=image_mask_generator(np.array(robot_rgb_images)) if image_mask_generator else None,
             distance_cutoff=1.0,
             visualize_point_cloud=True

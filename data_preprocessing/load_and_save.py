@@ -199,9 +199,9 @@ def save_output_data(
     n_datapoints = len(robot_folder_names)
     assert n_datapoints == robot_rgb_images.shape[0] and robot_rgb_images.shape[-1] == 3
     assert n_datapoints == robot_xyz_images.shape[0] and robot_xyz_images.shape == robot_rgb_images.shape, f"n datapoints:{n_datapoints}, xyzimg: {robot_xyz_images.shape}, rgbimg: {robot_rgb_images.shape}"
-    assert n_datapoints == robot_base_t_robot_camera_s
-    assert n_datapoints == robot_base_t_headsets
-    assert robot_rgb_cam_mtx.shape == (3, 3)
+    assert n_datapoints == len(robot_base_t_robot_camera_s), f"n datapoints: {n_datapoints}, number b_t_c poses: {len(robot_base_t_robot_camera_s)}"
+    assert n_datapoints == len(robot_base_t_headsets), f"n datapoints: {n_datapoints}, number b_t_h poses: {len(robot_base_t_robot_camera_s)}"
+    assert robot_rgb_cam_mtx.shape == (3, 3), f"robot cam mtx shape: {robot_rgb_cam_mtx.shape}"
     assert point_cloud.ndim == 2 and point_cloud.shape[-1] == 3
 
     if os.path.exists(f"{output_folder}"):
@@ -215,13 +215,13 @@ def save_output_data(
     save_cam_properties_as_json(output_folder, "robot_cam_calibration", robot_rgb_cam_mtx, robot_rgb_cam_dist_coeffs)
 
 
-    for rgb_image, xyz_image, robot_base_t_robot_camera, robot_base_t_headset, name in zip(robot_rgb_images, robot_xyz_images, robot_base_t_robot_camera_s, robot_base_t_headsets,robot_image_names):
+    for rgb_image, xyz_image, robot_base_t_robot_camera, robot_base_t_headset, name in zip(robot_rgb_images, robot_xyz_images, robot_base_t_robot_camera_s, robot_base_t_headsets,robot_folder_names):
         os.makedirs(f"{output_folder}/robot/{name}", exist_ok=True)
         cv2.imwrite(f"{output_folder}/robot/{name}/rgb.png", cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB))
         np.save(f"{output_folder}/robot/{name}/xyz.npy", xyz_image)
 
         with open(f"{output_folder}/robot/{name}/robot_base_t_robot_camera.json", 'w') as f:
-            json.dump({"robot_base_t_robot_camera",robot_base_t_robot_camera.tolist()}, f, indent=4)
+            json.dump({"robot_base_t_robot_camera":robot_base_t_robot_camera.tolist()}, f, indent=4)
         with open(f"{output_folder}/robot/{name}/label.json", 'w') as f:
             json.dump({"robot_base_t_headset":robot_base_t_headset.tolist() if robot_base_t_headset is not None else None}, f, indent=4)
 

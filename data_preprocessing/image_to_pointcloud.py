@@ -93,7 +93,7 @@ def remove_outliers_from_point_cloud(points:np.ndarray, contamination:float = 0.
     if contamination == 1.0:
         return np.empty((0,3))
 
-    if points.shape[0] > 100000:
+    if points.shape[0] > 1000000:
         warnings.warn(f"Using Iforest on {points.shape[0]} points may take a long time", RuntimeWarning)
 
     from sklearn.ensemble import IsolationForest
@@ -212,7 +212,7 @@ def create_point_cloud(
     rgb_images = [rgb(view['img'], view['data_norm_type'][0])[0] for view in processed_views]
     rgb_images = [((img*255).astype(np.uint8) if img.dtype in [np.float16, np.float32, np.float64] else img) for img in rgb_images]
 
-    camera_intrinsics = [view['intrinsics'].cpu().numpy() for view in processed_views][0]
+    camera_intrinsics = [view['intrinsics'][0].cpu().numpy() for view in processed_views][0]
 
     predictions = model.infer(
         processed_views,
@@ -233,7 +233,7 @@ def create_point_cloud(
     )
 
 
-    world_xyz_images = [view['pts3d'].cpu().numpy() for view in predictions]
+    world_xyz_images = [view['pts3d'][0].cpu().numpy() for view in predictions]
     all_world_points = np.array(world_xyz_images).reshape(-1, 3)
 
     if image_mask_generator is not None:
@@ -244,7 +244,7 @@ def create_point_cloud(
         vis_point_cloud.points = o3d.utility.Vector3dVector(all_world_points)
         o3d.visualization.draw_geometries([vis_point_cloud], window_name = "3D Point cloud visualization")
 
-
+    assert np.array(rgb_images).shape == np.array(world_xyz_images).shape, f"rgb: {np.array(rgb_images).shape} xyz {np.array(world_xyz_images).shape}"
     return rgb_images, world_xyz_images,all_world_points, camera_intrinsics
 
 
