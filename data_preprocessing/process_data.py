@@ -5,6 +5,7 @@ import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_gathering.aruco_charuco_detection import *
+from preprocessing_2_prediction import *
 
 from image_to_pointcloud import *
 from load_and_save import *
@@ -25,7 +26,7 @@ def process_data(
         est3d_pointcloud_foreground_masks_conf_threshold: float = 0.5,
         est3d_pointcloud_foreground_object_detection_threshold: float = 0.5,
         est3d_pointcloud_iforest_confidence_threshold: float = 0.0,
-        est3d_use_Depth_images: bool = True,
+        est3d_use_depth_images: bool = True,
         est3d_use_intrinsic_cam_mtx: bool = True,
         est3d_debug_pointcloud_visualize_result: bool = False,
         est3d_debug_visualize_foreground_masks: bool = False,
@@ -45,7 +46,7 @@ def process_data(
     assert 0.0 <= est3d_pointcloud_iforest_confidence_threshold <= 1.0, "est3d_pointcloud_iforest_confidence_threshold out of range: 0.0-1.0"
 
 
-    print(f"Loading the data from {input_folder}...")
+    print(f"Loading the data from {os.path.abspath(input_folder)}")
     loaded_data = load_input_data(input_folder=input_folder)
 
     headset_images:np.ndarray = loaded_data["headset_images"]
@@ -119,7 +120,7 @@ def process_data(
         robot_rgb_images, robot_base_xyz_imgs, point_cloud, robot_rgb_cam_mtx = create_point_cloud(
             rgb_images=np.array(robot_rgb_images),
             base_t_cam_s=np.array(robot_base_t_robot_camera_s),
-            depth_images=np.array(robot_depth_images) if est3d_use_Depth_images else None,
+            depth_images=np.array(robot_depth_images) if est3d_use_depth_images else None,
             camera_intrinsics=robot_rgb_cam_mtx if est3d_use_intrinsic_cam_mtx else None,
             confidence_threshold_percent=est3d_xyz_img_confidence_threshold,
             image_mask_generator=image_mask_generator,
@@ -149,20 +150,19 @@ def process_data(
 
 
     print("Saving the data...")
-    save_output_data(
-        output_folder=output_folder,
-        headset_image=headset_image,
-        headset_cam_mtx=headset_cam_mtx,
-        robot_folder_names=robot_images_names,
-        robot_rgb_cam_mtx=robot_rgb_cam_mtx,
-        robot_rgb_images=np.array(robot_rgb_images),
+    PredictionData(
+        name = "",
+        robot_bgr_images=np.array(robot_rgb_images),
+        robot_bgr_intrinsics=robot_rgb_cam_mtx,
+        robot_bgr_distortion_coefficients=robot_rgb_cam_dist_coef,
+        headset_bgr_image=headset_image,
+        headset_intrinsics=headset_cam_mtx,
+        headset_distortion_coefficients=headset_cam_dist_coeffs,
         robot_xyz_images=np.array(robot_base_xyz_imgs),
-        point_cloud = point_cloud,
-        robot_base_t_robot_camera_s = robot_base_t_robot_camera_s,
-        robot_base_t_headsets = robot_base_t_headsets,
-        headset_cam_dist_coeffs = headset_cam_dist_coeffs,
-        robot_rgb_cam_dist_coeffs = robot_rgb_cam_dist_coef
-    )
+        point_cloud=point_cloud,
+        robot_base_t_robot_camera_s=np.array(robot_base_t_robot_camera_s),
+        robot_base_t_headset=robot_base_t_headsets[0], #TODO use avg or median
+    ).save(os.path.dirname(output_folder), new_name=os.path.basename(output_folder))
 
 
 
@@ -181,9 +181,11 @@ if __name__ == "__main__":
         est3d_debug_pointcloud_visualize_result = False,
         number_of_sampled_datapoints = 10,
         est3d_pointcloud_iforest_confidence_threshold = 0.1,
-        est3d_use_Depth_images= False,
-        est3d_use_map_anything = True,
+        est3d_use_depth_images= False,
+        est3d_use_map_anything = False,
+        est3d_use_sam3_for_foreground_seg = False,
     )
+    pd = PredictionData.from_folder(args.output_folder)
     print(f"Data processing took {(time.perf_counter() - start_time):.6f} seconds")
 
 

@@ -2,6 +2,8 @@ import sys
 import os
 import json
 import shutil
+
+import numpy as np
 import open3d as o3d
 from projectaria_tools.core import data_provider, calibration
 
@@ -144,92 +146,4 @@ def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str]
     }
 
     return ret_dict
-
-
-def save_cam_properties_as_json(output_folder:str, output_file_name:str, cam_mtx:np.ndarray,cam_dist_coeffs:list[float]):
-    """
-    Saves the camera properties under the keys: `intrinsic_camera_matrix` and `distortion_coefficients` into a json file
-    :param output_folder: The folder to save the json file into
-    :param output_file_name: The name of the json file
-    :param cam_mtx: A 3x3 camera Matrix
-    :param cam_dist_coeffs: An array of distortion coefficients
-    :return: Nothing
-    """
-    assert cam_mtx.shape == (3, 3)
-    headset_camera_data = {
-        'intrinsic_camera_matrix': cam_mtx.tolist(),
-        'distortion_coefficients': cam_dist_coeffs
-    }
-    if output_folder is not None and output_file_name is not None:
-        with open(f"{output_folder}/{output_file_name}.json", 'w') as f:
-            json.dump(headset_camera_data, f, indent=4)
-
-
-def save_output_data(
-        output_folder:str,
-        headset_image:np.ndarray,
-        headset_cam_mtx:np.ndarray,
-        headset_cam_dist_coeffs:list[float],
-        robot_folder_names: list[str],
-        robot_rgb_images:np.ndarray,
-        robot_xyz_images:np.ndarray,
-        robot_base_t_robot_camera_s:list[np.ndarray],
-        robot_base_t_headsets:list[np.ndarray | None],
-        robot_rgb_cam_mtx:np.ndarray,
-        robot_rgb_cam_dist_coeffs:list[float],
-        point_cloud:np.ndarray,
-):
-    """
-    Outputs a Folder of the structure:
-    `output_folder`
-    ├── headset
-    │   └── a .png image with possible aruco markers digitally removed
-    ├── headset_cam_calibration.json
-    ├── robot_cam_calibration.json
-    ├── robot
-    │   └── filenames (multiple folders)
-    │       ├── A xyz.npy file with the world points associated to each pixel
-    │       ├── A robot_base_t_robot_camera.json with the 4x4 transformation matrix between robot base and camera
-    │       ├── A label.json file with the robot base 2 headset pose estimates based on the aruco marker (might be missing)
-    │       └── A rgb.png image with possible aruco markers digitally removed
-    └── point_cloud.ply
-    """
-    assert headset_image.ndim == 3 and headset_image.shape[-1] == 3
-    assert headset_cam_mtx.shape == (3, 3)
-    n_datapoints = len(robot_folder_names)
-    assert n_datapoints == robot_rgb_images.shape[0] and robot_rgb_images.shape[-1] == 3
-    assert n_datapoints == robot_xyz_images.shape[0] and robot_xyz_images.shape == robot_rgb_images.shape, f"n datapoints:{n_datapoints}, xyzimg: {robot_xyz_images.shape}, rgbimg: {robot_rgb_images.shape}"
-    assert n_datapoints == len(robot_base_t_robot_camera_s), f"n datapoints: {n_datapoints}, number b_t_c poses: {len(robot_base_t_robot_camera_s)}"
-    assert n_datapoints == len(robot_base_t_headsets), f"n datapoints: {n_datapoints}, number b_t_h poses: {len(robot_base_t_robot_camera_s)}"
-    assert robot_rgb_cam_mtx.shape == (3, 3), f"robot cam mtx shape: {robot_rgb_cam_mtx.shape}"
-    assert point_cloud.ndim == 2 and point_cloud.shape[-1] == 3
-
-    if os.path.exists(f"{output_folder}"):
-        print(f"Output folder already exists, deleting it ...")
-        shutil.rmtree(f"{output_folder}")
-
-    os.makedirs(name = f"{output_folder}/headset", exist_ok=True)
-    cv2.imwrite(f"{output_folder}/headset/headset_image.png", cv2.cvtColor(headset_image, cv2.COLOR_BGR2RGB))
-
-    save_cam_properties_as_json(output_folder, "headset_cam_calibration", headset_cam_mtx, headset_cam_dist_coeffs)
-    save_cam_properties_as_json(output_folder, "robot_cam_calibration", robot_rgb_cam_mtx, robot_rgb_cam_dist_coeffs)
-
-
-    for rgb_image, xyz_image, robot_base_t_robot_camera, robot_base_t_headset, name in zip(robot_rgb_images, robot_xyz_images, robot_base_t_robot_camera_s, robot_base_t_headsets,robot_folder_names):
-        os.makedirs(f"{output_folder}/robot/{name}", exist_ok=True)
-        cv2.imwrite(f"{output_folder}/robot/{name}/rgb.png", cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB))
-        np.save(f"{output_folder}/robot/{name}/xyz.npy", xyz_image)
-
-        with open(f"{output_folder}/robot/{name}/robot_base_t_robot_camera.json", 'w') as f:
-            json.dump({"robot_base_t_robot_camera":robot_base_t_robot_camera.tolist()}, f, indent=4)
-        with open(f"{output_folder}/robot/{name}/label.json", 'w') as f:
-            json.dump({"robot_base_t_headset":robot_base_t_headset.tolist() if robot_base_t_headset is not None else None}, f, indent=4)
-
-    point_cloud_o3d = o3d.geometry.PointCloud()
-    point_cloud_o3d.points = o3d.utility.Vector3dVector(point_cloud)
-    o3d.io.write_point_cloud(f"{output_folder}/pointcloud.ply", point_cloud_o3d, write_ascii=False)
-
-
-
-
 

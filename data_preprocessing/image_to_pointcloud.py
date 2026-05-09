@@ -267,7 +267,7 @@ def create_point_cloud_simple(
     """
     assert depth_images.ndim == 3
     assert base_t_camera_s.shape == (depth_images.shape[0],4,4)
-    assert image_masks.shape == depth_images.shape and image_masks.dtype == np.bool
+    assert image_masks is None or image_masks.shape == depth_images.shape and image_masks.dtype == np.bool
     assert 0 <= distance_cutoff
     assert depth_cam_mtx.shape == (3,3)
     print(f"Creating simple point cloud with {depth_images.shape[0]}, {get_image_type_hxw(depth_images[0])} depth images")
