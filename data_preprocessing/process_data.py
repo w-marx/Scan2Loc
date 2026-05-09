@@ -156,7 +156,7 @@ def process_data(
         robot_folder_names=robot_images_names,
         robot_rgb_cam_mtx=robot_rgb_cam_mtx,
         robot_rgb_images=np.array(robot_rgb_images),
-        robot_xyz_images=robot_base_xyz_imgs,
+        robot_xyz_images=np.array(robot_base_xyz_imgs),
         point_cloud = point_cloud,
         robot_base_t_robot_camera_s = robot_base_t_robot_camera_s,
         robot_base_t_headsets = robot_base_t_headsets,
@@ -182,7 +182,7 @@ if __name__ == "__main__":
         number_of_sampled_datapoints = 10,
         est3d_pointcloud_iforest_confidence_threshold = 0.1,
         est3d_use_Depth_images= False,
-        est3d_use_map_anything = False,
+        est3d_use_map_anything = True,
     )
     print(f"Data processing took {(time.perf_counter() - start_time):.6f} seconds")
 

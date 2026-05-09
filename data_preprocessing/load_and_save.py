@@ -198,7 +198,7 @@ def save_output_data(
     assert headset_cam_mtx.shape == (3, 3)
     n_datapoints = len(robot_folder_names)
     assert n_datapoints == robot_rgb_images.shape[0] and robot_rgb_images.shape[-1] == 3
-    assert n_datapoints == robot_xyz_images.shape[0] and robot_xyz_images.shape == robot_rgb_images.shape
+    assert n_datapoints == robot_xyz_images.shape[0] and robot_xyz_images.shape == robot_rgb_images.shape, f"n datapoints:{n_datapoints}, xyzimg: {robot_xyz_images.shape}, rgbimg: {robot_rgb_images.shape}"
     assert n_datapoints == robot_base_t_robot_camera_s
     assert n_datapoints == robot_base_t_headsets
     assert robot_rgb_cam_mtx.shape == (3, 3)
