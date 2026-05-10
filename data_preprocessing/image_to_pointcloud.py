@@ -28,7 +28,7 @@ def create_foreground_masks(
     ) -> np.ndarray:
     """
     Uses Sam3 to detect objects/the foreground and returns a mask for each image, which is `True` where an object was detected
-    :param images: NxHxWx3-uint8/float16/float32/float64 numpy array for the images (RGB)
+    :param images: NxHxWx3-uint8/float16/float32/float64 numpy array for the images (BGR)
     :param threshold: certainty needed by sam3 to detect an object
     :param mask_threshold certainty for mask generation by sam3
     :param visualize_masks: Whether to visualize the masks for debugging

@@ -39,7 +39,7 @@ def create_3d_camera(
     lines = o3d.geometry.LineSet()
     lines.points = o3d.utility.Vector3dVector(corners.T)
     lines.lines = o3d.utility.Vector2iVector(
-        [[0,1], [1,2], [2,3], [3,4], [4,0], [4,1], [4,2], [4,3]]
+        [[0,1], [1,2], [2,3], [3,0], [4,0], [4,1], [4,2], [4,3]]
     )
     return lines
 
@@ -231,7 +231,7 @@ class PredictionData:
                 hxw_img=self.headset_bgr_image,
                 scale=0.2
             ))
-            headset_frame.Transform(self.robot_base_t_headset)
+            headset_frame.transform(self.robot_base_t_headset)
             to_vis.append(headset_frame)
 
         o3d.visualization.draw_geometries(to_vis, f"Processed Data {self.name} visualization")

@@ -5,20 +5,9 @@ from matplotlib.gridspec import GridSpec
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from aruco_charuco_detection import ArucoCharucoDetector, ArucoDetector, CharucoDetector
+from gathering_2_preprocessing import compute_pose_pseudo_median
 
 calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2)
-
-def compute_pose_pseudo_median(poses:list[np.ndarray])->np.ndarray:
-    """
-    Takes a numpy array of poses and computes the median pose.
-    To compute the median pose the median rotation and the geometric median of the translation are combined.
-    Therefore, the returned pose may not be in poses
-    :param poses: Nx4x4 numpy array of poses
-    :return: median pose, as a 4x4 numpy array
-    """
-    median_pose = min(poses, key = lambda x: sum([np.linalg.norm(x[:3,3]-y[:3,3]) for y in poses]))
-    median_pose[:3,:3] = min(poses, key = lambda x: sum([calc_rotational_difference(x,y) for y in poses]))[:3,:3]
-    return median_pose
 
 
 

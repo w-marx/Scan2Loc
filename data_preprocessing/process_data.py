@@ -4,7 +4,7 @@ import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from preprocessing_2_prediction import *
-from gathering_2_preprocessing import GatheredRobotData
+from gathering_2_preprocessing import GatheredRobotData, compute_pose_pseudo_median
 
 from image_to_pointcloud import *
 from load_and_save import *
@@ -22,39 +22,53 @@ def process_data(
         est3d_xyz_img_custom_downscaling:bool = False, # TODO
         est3d_xyz_img_upscaling:bool = False, #TODO
         est3d_xyz_img_confidence_threshold: int = 10,
-        est3d_pointcloud_foreground_masks_conf_threshold: float = 0.5,
-        est3d_pointcloud_foreground_object_detection_threshold: float = 0.5,
-        est3d_pointcloud_iforest_confidence_threshold: float = 0.0,
+        est3d_point_cloud_foreground_masks_conf_threshold: float = 0.5,
+        est3d_point_cloud_foreground_object_detection_threshold: float = 0.5,
+        est3d_point_cloud_iforest_confidence_threshold: float = 0.0,
         est3d_use_depth_images: bool = True,
         est3d_use_intrinsic_cam_mtx: bool = True,
-        est3d_debug_pointcloud_visualize_result: bool = False,
+        est3d_debug_point_cloud_visualize_result: bool = False,
         est3d_debug_visualize_foreground_masks: bool = False,
     )->PredictionData:
     """
-
-    :param input_folder: The Folder path from which to load the data
-    :param output_folder: The Folder path to which to save the data
-    :return:
+    :param robot_data: GatheredRobotData instance
+    :param headset_data: HeadsetData instance
+    :param number_of_sampled_datapoints:
+    :param only_sample_robot_datapoints_w_marker_estimates:
+    :param markers_use_advanced_removal:
+    :param est3d_use_map_anything:
+    :param est3d_use_sam3_for_foreground_seg:
+    :param est3d_xyz_img_custom_downscaling
+    :param est3d_xyz_img_upscaling
+    :param est3d_xyz_img_confidence_threshold
+    :param est3d_point_cloud_foreground_masks_conf_threshold
+    :param est3d_point_cloud_foreground_object_detection_threshold
+    :param est3d_point_cloud_iforest_confidence_threshold
+    :param est3d_use_depth_images:
+    :param est3d_use_intrinsic_cam_mtx:
+    :param est3d_debug_point_cloud_visualize_result:
+    :param est3d_debug_visualize_foreground_masks:
+    :return: PredictionData instance
     """
 
     # Check that the parameters are valid
     assert number_of_sampled_datapoints > 0, "Non positive number of datapoints cant be sampled"
     assert 0 <= est3d_xyz_img_confidence_threshold <= 100, "est3d_xyz_img_confidence_threshold out of range: 0-100"
-    assert 0.0 <= est3d_pointcloud_foreground_object_detection_threshold <= 1.0, "est3d_pointcloud_foreground_object_detection_threshold out of range: 0.0-1.0"
-    assert 0.0 <= est3d_pointcloud_foreground_masks_conf_threshold <= 1.0, "est3d_pointcloud_foreground_masks_conf_threshold out of range: 0.0-1.0"
-    assert 0.0 <= est3d_pointcloud_iforest_confidence_threshold <= 1.0, "est3d_pointcloud_iforest_confidence_threshold out of range: 0.0-1.0"
+    assert 0.0 <= est3d_point_cloud_foreground_object_detection_threshold <= 1.0, "est3d_pointcloud_foreground_object_detection_threshold out of range: 0.0-1.0"
+    assert 0.0 <= est3d_point_cloud_foreground_masks_conf_threshold <= 1.0, "est3d_pointcloud_foreground_masks_conf_threshold out of range: 0.0-1.0"
+    assert 0.0 <= est3d_point_cloud_iforest_confidence_threshold <= 1.0, "est3d_pointcloud_iforest_confidence_threshold out of range: 0.0-1.0"
 
     headset_images = headset_data.bgr_image_s
     headset_cam_mtx = headset_data.intrinsic_camera_matrix
     headset_cam_dist_coef = headset_data.distortion_coefficients
 
-    robot_rgb_images = robot_data.robot_bgr_images
+    robot_bgr_images = robot_data.robot_bgr_images
     robot_depth_images = robot_data.robot_depth_images
     robot_camera_t_marker_s = robot_data.robot_camera_t_marker_s
     robot_base_t_robot_camera_s = robot_data.robot_base_t_camera_s
 
-    robot_rgb_cam_mtx = robot_data.robot_bgr_cam_mtx
-    robot_rgb_cam_dist_coef = robot_data.robot_bgr_distortion_coefficients
+    robot_bgr_cam_mtx = robot_data.robot_bgr_cam_mtx
+    robot_bgr_cam_dist_coef = robot_data.robot_bgr_distortion_coefficients
     robot_depth_cam_mtx:np.ndarray = robot_data.robot_depth_cam_mtx
 
 
@@ -66,7 +80,7 @@ def process_data(
         headset_t_markers = robot_data.marker_detector.get_camera_t_marker(
             images=list(headset_images),
             camera_matrix=headset_cam_mtx,
-            distortion_coefficients = robot_rgb_cam_dist_coef
+            distortion_coefficients = robot_bgr_cam_dist_coef
         )
         headset_t_markers_idx_none_filtered = [idx for idx, h_t_m in enumerate(headset_t_markers) if h_t_m is not None]
         if len(headset_t_markers_idx_none_filtered) > 0:
@@ -75,13 +89,13 @@ def process_data(
             headset_image = headset_images[headset_w_marker_img_idx]
 
         headset_image = robot_data.marker_detector.remove_markers([headset_image])[0]
-        robot_rgb_images = robot_data.marker_detector.remove_markers(list(robot_rgb_images))
+        robot_bgr_images = robot_data.marker_detector.remove_markers(list(robot_bgr_images))
 
 
     # Choose the robot images smartly
     robot_image_indices_w_base_t_marker = [idx for idx, _ in enumerate(robot_camera_t_marker_s) if robot_base_t_robot_camera_s is not None]
 
-    chosen_indices = [idx for idx, _ in enumerate(robot_rgb_images)]
+    chosen_indices = [idx for idx, _ in enumerate(robot_bgr_images)]
 
     if number_of_sampled_datapoints <= len(robot_image_indices_w_base_t_marker) or only_sample_robot_datapoints_w_marker_estimates:
         chosen_indices = robot_image_indices_w_base_t_marker[:number_of_sampled_datapoints]
@@ -91,7 +105,7 @@ def process_data(
 
     print(f"length of chosen indices {len(chosen_indices)}")
 
-    robot_rgb_images = [robot_rgb_images[i] for i in chosen_indices]
+    robot_bgr_images = [robot_bgr_images[i] for i in chosen_indices]
     robot_depth_images = [robot_depth_images[i] for i in chosen_indices]
     robot_camera_t_marker_s = [robot_camera_t_marker_s[i] for i in chosen_indices]
     robot_base_t_robot_camera_s = [robot_base_t_robot_camera_s[i] for i in chosen_indices]
@@ -102,57 +116,58 @@ def process_data(
     point_cloud = None
     image_mask_generator = lambda imgs: create_foreground_masks(
                 images=imgs,
-                threshold=est3d_pointcloud_foreground_object_detection_threshold,
-                mask_threshold = est3d_pointcloud_foreground_masks_conf_threshold,
+                threshold=est3d_point_cloud_foreground_object_detection_threshold,
+                mask_threshold = est3d_point_cloud_foreground_masks_conf_threshold,
                 visualize_masks=est3d_debug_visualize_foreground_masks
     ) if est3d_use_sam3_for_foreground_seg else None
 
     if est3d_use_map_anything:
-        robot_rgb_images, robot_base_xyz_imgs, point_cloud, robot_rgb_cam_mtx = create_point_cloud(
-            rgb_images=np.array(robot_rgb_images),
+        robot_bgr_images, robot_base_xyz_imgs, point_cloud, robot_bgr_cam_mtx = create_point_cloud(
+            rgb_images=np.array(robot_bgr_images),
             base_t_cam_s=np.array(robot_base_t_robot_camera_s),
             depth_images=np.array(robot_depth_images) if est3d_use_depth_images else None,
-            camera_intrinsics=robot_rgb_cam_mtx if est3d_use_intrinsic_cam_mtx else None,
+            camera_intrinsics=robot_bgr_cam_mtx if est3d_use_intrinsic_cam_mtx else None,
             confidence_threshold_percent=est3d_xyz_img_confidence_threshold,
             image_mask_generator=image_mask_generator,
-            visualize_point_cloud=est3d_debug_pointcloud_visualize_result
+            visualize_point_cloud=est3d_debug_point_cloud_visualize_result
         )
         # Use Iforest on pointcloud
         point_cloud = remove_outliers_from_point_cloud(
             points=point_cloud,
-            contamination=est3d_pointcloud_iforest_confidence_threshold
+            contamination=est3d_point_cloud_iforest_confidence_threshold
         )
     else:
         robot_base_xyz_imgs, point_cloud = create_point_cloud_simple(
             depth_images=np.array(robot_depth_images),
             depth_cam_mtx=np.array(robot_depth_cam_mtx),
             base_t_camera_s=np.array(robot_base_t_robot_camera_s),
-            image_masks=image_mask_generator(np.array(robot_rgb_images)) if image_mask_generator else None,
+            image_masks=image_mask_generator(np.array(robot_bgr_images)) if image_mask_generator else None,
             distance_cutoff=1.0,
             visualize_point_cloud=True
         )
 
-    print("Generating the labels...")
-    robot_base_t_headsets = [None] * len(robot_rgb_images)
+    print("Generating the label...")
+    robot_base_t_headsets = [None] * len(robot_bgr_images)
     if headset_t_marker is not None:
         for idx, (robot_base_t_camera, robot_camera_t_marker) in enumerate(zip(robot_base_t_robot_camera_s, robot_camera_t_marker_s)):
             if robot_camera_t_marker is not None:
                 robot_base_t_headsets[idx] = robot_base_t_camera @ robot_camera_t_marker @ np.linalg.inv(headset_t_marker)
+    robot_base_t_headset = compute_pose_pseudo_median([m for m in robot_base_t_headsets if m is not None])
 
 
     print("Saving the data...")
     return PredictionData(
         name = "",
-        robot_bgr_images=np.array(robot_rgb_images),
-        robot_bgr_intrinsics=robot_rgb_cam_mtx,
-        robot_bgr_distortion_coefficients=robot_rgb_cam_dist_coef,
+        robot_bgr_images=np.array(robot_bgr_images),
+        robot_bgr_intrinsics=robot_bgr_cam_mtx,
+        robot_bgr_distortion_coefficients=robot_bgr_cam_dist_coef,
         headset_bgr_image=headset_image,
         headset_intrinsics=headset_cam_mtx,
         headset_distortion_coefficients=headset_cam_dist_coef,
         robot_xyz_images=np.array(robot_base_xyz_imgs),
         point_cloud=point_cloud,
         robot_base_t_robot_camera_s=np.array(robot_base_t_robot_camera_s),
-        robot_base_t_headset=robot_base_t_headsets[0], #TODO use avg or median
+        robot_base_t_headset=robot_base_t_headset
     )
 
 
@@ -180,19 +195,14 @@ if __name__ == "__main__":
     processed_data = process_data(
         robot_data = robot_data,
         headset_data=headset_data,
-        est3d_debug_pointcloud_visualize_result = False,
+        est3d_debug_point_cloud_visualize_result= False,
         number_of_sampled_datapoints = 3,
-        est3d_pointcloud_iforest_confidence_threshold = 0.1,
+        est3d_point_cloud_iforest_confidence_threshold= 0.1,
         est3d_use_depth_images= False,
         est3d_use_map_anything = False,
-        est3d_use_sam3_for_foreground_seg = False,
+        est3d_use_sam3_for_foreground_seg = True,
     )
     processed_data.save(os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
     pd = PredictionData.from_folder(args.output_folder)
     pd.visualize_3d_data()
     print(f"Data processing took {(time.perf_counter() - start_time):.6f} seconds")
-
-
-
-
-
