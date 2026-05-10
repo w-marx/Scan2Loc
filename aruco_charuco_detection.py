@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 
 
-DICTIONARY_OPTIONS = {
+ARUCO_DICTIONARY_OPTIONS = {
     "4X4_250": cv2.aruco.DICT_4X4_250,
     "5X5_100": cv2.aruco.DICT_5X5_100,
     "5X5_250": cv2.aruco.DICT_5X5_250,
@@ -49,6 +49,39 @@ class ArucoCharucoDetector:
         """
         return {}
 
+    @classmethod
+    def from_json(cls, json_file:str):
+        """
+        Builds an aruco charuco detector from the json file
+        :param json_file: the location of the json file
+        :return: an aruco/charuco Detector or None
+        """
+        import json, os
+        if not os.path.exists(json_file):
+            print(f"No detector creation json found, returning None {json_file}")
+            return None
+
+        metadata_dict = json.load(open(json_file))
+
+        if metadata_dict["Aruco/Charuco Type"] is None:
+            return None
+        if metadata_dict["Aruco/Charuco Type"] == "Aruco":
+            return ArucoDetector(
+                aruco_marker_side_length=metadata_dict["Aruco marker side length"],
+                aruco_marker_dictionary=metadata_dict["Aruco dictionary"]
+            )
+        elif metadata_dict["Aruco/Charuco Type"] == "Charuco":
+            return CharucoDetector(
+                board_size=(metadata_dict["Charuco board size"][0], metadata_dict["Charuco board size"][1]),
+                square_size=metadata_dict["Charuco square size"],
+                marker_size=metadata_dict["Aruco marker side length"],
+                aruco_dictionary=metadata_dict["Aruco dictionary"],
+                min_fraction_of_markers=metadata_dict["Min fraction of markers"]
+            )
+        else:
+            raise Exception("Unknown aruco charuco type")
+
+
 class ArucoDetector(ArucoCharucoDetector):
     def __init__(
             self,
@@ -63,7 +96,7 @@ class ArucoDetector(ArucoCharucoDetector):
         }
 
         self.aruco_marker_side_length = aruco_marker_side_length
-        self.aruco_marker_dictionary = cv2.aruco.getPredefinedDictionary(DICTIONARY_OPTIONS[aruco_marker_dictionary])
+        self.aruco_marker_dictionary = cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY_OPTIONS[aruco_marker_dictionary])
         detector_params = cv2.aruco.DetectorParameters()
         detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.detector = cv2.aruco.ArucoDetector(self.aruco_marker_dictionary, detector_params)
@@ -127,7 +160,7 @@ class CharucoDetector(ArucoCharucoDetector):
         super().__init__()
         self.square_size = square_size
         self.marker_size = marker_size
-        self.board = cv2.aruco.CharucoBoard(board_size, square_size, marker_size, cv2.aruco.getPredefinedDictionary(DICTIONARY_OPTIONS[aruco_dictionary]))
+        self.board = cv2.aruco.CharucoBoard(board_size, square_size, marker_size, cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY_OPTIONS[aruco_dictionary]))
         self.min_number_of_markers = min_fraction_of_markers * (board_size[0] * board_size[1]) * 0.5
 
         detector_params = cv2.aruco.DetectorParameters()
@@ -240,28 +273,3 @@ if __name__ == "__main__":
     images = [cv2.imread(name) for name in image_paths]
     charuco_detector = CharucoDetector()
     charuco_detector.remove_markers(images)
-
-
-def build_aruco_charuco_detector(metadata_dict:dict)->ArucoCharucoDetector:
-    """
-    Builds an aruco charuco detector from the metadata dict
-    :param metadata_dict:
-    :return:
-    """
-    if metadata_dict["Aruco/Charuco Type"] is None:
-        return None
-    if metadata_dict["Aruco/Charuco Type"] == "Aruco":
-        return ArucoDetector(
-            aruco_marker_side_length=metadata_dict["Aruco marker side length"],
-            aruco_marker_dictionary=metadata_dict["Aruco dictionary"]
-        )
-    elif metadata_dict["Aruco/Charuco Type"] == "Charuco":
-        return CharucoDetector(
-            board_size=(metadata_dict["Charuco board size"][0], metadata_dict["Charuco board size"][1]),
-            square_size=metadata_dict["Charuco square size"],
-            marker_size=metadata_dict["Aruco marker side length"],
-            aruco_dictionary=metadata_dict["Aruco dictionary"],
-            min_fraction_of_markers=metadata_dict["Min fraction of markers"]
-        )
-    else:
-        raise Exception("Unknown aruco charuco type")

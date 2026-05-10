@@ -1,11 +1,10 @@
-import numpy as np
 import os
 import sys
 import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from data_gathering.aruco_charuco_detection import *
 from preprocessing_2_prediction import *
+from gathering_2_preprocessing import GatheredRobotData
 
 from image_to_pointcloud import *
 from load_and_save import *
@@ -13,8 +12,8 @@ import argparse
 
 
 def process_data(
-        input_folder: str = "./in_data",
-        output_folder: str = "./out_data",
+        robot_data:GatheredRobotData,
+        headset_data:HeadsetData,
         number_of_sampled_datapoints: int = 10,
         only_sample_robot_datapoints_w_marker_estimates: bool = False,
         markers_use_advanced_removal: bool = False, #TODO
@@ -30,7 +29,7 @@ def process_data(
         est3d_use_intrinsic_cam_mtx: bool = True,
         est3d_debug_pointcloud_visualize_result: bool = False,
         est3d_debug_visualize_foreground_masks: bool = False,
-    ):
+    )->PredictionData:
     """
 
     :param input_folder: The Folder path from which to load the data
@@ -45,33 +44,26 @@ def process_data(
     assert 0.0 <= est3d_pointcloud_foreground_masks_conf_threshold <= 1.0, "est3d_pointcloud_foreground_masks_conf_threshold out of range: 0.0-1.0"
     assert 0.0 <= est3d_pointcloud_iforest_confidence_threshold <= 1.0, "est3d_pointcloud_iforest_confidence_threshold out of range: 0.0-1.0"
 
+    headset_images = headset_data.bgr_image_s
+    headset_cam_mtx = headset_data.intrinsic_camera_matrix
+    headset_cam_dist_coef = headset_data.distortion_coefficients
 
-    print(f"Loading the data from {os.path.abspath(input_folder)}")
-    loaded_data = load_input_data(input_folder=input_folder)
+    robot_rgb_images = robot_data.robot_bgr_images
+    robot_depth_images = robot_data.robot_depth_images
+    robot_camera_t_marker_s = robot_data.robot_camera_t_marker_s
+    robot_base_t_robot_camera_s = robot_data.robot_base_t_camera_s
 
-    headset_images:np.ndarray = loaded_data["headset_images"]
-    headset_cam_mtx:np.ndarray = loaded_data["headset_cam_mtx"]
-    headset_cam_dist_coeffs:list[float] = loaded_data["headset_dist_coef"]
-
-    robot_images_names:list[str] = loaded_data["robot_folder_names"]
-    robot_rgb_images:list[np.ndarray] = loaded_data["robot_rgb_images"]
-    robot_depth_images:list[np.ndarray] = loaded_data["robot_depth_images"]
-    robot_camera_t_marker_s:list[np.ndarray | None] = loaded_data["robot_camera_t_marker_s"]
-    robot_base_t_robot_camera_s:list[np.ndarray] = loaded_data["robot_base_t_camera_s"]
-
-    robot_rgb_cam_mtx:np.ndarray = loaded_data["robot_rgb_cam_mtx"]
-    robot_rgb_cam_dist_coef:list[float] = loaded_data["robot_rgb_dist"]
-    robot_depth_cam_mtx:np.ndarray = loaded_data["robot_depth_cam_mtx"]
+    robot_rgb_cam_mtx = robot_data.robot_bgr_cam_mtx
+    robot_rgb_cam_dist_coef = robot_data.robot_bgr_distortion_coefficients
+    robot_depth_cam_mtx:np.ndarray = robot_data.robot_depth_cam_mtx
 
 
     # Marker handling
     headset_image = headset_images[int(len(headset_images)/2)]
     headset_t_marker = None
-
-    marker_detector:ArucoCharucoDetector|None = loaded_data["marker_detector"]
-    if marker_detector is not None:
-        # Select better headset image
-        headset_t_markers = marker_detector.get_camera_t_marker(
+    # select better headset image
+    if robot_data.marker_detector is not None:
+        headset_t_markers = robot_data.marker_detector.get_camera_t_marker(
             images=list(headset_images),
             camera_matrix=headset_cam_mtx,
             distortion_coefficients = robot_rgb_cam_dist_coef
@@ -82,8 +74,8 @@ def process_data(
             headset_t_marker = headset_t_markers[headset_w_marker_img_idx]
             headset_image = headset_images[headset_w_marker_img_idx]
 
-        headset_image = marker_detector.remove_markers([headset_image])[0]
-        robot_rgb_images = marker_detector.remove_markers(robot_rgb_images)
+        headset_image = robot_data.marker_detector.remove_markers([headset_image])[0]
+        robot_rgb_images = robot_data.marker_detector.remove_markers(list(robot_rgb_images))
 
 
     # Choose the robot images smartly
@@ -103,7 +95,6 @@ def process_data(
     robot_depth_images = [robot_depth_images[i] for i in chosen_indices]
     robot_camera_t_marker_s = [robot_camera_t_marker_s[i] for i in chosen_indices]
     robot_base_t_robot_camera_s = [robot_base_t_robot_camera_s[i] for i in chosen_indices]
-    robot_images_names = [robot_images_names[i] for i in chosen_indices]
 
     # Generate 3D Point cloud
     print("Generating point cloud...")
@@ -150,19 +141,19 @@ def process_data(
 
 
     print("Saving the data...")
-    PredictionData(
+    return PredictionData(
         name = "",
         robot_bgr_images=np.array(robot_rgb_images),
         robot_bgr_intrinsics=robot_rgb_cam_mtx,
         robot_bgr_distortion_coefficients=robot_rgb_cam_dist_coef,
         headset_bgr_image=headset_image,
         headset_intrinsics=headset_cam_mtx,
-        headset_distortion_coefficients=headset_cam_dist_coeffs,
+        headset_distortion_coefficients=headset_cam_dist_coef,
         robot_xyz_images=np.array(robot_base_xyz_imgs),
         point_cloud=point_cloud,
         robot_base_t_robot_camera_s=np.array(robot_base_t_robot_camera_s),
         robot_base_t_headset=robot_base_t_headsets[0], #TODO use avg or median
-    ).save(os.path.dirname(output_folder), new_name=os.path.basename(output_folder))
+    )
 
 
 
@@ -175,17 +166,30 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     start_time = time.perf_counter()
-    process_data(
-        input_folder=args.input_folder,
-        output_folder=args.output_folder,
+
+    print(f"Loading the data from {os.path.abspath(args.input_folder)}")
+    robot_data = GatheredRobotData.from_folder(args.input_folder)
+
+    vrs_files = [file for file in os.listdir(f"{args.input_folder}") if file.endswith('.vrs')]
+    if len(vrs_files) == 0:
+        raise Exception(f"No VRS files found at {args.input_folder}", FileNotFoundError)
+    if len(vrs_files) > 1:
+        print(f"Found multiple .vrs files, using {vrs_files[0]}")
+    headset_data = HeadsetData.from_vrs_file(f"{args.input_folder}/{vrs_files[0]}")
+
+    processed_data = process_data(
+        robot_data = robot_data,
+        headset_data=headset_data,
         est3d_debug_pointcloud_visualize_result = False,
-        number_of_sampled_datapoints = 10,
+        number_of_sampled_datapoints = 3,
         est3d_pointcloud_iforest_confidence_threshold = 0.1,
         est3d_use_depth_images= False,
         est3d_use_map_anything = False,
         est3d_use_sam3_for_foreground_seg = False,
     )
+    processed_data.save(os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
     pd = PredictionData.from_folder(args.output_folder)
+    pd.visualize_3d_data()
     print(f"Data processing took {(time.perf_counter() - start_time):.6f} seconds")
 
 

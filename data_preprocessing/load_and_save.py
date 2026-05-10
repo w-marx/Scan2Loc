@@ -1,149 +1,80 @@
 import sys
 import os
-import json
-import shutil
 
-import numpy as np
-import open3d as o3d
+import cv2
 from projectaria_tools.core import data_provider, calibration
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from data_gathering.aruco_charuco_detection import *
+from gathering_2_preprocessing import assert_intrinsic_mat
+import numpy as np
 
-def vrs_to_images_intrinsic(file_location:str) -> tuple[np.ndarray, np.ndarray, list[float]]:
-    """
-    Converts the rgb channel of the file at the location to an array of images (undistorted) and returns the intrinsic camera matrix.
-    It undistorts them by taking the camera-rgb - fisheye camera and transforming it to a pinhole camera
-    It makes the assumption that the fisheye camera focal length is the average of fx and fy.
-    The distortion coefficients are assumed to be 0
-    :param file_location: The location of the .vrs file including the filename
-    :return: an NxWxHx3-uint8 RGB image array, the camera intrinsic matrix, the camera distortion coefficients
-    """
-    if not os.path.isfile(file_location):
-        raise FileNotFoundError(f"No .vrs file found at {file_location}")
-
-    provider = data_provider.create_vrs_data_provider(file_location)
-    stream_id = provider.get_stream_id_from_label("camera-rgb")
-    cam_calib = provider.get_device_calibration().get_camera_calib("camera-rgb")
-    img_width, img_height = cam_calib.get_image_size()
-    focal_length = (cam_calib.get_focal_lengths()[0]+cam_calib.get_focal_lengths()[1])/2
-    pinhole = calibration.get_linear_camera_calibration(image_width=img_width, image_height=img_height, focal_length=focal_length, label="camera-rgb")
-
-    images = []
-    for i in range(0, provider.get_num_data(stream_id)):
-        image_data = provider.get_image_data_by_index(stream_id, i)[0].to_numpy_array()
-        undistorted_image = calibration.distort_by_calibration(arraySrc=image_data, dstCalib=pinhole, srcCalib=cam_calib)
-        images.append(undistorted_image)
-
-    fx, fy = pinhole.get_focal_lengths()
-    cx, cy = pinhole.get_principal_point()
-    mtx = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-
-    return np.array(images), mtx, [0,0,0,0,0]
+class HeadsetData:
+    def __init__(
+            self,
+            bgr_image_s:np.ndarray,
+            intrinsic_camera_matrix:np.ndarray,
+            distortion_coefficients:list[float],
+    ):
+        """
+        :param bgr_image_s: BGR images as an NxHxWx3-uint8 numpy array
+        :param intrinsic_camera_matrix: Intrinsic camera matrix as a 3x3 numpy array
+        :param distortion_coefficients: Distortion coefficients as a list of floats
+        """
+        assert bgr_image_s.ndim == 4, f"Wrong shape of BGR images {bgr_image_s.shape}"
+        assert bgr_image_s.shape[0] > 0, f"No BGR images {bgr_image_s.shape}"
+        assert bgr_image_s.dtype == np.uint8, f"Wrong dtype for bgr images {bgr_image_s.dtype}"
+        self._bgr_image_s = bgr_image_s
 
 
+        assert assert_intrinsic_mat(intrinsic_camera_matrix, self._bgr_image_s[0])
+        self._intrinsic_camera_matrix = intrinsic_camera_matrix
+
+        assert isinstance(distortion_coefficients, list) and len(distortion_coefficients) > 0
+        self._distortion_coefficients = distortion_coefficients
 
 
-def load_input_data(input_folder:str) -> dict[str, np.ndarray | None | list[str] | list[float] | list[np.ndarray]]:
-    """
-    Takes the location of a input data folder and loads it into memory
-    Input data folder should have the following structure:
+    @classmethod
+    def from_vrs_file(cls, file_location):
+        """
+        This function takes a .vrs file and creates a HeadsetData instance
+        It undistorts the images by taking the camera-rgb - fisheye camera and transforming it to a pinhole camera
+        It makes the assumption that the fisheye camera focal length is the average of fx and fy.
+        The distortion coefficients are assumed to be 0
 
-    `input_folder`
-    ├── headset.vrs
-    ├── robot
-    │   └── multiple folders
-    │       ├──  rgb.png
-    │       ├──  depth.npy
-    │       └──  poses.json
-    ├── metadata.json
-    └── robot_cam_calibration.json
+        :param file_location: The location of the .vrs file including the filename
+        :return: an NxWxHx3-uint8 RGB image array, the camera intrinsic matrix, the camera distortion coefficients
+        """
+        if not os.path.isfile(file_location):
+            raise FileNotFoundError(f"No .vrs file found at {file_location}")
 
-    The robot_cam_calibration.json file should contain the fields:
-    `rgb_camera_matrix`, `depth_camera_matrix`, `rgb_distortion_coefficients` and `depth_distortion_coefficients`.`
+        provider = data_provider.create_vrs_data_provider(file_location)
+        stream_id = provider.get_stream_id_from_label("camera-rgb")
+        cam_calib = provider.get_device_calibration().get_camera_calib("camera-rgb")
+        img_width, img_height = cam_calib.get_image_size()
+        focal_length = (cam_calib.get_focal_lengths()[0] + cam_calib.get_focal_lengths()[1]) / 2
+        pinhole = calibration.get_linear_camera_calibration(image_width=img_width, image_height=img_height,focal_length=focal_length, label="camera-rgb")
 
-    The `poses.json` files should contain the field:
-        -`base_t_cam`
-    And may contain the field:
-        -`camera_t_marker`
+        bgr_hxw_imgs = []
+        for i in range(0, provider.get_num_data(stream_id)):
+            image_data = provider.get_image_data_by_index(stream_id, i)[0].to_numpy_array()
+            undistorted_image = calibration.distort_by_calibration(arraySrc=image_data, dstCalib=pinhole,srcCalib=cam_calib)
+            bgr_image = cv2.cvtColor(np.array(undistorted_image), cv2.COLOR_RGB2BGR)
+            bgr_hxw_imgs.append(cv2.rotate(bgr_image, cv2.ROTATE_90_CLOCKWISE))
 
-    The metadata.json file should contain the fields to build an aruco marker detector.
+        fx, fy = pinhole.get_focal_lengths()
+        cx, cy = pinhole.get_principal_point()
+        mtx = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
 
-    :param input_folder: the location of the input data folder
-    :return: A Dictionary:
-    {
-        headset_images: headset_images (NxWxHx3-uint8 numpy array),
-        headset_cam_mtx: 3x3 numpy array of the cam_mtx or None (either headset_calibration_images or robot_cam_mtx is not none)
-        headset_list_coefficients: A list of floats and with the headset cam distortion coefficients
+        return cls(bgr_image_s=np.array(bgr_hxw_imgs),intrinsic_camera_matrix=mtx, distortion_coefficients=[0,0,0,0,0])
 
-        robot_rgb_images:  (NxWxHx3-uint8 numpy array),
-        robot_depth_images: (NxWxH numpy array)
-        robot_images_names: robot_image_names list of strings of length number of robot images,
-        robot_rgb_cam_mtx: A 3x3 Numpy array with the intrinsic matrix of the rgb camera
-        robot_depth_cam_mtx: A 3x3 Numpy array with the intrinsic matrix of the depth camera
-        robot_depth_dist: A list of floats and with the robot rgb cam distortion coefficients
-        robot_rgb_dist: A list of floats and with the robot_rgb cam distortion coefficients
+    @property
+    def bgr_image_s(self):
+        return self._bgr_image_s
 
-        robot_base_t_camera_s: A list of Nx4x4 numpy of transformation matrices or None if those are not provided
-        robot_camera_t_marker_s: A list of Nx4x4 numpy of transformation matrices or None if those are not provided
-        aruco_marker_detector: A ArucoMarkerDetector object or None if the aruco marker detector was not provided
-    }
-    """
+    @property
+    def intrinsic_camera_matrix(self):
+        return self._intrinsic_camera_matrix
 
-    # vrs file handling
-    vrs_files = [file for file in os.listdir(f"{input_folder}") if file.endswith('.vrs')]
-    if len(vrs_files) == 0:
-        raise Exception(f"No VRS files found at {input_folder}", FileNotFoundError)
-    if len(vrs_files) > 1:
-        print(f"Found multiple .vrs files, using {vrs_files[0]}")
-    headset_images, headset_mtx, headset_dist_coef = vrs_to_images_intrinsic(f"{input_folder}/{vrs_files[0]}")
-
-    # Load Robot images
-    robot_folder_names = [f"{folder_name}" for folder_name in os.listdir(f"{input_folder}/robot")]
-    try:
-        robot_folder_names = sorted(robot_folder_names, key=lambda x: int(x))
-    except Exception:
-        print("could not sort robot images as numbers")
-
-
-    robot_rgb_images, robot_depth_images, robot_base_t_cameras, robot_camera_t_marker = [], [], [], []
-
-    for folder in robot_folder_names:
-        location = f"{input_folder}/robot/{folder}"
-
-        robot_rgb_images.append(cv2.cvtColor(cv2.imread(f"{location}/rgb.png"), cv2.COLOR_BGR2RGB))
-        robot_depth_images.append(np.load(f"{location}/depth.npy"))
-
-        poses_dict = json.load(open(f"{location}/poses.json"))
-        robot_base_t_cameras.append(np.array(poses_dict["base_t_cam"]))
-        robot_camera_t_marker.append(np.array(poses_dict["camera_t_marker"]) if poses_dict["camera_t_marker"] is not None else None)
-
-
-    # Load Robot calibration
-    robot_calibration = json.loads(open(f"{input_folder}/robot_cam_calibration.json").read())
-
-    # Load aruco marker
-    aruco_marker_detector = None
-    if os.path.exists(f"{input_folder}/metadata.json"):
-        aruco_marker_detector = build_aruco_charuco_detector(json.load(open(f"{input_folder}/metadata.json")))
-
-    ret_dict = {
-        "headset_images": headset_images,
-        "headset_cam_mtx": headset_mtx,
-        "headset_dist_coef": headset_dist_coef,
-
-        "robot_rgb_images": robot_rgb_images,
-        "robot_depth_images": robot_depth_images,
-        "robot_folder_names": robot_folder_names,
-        "robot_base_t_camera_s": robot_base_t_cameras,
-        "robot_camera_t_marker_s": robot_camera_t_marker,
-
-        "robot_rgb_cam_mtx": np.array(robot_calibration["rgb_camera_matrix"]),
-        "robot_depth_cam_mtx": np.array(robot_calibration["depth_camera_matrix"]),
-        "robot_depth_dist": robot_calibration["depth_distortion_coefficients"],
-        "robot_rgb_dist": robot_calibration["rgb_distortion_coefficients"],
-        "marker_detector": aruco_marker_detector
-    }
-
-    return ret_dict
-
+    @property
+    def distortion_coefficients(self):
+        return self._distortion_coefficients

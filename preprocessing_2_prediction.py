@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import open3d as o3d
 
 def assert_intrinsic_mat(m:np.ndarray, hxw_img: np.ndarray | None)->bool:
     assert m.shape == (3, 3), f"M not 3x3 {m.shape}"
@@ -14,6 +15,33 @@ def assert_homogeneous_mat(m:np.ndarray, abs_tolerance:float = 0.001) -> bool:
     assert np.allclose(m[:3, :3] @ m[:3, :3].T, np.eye(3), atol=abs_tolerance), f"Rot part not invertible by transpose: {m[:3, :3] @ m[:3, :3].T}"
     assert np.isclose(np.linalg.det(m[:3, :3]), 1, atol=abs_tolerance), f"Determinant is not 1: {np.linalg.det(m[:3, :3])}"
     return True
+
+def create_3d_camera(
+        base_t_camera:np.ndarray,
+        intrinsics: np.ndarray,
+        hxw_img: np.ndarray,
+        scale:float = 0.1
+    ):
+    assert assert_intrinsic_mat(intrinsics, hxw_img)
+    assert assert_homogeneous_mat(base_t_camera)
+    assert np.abs(scale) > 1e-6
+    fx, fy, cx, cy = intrinsics[0,0], intrinsics[1,1], intrinsics[0,2], intrinsics[1,2]
+    w, h = hxw_img.shape[1], hxw_img.shape[0]
+
+    corners_hom = np.array([
+        [-cx/fx, -cy/fy, 1.0, 1.0/scale],
+        [(w-cx)/fx, -cy/fy, 1.0, 1.0/scale],
+        [(w-cx)/fx, (h-cy)/fy, 1.0, 1.0/scale],
+        [-cx/fx, (h-cy)/fy, 1.0, 1.0/scale],
+        [0,0,0, 1.0/scale]
+    ])*scale
+    corners = (base_t_camera @ corners_hom.T)[:3, :]
+    lines = o3d.geometry.LineSet()
+    lines.points = o3d.utility.Vector3dVector(corners.T)
+    lines.lines = o3d.utility.Vector2iVector(
+        [[0,1], [1,2], [2,3], [3,4], [4,0], [4,1], [4,2], [4,3]]
+    )
+    return lines
 
 
 class PredictionData:
@@ -174,7 +202,39 @@ class PredictionData:
         point_cloud_o3d.points = open3d.utility.Vector3dVector(self.point_cloud)
         open3d.io.write_point_cloud(f"{location}/pointcloud.ply", point_cloud_o3d, write_ascii=True)
 
-    #TODO visualisation function
+    def visualize_3d_data(self):
+        import open3d as o3d
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self.point_cloud)
+
+        base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
+
+        robot_camera_s = []
+        for idx, b_t_c in enumerate(self.robot_base_t_robot_camera_s):
+            cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+            cam_frame.transform(b_t_c)
+            robot_camera_s.append(cam_frame)
+            robot_camera_s.append(create_3d_camera(
+                base_t_camera=b_t_c,
+                intrinsics=self.robot_bgr_intrinsics,
+                hxw_img=self.robot_bgr_images[0],
+                scale=0.1
+            ))
+
+        to_vis = [pcd, base_frame]+robot_camera_s
+
+        if self.robot_base_t_headset is not None:
+            headset_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
+            to_vis.append(create_3d_camera(
+                base_t_camera=self.robot_base_t_headset,
+                intrinsics=self.headset_intrinsics,
+                hxw_img=self.headset_bgr_image,
+                scale=0.2
+            ))
+            headset_frame.Transform(self.robot_base_t_headset)
+            to_vis.append(headset_frame)
+
+        o3d.visualization.draw_geometries(to_vis, f"Processed Data {self.name} visualization")
 
     @property
     def name(self)->str:

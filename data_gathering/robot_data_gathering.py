@@ -1,13 +1,9 @@
-import os
+import os, cv2, json, argparse, shutil, sys
 import numpy as np
-import cv2
-import json
-import argparse
-import shutil
-
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from aruco_charuco_detection import ArucoCharucoDetector, ArucoDetector, CharucoDetector
 
 calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2)
