@@ -5,44 +5,41 @@ from matplotlib.gridspec import GridSpec
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from aruco_charuco_detection import ArucoCharucoDetector, ArucoDetector, CharucoDetector
-from gathering_2_preprocessing import compute_pose_pseudo_median
+from gathering_2_preprocessing import compute_pose_pseudo_median, GatheredRobotData
 
 calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2)
 
 
 
 def optimize_robot_data(
-        rgb_images: list[np.ndarray],
+        bgr_images: list[np.ndarray],
         base_t_gripper_s: list[np.ndarray],
-        rgb_cam_mat: np.ndarray,
-        rgb_cam_dist_coef: list[float],
-        output_folder:str = "data",
+        color_cam_mat: np.ndarray,
+        color_cam_dist_coef: list[float],
+        depth_images: np.ndarray,
+        depth_cam_mat: np.ndarray,
+        depth_cam_distortion_coefficients: list[float],
+        name: str = "rob_data1",
         marker_detector: ArucoCharucoDetector | None = None,
         gripper_t_cam: np.ndarray|None = None,
         base_t_gripper_outlier_quantiles:tuple[float, float] = (0.2, 0.2)
-    ):
+    )->GatheredRobotData:
     """
-    Creates the following output folder format by moving the robot and taking images:
+    Processed Raw gathered robot data to get a GatheredRobotData instance
 
-    `output_folder`
-    ├── robot
-    │   └── multiple folders with the contents:
-    │       ├──  A rgb.png image
-    │       ├──  A poses.json file
-    │       └──  A depth.npy file
-    ├── cam_t_gripper.npy
-    └── robot_cam_calibration.json
-
-    :param rgb_images: list of WxHx3-uint8 rgb images
+    :param bgr_images: list of HxWx3-uint8 bgr images
     :param gripper_t_cam: A 4x4 transformation matrix for gripper^T_Cam, if None will be estimated
     :param marker_detector: A aruco/charuco marker detector depending on what will be seen in the images
                             or none if they should not be estimated (but then gripper_t_cam must be provided)
-    :param rgb_cam_dist_coef: distortion coefficients for the camera
-    :param rgb_cam_mat: intrinsic camera matrix
+    :param color_cam_dist_coef: distortion coefficients for the color camera
+    :param color_cam_mat: intrinsic camera matrix
+    :param depth_images: A NxHxW-float array of depth images
+    :param depth_cam_mat: The intrinsic 3x3 matrix of the depth camera
+    :param depth_cam_distortion_coefficients: The distortion coefficients of the depth camera
     :param base_t_gripper_s: list of 4x4 transformation matrices for the robot base^T_gripper
-    :param output_folder: the name of the output folder
+    :param name: the name of the output folder/ dataset
     :param base_t_gripper_outlier_quantiles the quantiles of base_t_gripper estimates to remove, first float for translation and second for rotation
-    :return: nothing
+    :return: a GatheredRobotData instance
     """
 
     if gripper_t_cam is None and marker_detector is None:
@@ -88,47 +85,36 @@ def optimize_robot_data(
             if not low_t_err or not low_r_err:
                 camera_t_marker_s[idx] = None
 
+    return GatheredRobotData(
+        name = name,
+        bgr_images=np.array(rgb_images),
+        color_cam_mtx=rgb_cam_mat,
+        color_cam_distortion_coefficients=rgb_cam_dist_coef,
+        depth_images=depth_images,
+        depth_cam_mtx=depth_cam_mat,
+        depth_cam_distortion_coefficients=depth_cam_distortion_coefficients,
+        base_t_gripper_s=np.array(base_t_gripper_s),
+        camera_t_marker_s=camera_t_marker_s,
+        marker_detector=marker_detector,
+        gripper_t_cam=gripper_t_cam
+    )
 
-    for i, (rgb_image, base_t_gripper) in enumerate(zip(rgb_images, base_t_gripper_s)):
-        os.makedirs(f"{output_folder}/robot/{i:06d}", exist_ok=True)
-
-        pose_dict = {
-            "base_t_gripper": base_t_gripper.tolist(),
-            "gripper_t_cam": gripper_t_cam.tolist(),
-            "base_t_cam": (base_t_gripper @ gripper_t_cam).tolist(),
-            "camera_t_marker": camera_t_marker_s[i].tolist() if camera_t_marker_s[i] is not None else None,
-        }
-        with open(f"{output_folder}/robot/{i:06d}/poses.json", 'w') as f:
-            json.dump(pose_dict, f, indent=4)
-    
-    np.save(f"{output_folder}/gripper_t_cam.npy", gripper_t_cam)
-    
 
 
 
 def check_output_data(
+        gathered_data: GatheredRobotData,
         output_folder:str = "data",
         use_mean:bool = True,
         save_result:bool = True,
 ):
     """
     Displays statistics for the estimated base_t_camera poses
-    :param output_folder: Where the output is stored
     :param use_mean: Whether to treat the pose mean or median as the truth
     :param save_result: Whether to save the results in output_folder/data_collect_analysis.pdf or not
+    :param output_folder: Where the result will be saved
     """
-    print("\n\n\n checking results")
-    json_files = []
-    for folder in os.listdir(f"{output_folder}/robot"):
-        with open(f"{output_folder}/robot/{folder}/poses.json", 'r') as f:
-            json_files.append(json.load(f))
-
-
-    base_t_gripper_s = np.array([pose["base_t_gripper"] for pose in json_files])
-    gripper_t_camera_s = np.array([pose["gripper_t_cam"] for pose in json_files])
-    camera_t_marker_s = [(np.array(pose["camera_t_marker"]) if pose["camera_t_marker"] is not None else None) for pose in json_files]
-
-    base_t_marker_s = [r_t_g @ g_t_c @ c_t_a for r_t_g, g_t_c, c_t_a in zip(base_t_gripper_s, gripper_t_camera_s, camera_t_marker_s) if c_t_a is not None]
+    base_t_marker_s = [r_t_g @ gathered_data.gripper_t_cam @ c_t_a for r_t_g, c_t_a in zip(base_t_gripper_s, gathered_data.camera_t_marker_s) if c_t_a is not None]
 
     if len(base_t_marker_s) < 1:
         return
@@ -158,7 +144,7 @@ def check_output_data(
     cor_text = np.char.mod('%7.3f', np.round(np.corrcoef(np.array(base_t_marker_s)[:,:3,3]*1000, rowvar = False), 3))
 
     text = f"""
-{len([p for p in camera_t_marker_s if p is not None])}/{len(camera_t_marker_s)} positions have marker pose estimates
+{len([p for p in gathered_data.camera_t_marker_s if p is not None])}/{len(gathered_data.camera_t_marker_s)} positions have marker pose estimates
 
 Avg translational error: {np.round(np.mean(translational_errors_mm), 3)}mm
 Avg rotational error: {np.round(np.mean(rotational_errors_deg), 3)}°
@@ -283,6 +269,14 @@ if __name__ == "__main__":
             rgb_cam_mat = np.array(json_file["rgb_camera_matrix"])
             rgb_cam_dist_coef = json_file["rgb_distortion_coefficients"]
 
+    folders = sorted(os.listdir(f"{args.output_folder}/robot"))
+    depth_images = np.array([np.load(f"{args.output_folder}/robot/{folder}/depth.npy") for folder in folders])
+
+    with open(f"{args.output_folder}/robot_cam_calibration.json", 'r') as f:
+        json_file = json.load(f)
+        depth_cam_mat = np.array(json_file["depth_camera_matrix"])
+        depth_cam_dist_coef = json_file["depth_distortion_coefficients"]
+
 
     marker_detector = None
 
@@ -308,18 +302,23 @@ if __name__ == "__main__":
 
 
     optimize_robot_data(
-        rgb_images=rgb_images,
+        bgr_images=rgb_images,
         base_t_gripper_s=base_t_gripper_s,
-        rgb_cam_mat=rgb_cam_mat,
-        rgb_cam_dist_coef=rgb_cam_dist_coef,
-        output_folder=args.output_folder,
+        color_cam_mat=rgb_cam_mat,
+        color_cam_dist_coef=rgb_cam_dist_coef,
+        depth_images=depth_images,
+        depth_cam_mat=depth_cam_mat,
+        depth_cam_distortion_coefficients=depth_cam_dist_coef,
         gripper_t_cam=gripper_t_cam,
         marker_detector = marker_detector,
         base_t_gripper_outlier_quantiles=(args.pose_outlier_quants[0], args.pose_outlier_quants[1]),
-    )
+    ).save(folder=os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
+
+    gd = GatheredRobotData.from_folder(args.output_folder)
 
     if args.analyze_results:
         check_output_data(
+            gathered_data=gd,
             output_folder = args.output_folder,
             use_mean= (True if args.analysis_baseline == "mean" else False),
             save_result=args.save_analysis_results

@@ -62,14 +62,14 @@ def process_data(
     headset_cam_mtx = headset_data.intrinsic_camera_matrix
     headset_cam_dist_coef = headset_data.distortion_coefficients
 
-    robot_bgr_images = robot_data.robot_bgr_images
-    robot_depth_images = robot_data.robot_depth_images
-    robot_camera_t_marker_s = robot_data.robot_camera_t_marker_s
-    robot_base_t_robot_camera_s = robot_data.robot_base_t_camera_s
+    robot_bgr_images = robot_data.bgr_images
+    robot_depth_images = robot_data.depth_images
+    robot_camera_t_marker_s = robot_data.camera_t_marker_s
+    robot_base_t_robot_camera_s = robot_data.base_t_camera_s
 
-    robot_bgr_cam_mtx = robot_data.robot_bgr_cam_mtx
-    robot_bgr_cam_dist_coef = robot_data.robot_bgr_distortion_coefficients
-    robot_depth_cam_mtx:np.ndarray = robot_data.robot_depth_cam_mtx
+    robot_bgr_cam_mtx = robot_data.color_cam_mtx
+    robot_bgr_cam_dist_coef = robot_data.color_distortion_coefficients
+    robot_depth_cam_mtx:np.ndarray = robot_data.depth_cam_mtx
 
 
     # Marker handling
@@ -200,7 +200,8 @@ if __name__ == "__main__":
         est3d_point_cloud_iforest_confidence_threshold= 0.1,
         est3d_use_depth_images= False,
         est3d_use_map_anything = False,
-        est3d_use_sam3_for_foreground_seg = True,
+        est3d_use_sam3_for_foreground_seg = False,
+        est3d_debug_visualize_foreground_masks = True,
     )
     processed_data.save(os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
     pd = PredictionData.from_folder(args.output_folder)

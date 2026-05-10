@@ -48,28 +48,34 @@ def create_foreground_masks(
     model = Sam3Model.from_pretrained("facebook/sam3").to(device)
     processor = Sam3Processor.from_pretrained("facebook/sam3")
 
+    prompts = [
+        ("distinct objects", True),
+        ("foreground", True),
+        ("tabletop", False),
+        ("background", False),
+    ]
     masks = []
     for idx, image in enumerate(images):
-        # TODO add batching for better performance / better prompts
-        inputs = processor(images=Image.fromarray(image.astype(np.uint8)), text = "distinct objects",return_tensors="pt").to(device)
+        mask = np.zeros((image.shape[0], image.shape[1]), dtype=bool)
+        for text, positive in prompts:
+            inputs = processor(images=Image.fromarray(image.astype(np.uint8)), text = text,return_tensors="pt").to(device)
         
-        with torch.no_grad():
-            outputs = model(**inputs)
-        
-        results = processor.post_process_instance_segmentation(
-            outputs,
-            threshold=threshold,
-            mask_threshold=mask_threshold,
-            target_sizes=inputs.get("original_sizes").tolist()
-        )[0]
+            with torch.no_grad():
+                outputs = model(**inputs)
 
-        if 'masks' in results and len(results['masks']) > 0:
-            instance_masks = results['masks'].cpu().numpy()
-            foreground_mask = np.any(instance_masks, axis=0)
-            masks.append(foreground_mask)
-        else:
-            masks.append(np.full((image.shape[0], image.shape[1]), False))
-        
+            results = processor.post_process_instance_segmentation(
+                outputs,
+                threshold=threshold,
+                mask_threshold=mask_threshold,
+                target_sizes=inputs.get("original_sizes").tolist()
+            )[0]
+
+            if 'masks' in results and len(results['masks']) > 0:
+                instance_masks = results['masks'].cpu().numpy()
+                aggregated_mask = np.any(instance_masks, axis=0)
+                mask = np.logical_and(mask, aggregated_mask if positive else np.logical_not(aggregated_mask))
+
+        masks.append(mask)
         if visualize_masks:
             plt.figure(figsize=(15, 5))
             plt.imshow(image)
