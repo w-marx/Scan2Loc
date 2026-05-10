@@ -159,7 +159,7 @@ def create_point_cloud(
         visualize_point_cloud:bool = False,
 )-> tuple[list[np.ndarray], list[np.ndarray], np.ndarray, np.ndarray]:
     """
-    :param rgb_images: A NxHxWx3-uint8/uint16/uint32/uint64/float32 numpy array of RGB images
+    :param rgb_images: A NxHxWx3-uint8/uint16/uint32/uint64/float32 numpy array of BGR images
     :param base_t_cam_s: A Nx4x4-float numpy array of base_t_cam homogeneous transformation matrices
     :param depth_images: A NxHxW-float32 numpy array of depth images (in meters) or None
     :param camera_intrinsics: A 3x3-float numpy-matrix of the camera intrinsics
@@ -167,7 +167,7 @@ def create_point_cloud(
     :param image_mask_generator: A Function that takes a NxHxW-uint8 image array and returns a NxHxW-bool numpy array of masks
     :param visualize_point_cloud: Whether to visualize the generated point cloud
     :return 
-    1. a list of RGB images as numpy array
+    1. a list of BGR images as numpy array
     2. a list of xyz world point images as numpy array
     3. a point cloud as a Nx3 numpy array
     4. the updated camera matrix (3x3 numpy array)
