@@ -125,7 +125,7 @@ def process_data(
 
     if est3d_use_map_anything:
         robot_bgr_images, robot_base_xyz_imgs, point_cloud, robot_bgr_cam_mtx = create_point_cloud(
-            rgb_images=np.array(robot_bgr_images),
+            bgr_images=np.array(robot_bgr_images),
             base_t_cam_s=np.array(robot_base_t_robot_camera_s),
             depth_images=np.array(robot_depth_images) if est3d_use_depth_images else None,
             camera_intrinsics=robot_bgr_cam_mtx if est3d_use_intrinsic_cam_mtx else None,
@@ -198,12 +198,12 @@ if __name__ == "__main__":
         robot_data = robot_data,
         headset_data=headset_data,
         est3d_debug_point_cloud_visualize_result= False,
-        number_of_sampled_datapoints = 3,
+        number_of_sampled_datapoints = 4,
         est3d_point_cloud_iforest_confidence_threshold= 0.1,
         est3d_use_depth_images= False,
-        est3d_use_map_anything = False,
+        est3d_use_map_anything = True,
         est3d_use_sam3_for_foreground_seg = True,
-        est3d_debug_visualize_foreground_masks = True,
+        #est3d_debug_visualize_foreground_masks = True,
     )
     processed_data.save(os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
     pd = PredictionData.from_folder(args.output_folder)

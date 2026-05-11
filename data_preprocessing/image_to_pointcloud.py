@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Literal
 import torch
 import numpy as np
 import open3d as o3d
@@ -112,33 +112,13 @@ def remove_outliers_from_point_cloud(points:np.ndarray, contamination:float = 0.
     prediction = forest.predict(points)
     return points[prediction==1]
 
-# TODO remove match_poses and/or kabsch_umeyama if not needed anymore
-def match_poses(poses_to_match:np.ndarray, actual_poses:np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
-    """
-    Solves that vggts center is off and that the scaling might be wrong.
-    To do this the kabsch umeyama algorithm is used (needs at least 3 poses)
 
-    :param poses_to_match: The R_t_cam poses estimated by vggt
-    :param actual_poses: The actual robot_base_t_cam poses
-    :return: a function that maps vggt [x,y,z] points into the real coordinate system
-    """
-
-    if poses_to_match.shape != actual_poses.shape or poses_to_match.shape[1:] != (4, 4):
-        raise Exception(f"Cant match poses on pose shapes: {poses_to_match.shape}, {actual_poses.shape}")
-
-    if poses_to_match.shape[0] < 3:
-        raise Exception(f"Not enough poses to correct correctly, only {len(poses_to_match)} provided, need at least 3")
-
-    to_match_points = poses_to_match[:, :3, 3]
-    actual_points = actual_poses[:, :3, 3]
-    R, c, t = kabsch_umeyama(actual_points, to_match_points)
-    return lambda point: t + c * R @ point
-def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
     """
     Taken from: https://zpl.fi/aligning-point-patterns-with-kabsch-umeyama-algorithm/
     :param A: list of 3D points
     :param B: list of 3D points
-    :return: R, c, t to translate the points B to the points A
+    :return: A function to transform the points B to the points A
     """
     assert A.shape == B.shape
     n, m = A.shape
@@ -156,20 +136,21 @@ def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> tuple[np.ndarray, np.ndarray, 
     c = VarA / np.trace(np.diag(D) @ S)
     t = EA - c * R @ EB
 
-    return R, c, t
+    return lambda points: (t.reshape(3,1) + c * R @ points.T).T
 
 
 def create_point_cloud(
-        rgb_images:np.ndarray,
+        bgr_images:np.ndarray,
         base_t_cam_s: np.ndarray,
         depth_images:np.ndarray | None = None,
         camera_intrinsics:np.ndarray = None,
         confidence_threshold_percent:int = 10,
         image_mask_generator:Callable[[np.ndarray], np.ndarray]|None = None,
         visualize_point_cloud:bool = False,
+        alginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama"
 )-> tuple[list[np.ndarray], list[np.ndarray], np.ndarray, np.ndarray]:
     """
-    :param rgb_images: A NxHxWx3-uint8/uint16/uint32/uint64/float32 numpy array of BGR images
+    :param bgr_images: A NxHxWx3-uint8/uint16/uint32/uint64/float32 numpy array of BGR images
     :param base_t_cam_s: A Nx4x4-float numpy array of base_t_cam homogeneous transformation matrices
     :param depth_images: A NxHxW-float32 numpy array of depth images (in meters) or None
     :param camera_intrinsics: A 3x3-float numpy-matrix of the camera intrinsics
@@ -183,8 +164,8 @@ def create_point_cloud(
     4. the updated camera matrix (3x3 numpy array)
     """
 
-    assert rgb_images.shape[0] == base_t_cam_s.shape[0] , f"Number of rgb images and poses dont match: {rgb_images.shape}, {base_t_cam_s.shape}"
-    assert depth_images is None or depth_images.shape[:3] == rgb_images.shape[:3], f"RGB: {rgb_images.shape}, Depth: {depth_images.shape} image dims dont match"    
+    assert bgr_images.shape[0] == base_t_cam_s.shape[0] , f"Number of rgb images and poses dont match: {bgr_images.shape}, {base_t_cam_s.shape}"
+    assert depth_images is None or depth_images.shape[:3] == bgr_images.shape[:3], f"RGB: {bgr_images.shape}, Depth: {depth_images.shape} image dims dont match"    
     assert camera_intrinsics.shape == (3,3), f"Camera intrinsics shape is not 3x3: {camera_intrinsics.shape}"
     assert 0 <= confidence_threshold_percent <= 100, f"confidence_threshhold_percent should be between 0 and 100 is {confidence_threshold_percent}"
 
@@ -198,14 +179,22 @@ def create_point_cloud(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = MapAnything.from_pretrained("facebook/map-anything").to(device)
-    if rgb_images.dtype in [np.uint8, np.uint16, np.uint32, np.uint64]:
-        rgb_images = rgb_images.astype(np.float32)/255.0
+    if bgr_images.dtype in [np.uint8, np.uint16, np.uint32, np.uint64]:
+        bgr_images = bgr_images.astype(np.float32)/255.0 # wrong in the documentation :( needs 0-1
 
     views = []
-    for image, base_t_cam in zip(rgb_images, base_t_cam_s):
+
+    flip_z = np.array([
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ])
+    
+    for image, base_t_cam in zip(bgr_images, base_t_cam_s):
         views.append({
             "img":image,
-            "camera_poses":base_t_cam,
+            "camera_poses":flip_z @ base_t_cam,
             "intrinsics": camera_intrinsics.astype(np.float32)
         })
 
@@ -219,8 +208,8 @@ def create_point_cloud(
     processed_views = preprocess_inputs(views)
 
 
-    rgb_images = [rgb(view['img'], view['data_norm_type'][0])[0] for view in processed_views]
-    rgb_images = [((img*255).astype(np.uint8) if img.dtype in [np.float16, np.float32, np.float64] else img) for img in rgb_images]
+    bgr_images = [rgb(view['img'], view['data_norm_type'][0])[0] for view in processed_views]
+    bgr_images = [((img*255).astype(np.uint8) if img.dtype in [np.float16, np.float32, np.float64] else img) for img in bgr_images]
 
     camera_intrinsics = [view['intrinsics'][0].cpu().numpy() for view in processed_views][0]
 
@@ -243,19 +232,35 @@ def create_point_cloud(
     )
 
 
-    world_xyz_images = [view['pts3d'][0].cpu().numpy() for view in predictions]
-    all_world_points = np.array(world_xyz_images).reshape(-1, 3)
+    world_xyz_images = np.array([view['pts3d'][0].cpu().numpy() for view in predictions])
 
+    if alginment_method == "simple":
+        world_xyz_images = []
+        cam_xyz_images = [view['pts3d_cam'][0].cpu().numpy() for view in predictions]
+        for cam_img, base_t_cam in zip(cam_xyz_images, base_t_cam_s):
+            cam_points = cam_img.reshape(-1,3)
+            cam_points_hom = np.hstack([cam_points, np.ones((cam_points.shape[0],1))])
+            world_points = (base_t_cam @ cam_points_hom.T).T
+            world_xyz_images.append(world_points[:, :3].reshape(cam_img.shape[0], cam_img.shape[1], cam_img.shape[2]))
+        world_xyz_images = np.array(world_xyz_images)
+
+    if alginment_method == "kabsch-umeyama":
+        camera_true_positions = base_t_cam_s[:,:3,3]
+        camera_new_positions = np.array([view['cam_trans'][0].cpu().numpy() for view in predictions])
+        transform_points_to_old = kabsch_umeyama(camera_true_positions, camera_new_positions)
+        world_xyz_images = transform_points_to_old(world_xyz_images.reshape(-1,3)).reshape(world_xyz_images.shape)
+
+    # Generate pointcloud
+    point_cloud = world_xyz_images.reshape(-1, 3)
     if image_mask_generator is not None:
-        all_world_points = all_world_points[image_mask_generator(np.array(rgb_images)).reshape(-1)]
-
+        point_cloud = point_cloud[image_mask_generator(np.array(bgr_images)).reshape(-1)]
     if visualize_point_cloud:
         vis_point_cloud = o3d.geometry.PointCloud()
-        vis_point_cloud.points = o3d.utility.Vector3dVector(all_world_points)
+        vis_point_cloud.points = o3d.utility.Vector3dVector(point_cloud)
         o3d.visualization.draw_geometries([vis_point_cloud], window_name = "3D Point cloud visualization")
 
-    assert np.array(rgb_images).shape == np.array(world_xyz_images).shape, f"rgb: {np.array(rgb_images).shape} xyz {np.array(world_xyz_images).shape}"
-    return rgb_images, world_xyz_images,all_world_points, camera_intrinsics
+    assert np.array(bgr_images).shape == np.array(world_xyz_images).shape, f"bgr: {np.array(bgr_images).shape} xyz {np.array(world_xyz_images).shape}"
+    return bgr_images, world_xyz_images,point_cloud, camera_intrinsics
 
 
 def create_point_cloud_simple(
