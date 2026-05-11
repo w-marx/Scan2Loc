@@ -103,9 +103,6 @@ def remove_outliers_from_point_cloud(points:np.ndarray, contamination:float = 0.
     if contamination == 1.0:
         return np.empty((0,3))
 
-    if points.shape[0] > 1000000:
-        warnings.warn(f"Using Iforest on {points.shape[0]} points may take a long time", RuntimeWarning)
-
     from sklearn.ensemble import IsolationForest
     forest = IsolationForest(contamination=contamination)
     forest.fit(points)
@@ -147,28 +144,45 @@ def create_point_cloud(
         confidence_threshold_percent:int = 10,
         image_mask_generator:Callable[[np.ndarray], np.ndarray]|None = None,
         visualize_point_cloud:bool = False,
-        alginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama"
-)-> tuple[list[np.ndarray], list[np.ndarray], np.ndarray, np.ndarray]:
+        alginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama",
+        crop_square:bool = True
+)-> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     :param bgr_images: A NxHxWx3-uint8/uint16/uint32/uint64/float32 numpy array of BGR images
     :param base_t_cam_s: A Nx4x4-float numpy array of base_t_cam homogeneous transformation matrices
-    :param depth_images: A NxHxW-float32 numpy array of depth images (in meters) or None
+    :param depth_images: A NxHxW-float32 numpy array of depth images (in meters) or None, SHOULD NOT BE USED IF DEPTH AND BGR ARE NOT ALIGNED
     :param camera_intrinsics: A 3x3-float numpy-matrix of the camera intrinsics
     :param confidence_threshold_percent: Percentage of low confidence points to be removed (between 0 and 100)
     :param image_mask_generator: A Function that takes a NxHxW-uint8 image array and returns a NxHxW-bool numpy array of masks
     :param visualize_point_cloud: Whether to visualize the generated point cloud
+    :param crop_square: Crops the bgr images to be sqare to utilize the full ~500x500 image size allowed by mapanything (dont use if distortion is not 0)
     :return 
-    1. a list of BGR images as numpy array
-    2. a list of xyz world point images as numpy array
+    1. NxWxHx3-uint8 BGR images as numpy array
+    2. NxWxHx3-float larray of xyz world point images
     3. a point cloud as a Nx3 numpy array
     4. the updated camera matrix (3x3 numpy array)
     """
 
-    assert bgr_images.shape[0] == base_t_cam_s.shape[0] , f"Number of rgb images and poses dont match: {bgr_images.shape}, {base_t_cam_s.shape}"
-    assert depth_images is None or depth_images.shape[:3] == bgr_images.shape[:3], f"RGB: {bgr_images.shape}, Depth: {depth_images.shape} image dims dont match"    
+    assert bgr_images.shape[0] == base_t_cam_s.shape[0] , f"Number of bgr images and poses dont match: {bgr_images.shape}, {base_t_cam_s.shape}"
+    assert depth_images is None or depth_images.shape[:3] == bgr_images.shape[:3], f"BGR: {bgr_images.shape}, Depth: {depth_images.shape} image dims dont match"    
     assert camera_intrinsics.shape == (3,3), f"Camera intrinsics shape is not 3x3: {camera_intrinsics.shape}"
     assert 0 <= confidence_threshold_percent <= 100, f"confidence_threshhold_percent should be between 0 and 100 is {confidence_threshold_percent}"
 
+    if crop_square and depth_images is not None:
+        warnings.warn("Depth images and cropping only color images will missalign the depth & color camera -> bad reconstruction", UserWarning)
+
+    if crop_square:
+        h_orig = bgr_images.shape[1]
+        w_orig = bgr_images.shape[2]
+
+        if w_orig > h_orig+2:
+            crop_amount = int((w_orig-h_orig)/2)
+            bgr_images = bgr_images[:,:,crop_amount:-crop_amount,:]
+            camera_intrinsics[0,2] -= crop_amount
+        elif h_orig > w_orig+2:
+            crop_amount = int((h_orig-w_orig)/2)
+            bgr_images = bgr_images[:,crop_amount:-crop_amount,:,:]
+            camera_intrinsics[1,2] -= crop_amount
 
     import os
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -183,18 +197,11 @@ def create_point_cloud(
         bgr_images = bgr_images.astype(np.float32)/255.0 # wrong in the documentation :( needs 0-1
 
     views = []
-
-    flip_z = np.array([
-        [1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-    ])
-    
+    print(f"image shape before processing: {bgr_images.shape}")
     for image, base_t_cam in zip(bgr_images, base_t_cam_s):
         views.append({
             "img":image,
-            "camera_poses":flip_z @ base_t_cam,
+            "camera_poses": base_t_cam,
             "intrinsics": camera_intrinsics.astype(np.float32)
         })
 
@@ -259,6 +266,7 @@ def create_point_cloud(
         vis_point_cloud.points = o3d.utility.Vector3dVector(point_cloud)
         o3d.visualization.draw_geometries([vis_point_cloud], window_name = "3D Point cloud visualization")
 
+    print(f"xyz images shape: {world_xyz_images.shape}")
     assert np.array(bgr_images).shape == np.array(world_xyz_images).shape, f"bgr: {np.array(bgr_images).shape} xyz {np.array(world_xyz_images).shape}"
     return bgr_images, world_xyz_images,point_cloud, camera_intrinsics
 
@@ -273,6 +281,7 @@ def create_point_cloud_simple(
 ):
     """
     Uses the depth images to create xyz-images and a point cloud
+    !!! If color cam and depth cam are not Aligned the xyz-imgs cant really be used !!!
     :param depth_images: an array of NxHxW-float numpy arrays
     :param depth_cam_mtx: the intrinsic matrix of the depth camera
     :param base_t_camera_s: the homogeneous transformation matrices from base to camera

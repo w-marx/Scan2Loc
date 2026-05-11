@@ -156,3 +156,4 @@ map-anything/
 data_preprocessing/sam3.pt
 data_preprocessing/runs
 runs/
+processed_datasets

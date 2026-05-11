@@ -4,7 +4,7 @@ from sklearn.externals.array_api_compat import torch
 
 from lightglue import LightGlue, SuperPoint, DISK, SIFT, ALIKED, DoGHardNet
 from lightglue.utils import load_image, rbd
-from predictor_handling import *
+from pose_estimation.predictor_handling import *
 
 
 

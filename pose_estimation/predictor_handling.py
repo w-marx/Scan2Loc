@@ -1,6 +1,4 @@
 import numpy as np
-from load_preprocessed_data import load_preprocessed_data
-
 
 class PosePredictor:
     def __init__(self):
@@ -33,7 +31,7 @@ def grade_predictions(predictions: list[np.ndarray], actual: list[np.ndarray]) -
 
 
 
-def run_predictions(input_dict, predictor:PosePredictor) -> list[np.ndarray]:
+def run_predictions(data:PredictionData, predictor:PosePredictor) -> list[np.ndarray]:
 
     point_cloud: np.ndarray = input_dict["point_cloud"]
     headset_image: np.ndarray = input_dict["headset_image"]

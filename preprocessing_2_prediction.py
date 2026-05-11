@@ -50,10 +50,8 @@ class PredictionData:
             name:str,
             robot_bgr_images:np.ndarray,
             robot_bgr_intrinsics:np.ndarray,
-            robot_bgr_distortion_coefficients:list[float],
             headset_bgr_image: np.ndarray,
             headset_intrinsics: np.ndarray,
-            headset_distortion_coefficients: list[float],
             robot_xyz_images:np.ndarray,
             point_cloud:np.ndarray,
             robot_base_t_robot_camera_s:np.ndarray,
@@ -63,10 +61,8 @@ class PredictionData:
         :param name: the name of the dataset (will be stored under it)
         :param robot_bgr_images: BGR images of the robot as a NxHxWx3-uint8 numpy array
         :param robot_bgr_intrinsics: Intrinsics BGR camera matrix of the robot (3x3 numpy array)
-        :param robot_bgr_distortion_coefficients: Distortion coefficients of the robot (list of floats)
         :param headset_bgr_image: One headset BGR image as a HxWx3-uint8 numpy array
         :param headset_intrinsics: Intrinsics BGR camera matrix of the headset (3x3 numpy array)
-        :param headset_distortion_coefficients: Distortion coefficients of the headset (list of floats)
         :param robot_xyz_images: XYZ images from the pov of the robot as a NxHxWx3-float numpy array
         :param point_cloud: A point cloud of the surroundings as a Nx3-float numpy array
         :param robot_base_t_robot_camera_s: The homogeneous robot_base->robot_camera transformation matrix as a Nx4x4-float numpy array
@@ -82,9 +78,6 @@ class PredictionData:
         assert assert_intrinsic_mat(robot_bgr_intrinsics, robot_bgr_images[0])
         self._robot_bgr_intrinsics = robot_bgr_intrinsics
 
-        assert isinstance(robot_bgr_distortion_coefficients, list) and len(robot_bgr_distortion_coefficients) > 0
-        self._robot_bgr_distortion_coefficients = robot_bgr_distortion_coefficients
-
 
         assert headset_bgr_image.ndim == 3, f"Wrong shape of Headset image {headset_bgr_image.shape}"
         assert headset_bgr_image.shape[0] > 0 and headset_bgr_image.shape[1] > 0 and  headset_bgr_image.shape[2] == 3, f"No BGR images {robot_bgr_images.shape}"
@@ -93,9 +86,6 @@ class PredictionData:
 
         assert assert_intrinsic_mat(headset_intrinsics, headset_bgr_image)
         self._headset_intrinsics = headset_intrinsics
-
-        assert isinstance(headset_distortion_coefficients, list) and len(headset_distortion_coefficients) > 0
-        self._headset_distortion_coefficients = headset_distortion_coefficients
 
 
         assert robot_xyz_images.shape == robot_bgr_images.shape
@@ -148,10 +138,8 @@ class PredictionData:
             name = os.path.basename(load_folder),
             robot_bgr_images = robot_bgr_images,
             robot_bgr_intrinsics = np.array(robot_cam_cal["intrinsic_camera_matrix"]),
-            robot_bgr_distortion_coefficients = robot_cam_cal["distortion_coefficients"],
             headset_bgr_image=cv2.imread(f"{load_folder}/headset.png"),
             headset_intrinsics=np.array(headset_cam_cal["intrinsic_camera_matrix"]),
-            headset_distortion_coefficients=headset_cam_cal["distortion_coefficients"],
             robot_xyz_images=robot_xyz_images,
             point_cloud=point_cloud,
             robot_base_t_robot_camera_s=robot_base_t_robot_cam_s,
@@ -179,9 +167,9 @@ class PredictionData:
 
 
         with open(f"{location}/headset_cam_calibration.json", 'w') as f:
-                json.dump({'intrinsic_camera_matrix': self.headset_intrinsics.tolist(),'distortion_coefficients': self.headset_distortion_coefficients}, f, indent=4)
+                json.dump({'intrinsic_camera_matrix': self.headset_intrinsics.tolist()}, f, indent=4)
         with open(f"{location}/robot_cam_calibration.json", 'w') as f:
-            json.dump({'intrinsic_camera_matrix': self.robot_bgr_intrinsics.tolist(), 'distortion_coefficients': self.robot_bgr_distortion_coefficients}, f, indent=4)
+            json.dump({'intrinsic_camera_matrix': self.robot_bgr_intrinsics.tolist()}, f, indent=4)
 
         if self.robot_base_t_headset is not None:
             with open(f"{location}/label.json", 'w') as f:
@@ -249,20 +237,12 @@ class PredictionData:
         return self._robot_bgr_intrinsics
 
     @property
-    def robot_bgr_distortion_coefficients(self)->list[float]:
-        return self._robot_bgr_distortion_coefficients
-
-    @property
     def headset_bgr_image(self)->np.ndarray:
         return self._headset_bgr_image
 
     @property
     def headset_intrinsics(self)->np.ndarray:
         return self._headset_intrinsics
-
-    @property
-    def headset_distortion_coefficients(self)->list[float]:
-        return self._headset_distortion_coefficients
 
     @property
     def robot_xyz_images(self)->np.ndarray:

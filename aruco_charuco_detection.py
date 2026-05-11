@@ -190,7 +190,7 @@ class CharucoDetector(ArucoCharucoDetector):
         for index, image in enumerate(images):
             charuco_corners, charuco_ids, marker_corners, marker_ids = self.detector.detectBoard(image)
 
-            if len(marker_ids) < self.min_number_of_markers:
+            if marker_ids is None or len(marker_ids) < self.min_number_of_markers:
                 camera_t_charuco_s.append(None)
                 continue
 
@@ -249,6 +249,9 @@ class CharucoDetector(ArucoCharucoDetector):
                 marker_avg = np.mean(marker, axis=0)
                 marker_square = marker_avg+((marker-marker_avg)*self.square_size/self.marker_size)*2
                 marker_squares.append(marker_square)
+            if len(marker_squares) == 0:
+                edited_images.append(image.copy())
+                continue
             marker_square_points = np.vstack(marker_squares)
 
             from scipy.spatial import ConvexHull
