@@ -19,6 +19,7 @@ def process_data(
         markers_use_advanced_removal: bool = False, #TODO
         est3d_use_map_anything: bool = True,
         est3d_use_sam3_for_foreground_seg: bool = True,
+        est3d_custom_sam3_prompts: list[tuple[str, int]] | None = None,
         est3d_xyz_img_custom_downscaling:bool = False, # TODO
         est3d_xyz_img_upscaling:bool = False, #TODO
         est3d_xyz_img_confidence_threshold: int = 10,
@@ -118,7 +119,8 @@ def process_data(
                 images=imgs,
                 threshold=est3d_point_cloud_foreground_object_detection_threshold,
                 mask_threshold = est3d_point_cloud_foreground_masks_conf_threshold,
-                visualize_masks=est3d_debug_visualize_foreground_masks
+                visualize_masks=est3d_debug_visualize_foreground_masks,
+                prompts=est3d_custom_sam3_prompts
     ) if est3d_use_sam3_for_foreground_seg else None
 
     if est3d_use_map_anything:
@@ -200,7 +202,7 @@ if __name__ == "__main__":
         est3d_point_cloud_iforest_confidence_threshold= 0.1,
         est3d_use_depth_images= False,
         est3d_use_map_anything = False,
-        est3d_use_sam3_for_foreground_seg = False,
+        est3d_use_sam3_for_foreground_seg = True,
         est3d_debug_visualize_foreground_masks = True,
     )
     processed_data.save(os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))

@@ -4,6 +4,7 @@ import numpy as np
 import open3d as o3d
 from PIL import Image
 import warnings
+import cv2
 
 import matplotlib.pyplot as plt
 
@@ -24,7 +25,8 @@ def create_foreground_masks(
         images:np.ndarray,
         threshold:float = 0.5,
         mask_threshold:float = 0.5,
-        visualize_masks:bool = False
+        visualize_masks:bool = False,
+        prompts:list[tuple[str, int]] | None = None
     ) -> np.ndarray:
     """
     Uses Sam3 to detect objects/the foreground and returns a mask for each image, which is `True` where an object was detected
@@ -32,11 +34,18 @@ def create_foreground_masks(
     :param threshold: certainty needed by sam3 to detect an object
     :param mask_threshold certainty for mask generation by sam3
     :param visualize_masks: Whether to visualize the masks for debugging
+    :param promts: A list of (sam3prompt, score) tuples, the scores over the different prompts will be added and only pixels with positive values will 
+    be positive in the mask. 
+    Default: [("distinct objects", 1),("foreground", 1),("tabletop", -1),("background", -1),("big plain surfaces", -2),("white paper", -2)]
     :return: NxHxW boolean numpy array of the foreground masks
     """
     assert images.ndim == 4 and images.shape[0] > 0
     assert 0 <= threshold <= 1.0
     assert 0 <= mask_threshold <= 1.0
+
+    if prompts is None:
+        prompts = [("distinct objects", 1),("foreground", 1),("tabletop", -1),("background", -1),("big plain surfaces", -2),("white paper", -2)]
+
     print(f"generating foreground masks for {images.shape[0]} {get_image_type_hxw(images[0])}images")
     if images.dtype in [np.float16,np.float32, np.float64]:
         images = (images*255).astype(np.uint8)
@@ -48,37 +57,32 @@ def create_foreground_masks(
     model = Sam3Model.from_pretrained("facebook/sam3").to(device)
     processor = Sam3Processor.from_pretrained("facebook/sam3")
 
-    prompts = [
-        ("distinct objects", True),
-        ("foreground", True),
-        ("tabletop", False),
-        ("background", False),
-    ]
     masks = []
     for idx, image in enumerate(images):
-        mask = np.zeros((image.shape[0], image.shape[1]), dtype=bool)
-        for text, positive in prompts:
-            inputs = processor(images=Image.fromarray(image.astype(np.uint8)), text = text,return_tensors="pt").to(device)
-        
-            with torch.no_grad():
+        pil_rgb_image = Image.fromarray(cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2RGB))
+        mask = np.zeros((image.shape[0], image.shape[1]), dtype=int)
+        for text, score in prompts:
+            inputs = processor(images=pil_rgb_image, text = text,return_tensors="pt").to(device)
+            
+            with torch.inference_mode():
                 outputs = model(**inputs)
 
-            results = processor.post_process_instance_segmentation(
-                outputs,
-                threshold=threshold,
-                mask_threshold=mask_threshold,
-                target_sizes=inputs.get("original_sizes").tolist()
-            )[0]
+                results = processor.post_process_instance_segmentation(
+                    outputs,
+                    threshold=threshold,
+                    mask_threshold=mask_threshold,
+                    target_sizes=inputs.get("original_sizes").tolist()
+                )[0]
 
             if 'masks' in results and len(results['masks']) > 0:
                 instance_masks = results['masks'].cpu().numpy()
                 aggregated_mask = np.any(instance_masks, axis=0)
-                mask = np.logical_and(mask, aggregated_mask if positive else np.logical_not(aggregated_mask))
+                mask = mask + score * aggregated_mask.astype(int)
 
-        masks.append(mask)
+        masks.append(mask > 0)
         if visualize_masks:
             plt.figure(figsize=(15, 5))
-            plt.imshow(image)
+            plt.imshow(pil_rgb_image)
             plt.imshow(masks[-1], alpha=0.5, cmap='jet')
             plt.show()
     
