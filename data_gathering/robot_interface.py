@@ -7,9 +7,8 @@ from deoxys import config_root
 import pyrealsense2 as rs
 import cv2
 import numpy as np
-import json
-import os
-import time
+import json, os, sys, time
+from proto_robot_data import *
 
 # Some positions for the Franka Panda robot.
 positions = [
@@ -77,30 +76,15 @@ positions = [
     [0.12325, -0.00228, -0.09325, -2.13569, -0.02817, 2.01549, 0.82194],
 ]
 
-def save_intrinsics(rgb_intrinsics, depth_intrinsics, output_folder:str = None, filename:str = None) -> tuple[np.ndarray,list[float],np.ndarray, list[float]]:
+def extract_intrinsics(rgb_intrinsics, depth_intrinsics) -> tuple[np.ndarray,list[float],np.ndarray, list[float]]:
     """
-    Takes intrinsicy and saves them as a json file if output_folder and filename is not none
-    Then returns the intrinsic rgb_camera_mat & coefficients and the intrinsic depth_camera_mat and coefficients
+    Returns the intrinsic rgb_camera_mat & coefficients and the intrinsic depth_camera_mat and coefficients
     :param rgb_intrinsics: The intrinsics of a rgb camera
     :param depth_intrinsics: The intrinsics of a depth camera
-    :param output_folder: The output folder, may be none if saving is not wished. If it doesnt exist it will be created
-    :param filename: The name to save the file under
     :return: he intrinsic rgb_camera_mat & distortion_coefficients & depth_camera_mat and distortion_coefficients
     """
     rgb_camera_mat = np.array([[rgb_intrinsics.fx, 0, rgb_intrinsics.ppx], [0, rgb_intrinsics.fy, rgb_intrinsics.ppy], [0,0,1]])
     depth_camera_mat = np.array([[depth_intrinsics.fx, 0, depth_intrinsics.ppx], [0, depth_intrinsics.fy, depth_intrinsics.ppy], [0,0,1]])
-
-    camera_data = {
-        'rgb_camera_matrix': rgb_camera_mat.tolist(),
-        'rgb_distortion_coefficients': rgb_intrinsics.coeffs,
-        'depth_camera_matrix': depth_camera_mat.tolist(),
-        'depth_distortion_coefficients': depth_intrinsics.coeffs,
-    }
-    if output_folder is not None and filename is not None:
-        os.makedirs(f"{output_folder}", exist_ok = True)
-        with open(f"{output_folder}/{filename}.json", 'w') as f:
-            json.dump(camera_data, f, indent=4)
-
     return rgb_camera_mat, rgb_intrinsics.coeffs, depth_camera_mat, depth_intrinsics.coeffs
 
 def gather_robot_imgs_eefs(
@@ -146,33 +130,16 @@ def gather_robot_imgs_eefs(
 
 
 def gather_robot_data(
-        output_folder: str = "data",
         number_of_positions:None|int = None,
         stabilisation_timeout:float = 0.0
-    ) -> tuple[list[np.ndarray], list[np.ndarray], np.ndarray, list[float]]:
+    ) -> ProtoRobotData:
     """
-    Creates the following output folder format by moving the robot and taking images:
+    Creates an instance of ProtoRobotData by moving the robot and taking images:
 
-    `output_folder`
-    ├── robot
-    │   └── multiple folders (000000 - min(999999, number_of_positions)) with the contents:
-    │       ├──  rgb.png
-    │       ├──  poses.json
-    │       └──  depth.npy
-    └── robot_cam_calibration.json
-
-    robot_cam_calibration.json has the following attributes:
-    - `rgb_camera_matrix`: the intrinsic camera matrix of the rgb camera,
-    - `rgb_distortion_coefficients`: the distortion coefficients of the rgb camera,
-    - `depth_camera_matrix`: the intrinsic camera matrix of the depth camera,
-    - `depth_distortion_coefficients`: the distortion coefficients of the depth camera,
-
-
-    :param number_of_positions: The number of positions to gather images for. If None it will gather images for all passed positions
+    :param number_of_positions: The number of positions to gather images for. If None it gathers images for all passed positions
     :param stabilisation_timeout: the time to wait after moving the robot before taking an image in seconds
-    :param output_folder: the name of the output folder
 
-    :return: rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef
+    :return: an instance of ProtoRobotData
     """
     robot_interface = FrankaInterface(config_root + "/charmander.yml", use_visualizer=False)
 
@@ -187,10 +154,8 @@ def gather_robot_data(
         rs.stream.color).as_video_stream_profile().get_intrinsics()
     depth_intrinsics = pipeline.get_active_profile().get_stream(
         rs.stream.depth).as_video_stream_profile().get_intrinsics()
-    rgb_cam_mat, rgb_cam_dist_coef, _, _ = save_intrinsics(rgb_intrinsics=rgb_intrinsics,
-                                                           depth_intrinsics=depth_intrinsics,
-                                                           output_folder=output_folder,
-                                                           filename="robot_cam_calibration")
+    rgb_cam_mat, rgb_cam_dist_coef, depth_cam_mat, depth_cam_dist_coef = extract_intrinsics(rgb_intrinsics=rgb_intrinsics,
+                                                                                            depth_intrinsics=depth_intrinsics)
 
     depth_scale = pipeline.get_active_profile().get_device().first_depth_sensor().get_depth_scale()
 
@@ -200,18 +165,14 @@ def gather_robot_data(
                                                                         robot_positions=positions,
                                                                         number_of_positions=number_of_positions,
                                                                         stabilisation_timeout=stabilisation_timeout)
-
-    for i, (depth_image, rgb_image, base_t_gripper) in enumerate(zip(depth_images, rgb_images, base_t_gripper_s)):
-        # save robot images
-        # TODO depth images are not saved (are empty)
-        os.makedirs(f"{output_folder}/robot/{i:06d}", exist_ok=True)
-        cv2.imwrite(f"{output_folder}/robot/{i:06d}/rgb.png", cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR))
-        np.save(f"{output_folder}/robot/{i:06d}/depth.npy", depth_image)
-
-        pose_dict = {
-            "base_t_gripper": base_t_gripper.tolist(),
-        }
-        with open(f"{output_folder}/robot/{i:06d}/poses.json", 'w') as f:
-            json.dump(pose_dict, f, indent=4)
     pipeline.stop()
-    return rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef
+    gathered_data = ProtoRobotData(
+        depth_images=np.array(depth_images),
+        depth_cam_intrinsic_mtx=depth_intrinsics,
+        depth_cam_distortion_coefficients=depth_cam_dist_coef,
+        bgr_images=cv2.cvtColor(np.array(rgb_images), cv2.COLOR_RGB2BGR),
+        color_cam_intrinsic_mtx =rgb_intrinsics,
+        color_cam_distortion_coefficients=rgb_cam_dist_coef,
+        base_t_gripper_s=np.array(base_t_gripper_s),
+    )
+    return gathered_data

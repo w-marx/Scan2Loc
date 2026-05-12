@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import open3d as o3d
 
 def assert_intrinsic_mat(m:np.ndarray, hxw_img: np.ndarray | None)->bool:
     assert m.shape == (3, 3), f"M not 3x3 {m.shape}"
@@ -22,6 +21,7 @@ def create_3d_camera(
         hxw_img: np.ndarray,
         scale:float = 0.1
     ):
+    import open3d as o3d
     assert assert_intrinsic_mat(intrinsics, hxw_img)
     assert assert_homogeneous_mat(base_t_camera)
     assert np.abs(scale) > 1e-6

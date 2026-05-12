@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
+from proto_robot_data import *
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from aruco_charuco_detection import ArucoCharucoDetector, ArucoDetector, CharucoDetector
 from gathering_2_preprocessing import compute_pose_pseudo_median, GatheredRobotData
@@ -12,13 +14,7 @@ calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, 
 
 
 def optimize_robot_data(
-        bgr_images: list[np.ndarray],
-        base_t_gripper_s: list[np.ndarray],
-        color_cam_mat: np.ndarray,
-        color_cam_dist_coef: list[float],
-        depth_images: np.ndarray,
-        depth_cam_mat: np.ndarray,
-        depth_cam_distortion_coefficients: list[float],
+        proto_data:ProtoRobotData,
         name: str = "rob_data1",
         marker_detector: ArucoCharucoDetector | None = None,
         gripper_t_cam: np.ndarray|None = None,
@@ -27,16 +23,10 @@ def optimize_robot_data(
     """
     Processed Raw gathered robot data to get a GatheredRobotData instance
 
-    :param bgr_images: list of HxWx3-uint8 bgr images
+    :param proto_data: a proto data object
     :param gripper_t_cam: A 4x4 transformation matrix for gripper^T_Cam, if None will be estimated
     :param marker_detector: A aruco/charuco marker detector depending on what will be seen in the images
                             or none if they should not be estimated (but then gripper_t_cam must be provided)
-    :param color_cam_dist_coef: distortion coefficients for the color camera
-    :param color_cam_mat: intrinsic camera matrix
-    :param depth_images: A NxHxW-float array of depth images
-    :param depth_cam_mat: The intrinsic 3x3 matrix of the depth camera
-    :param depth_cam_distortion_coefficients: The distortion coefficients of the depth camera
-    :param base_t_gripper_s: list of 4x4 transformation matrices for the robot base^T_gripper
     :param name: the name of the output folder/ dataset
     :param base_t_gripper_outlier_quantiles the quantiles of base_t_gripper estimates to remove, first float for translation and second for rotation
     :return: a GatheredRobotData instance
@@ -45,16 +35,20 @@ def optimize_robot_data(
     if gripper_t_cam is None and marker_detector is None:
         raise ValueError("Either gripper_t_cam or marker_detector must be provided")
 
-    camera_t_marker_s = [None] * len(rgb_images)
+    camera_t_marker_s = [None] * len(proto_data.bgr_images)
     if marker_detector is not None:
-        camera_t_marker_s = marker_detector.get_camera_t_marker(images=rgb_images, camera_matrix=rgb_cam_mat, distortion_coefficients=rgb_cam_dist_coef)
+        camera_t_marker_s = marker_detector.get_camera_t_marker(
+            images=list(proto_data.bgr_images),
+            camera_matrix=proto_data.color_cam_intrinsic_mtx,
+            distortion_coefficients=proto_data.color_cam_distortion_coefficients
+        )
 
     if gripper_t_cam is None:
         print("Using aruco markers for gripper_T_cam determination")
 
         r_base_t_gripper , t_base_t_gripper, r_marker_t_camera, t_marker_t_camera = [], [], [], []
 
-        for camera_t_marker, base_t_gripper in zip(camera_t_marker_s, base_t_gripper_s):
+        for camera_t_marker, base_t_gripper in zip(camera_t_marker_s, proto_data.base_t_gripper_s):
             if camera_t_marker is not None:
                 r_base_t_gripper.append(base_t_gripper[:3, :3])
                 t_base_t_gripper.append(base_t_gripper[:3, 3])
@@ -68,7 +62,7 @@ def optimize_robot_data(
         gripper_t_cam = np.concatenate((np.concatenate((r_gripper_t_cam, t_gripper_t_cam), axis=1), [[0, 0, 0, 1]]), axis=0)
 
     # Remove camera_t_marker estimates that lead to outliers
-    b_t_m_s = [b_t_g @ gripper_t_cam @ c_t_m for b_t_g, c_t_m in zip(base_t_gripper_s, camera_t_marker_s) if
+    b_t_m_s = [b_t_g @ gripper_t_cam @ c_t_m for b_t_g, c_t_m in zip(proto_data.base_t_gripper_s, camera_t_marker_s) if
                c_t_m is not None]
     
     if len(b_t_m_s) > 1:
@@ -77,7 +71,7 @@ def optimize_robot_data(
         t_err_quant = np.quantile([np.linalg.norm(b_t_m[:3,3]-base_t_marker_median[:3,3]) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[0])
         r_err_quant = np.quantile([calc_rotational_difference(b_t_m, base_t_marker_median) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[1])
 
-        for idx, (b_t_g, c_t_m) in enumerate(zip(base_t_gripper_s, camera_t_marker_s)):
+        for idx, (b_t_g, c_t_m) in enumerate(zip(proto_data.base_t_gripper_s, camera_t_marker_s)):
             not_None:bool = c_t_m is not None
             low_t_err:bool = not_None and np.linalg.norm((b_t_g @ gripper_t_cam @ c_t_m)[:3,3] - base_t_marker_median[:3,3]) <= t_err_quant
             low_r_err:bool = not_None and calc_rotational_difference(b_t_g @ gripper_t_cam @ c_t_m, base_t_marker_median) <= r_err_quant
@@ -87,13 +81,13 @@ def optimize_robot_data(
 
     return GatheredRobotData(
         name = name,
-        bgr_images=np.array(rgb_images),
-        color_cam_mtx=rgb_cam_mat,
-        color_cam_distortion_coefficients=rgb_cam_dist_coef,
-        depth_images=depth_images,
-        depth_cam_mtx=depth_cam_mat,
-        depth_cam_distortion_coefficients=depth_cam_distortion_coefficients,
-        base_t_gripper_s=np.array(base_t_gripper_s),
+        bgr_images=proto_data.bgr_images,
+        color_cam_mtx=proto_data.color_cam_intrinsic_mtx,
+        color_cam_distortion_coefficients=proto_data.color_cam_distortion_coefficients,
+        depth_images=proto_data.depth_images,
+        depth_cam_mtx=proto_data.depth_cam_intrinsic_mtx,
+        depth_cam_distortion_coefficients=proto_data.depth_cam_distortion_coefficients,
+        base_t_gripper_s=proto_data.base_t_gripper_s,
         camera_t_marker_s=camera_t_marker_s,
         marker_detector=marker_detector,
         gripper_t_cam=gripper_t_cam
@@ -110,11 +104,12 @@ def check_output_data(
 ):
     """
     Displays statistics for the estimated base_t_camera poses
+    :param gathered_data: GatheredRobotData: The data to be checked
     :param use_mean: Whether to treat the pose mean or median as the truth
     :param save_result: Whether to save the results in output_folder/data_collect_analysis.pdf or not
     :param output_folder: Where the result will be saved
     """
-    base_t_marker_s = [r_t_g @ gathered_data.gripper_t_cam @ c_t_a for r_t_g, c_t_a in zip(base_t_gripper_s, gathered_data.camera_t_marker_s) if c_t_a is not None]
+    base_t_marker_s = [r_t_g @ gathered_data.gripper_t_cam @ c_t_a for r_t_g, c_t_a in zip(gathered_data.base_t_gripper_s, gathered_data.camera_t_marker_s) if c_t_a is not None]
 
     if len(base_t_marker_s) < 1:
         return
@@ -123,13 +118,13 @@ def check_output_data(
     if use_mean:
         from scipy.spatial.transform import RigidTransform
         avg_base_t_marker = RigidTransform.from_matrix(np.array(base_t_marker_s)).mean().as_matrix()
-    median_base_t_marker = compute_pose_pseudo_median(np.array(base_t_marker_s))
+    median_base_t_marker = compute_pose_pseudo_median(base_t_marker_s)
 
     actual_base_t_marker = avg_base_t_marker if use_mean else median_base_t_marker
 
 
     translational_errors_mm = [np.linalg.norm(b_t_a[:3,3]-actual_base_t_marker[:3,3])*1000 for b_t_a in base_t_marker_s]
-    rotational_errors_deg = [calc_rotational_difference(b_t_a[:3,:3], actual_base_t_marker[:3,:3])*360 for b_t_a in base_t_marker_s]
+    rotational_errors_deg = [np.rad2deg(calc_rotational_difference(b_t_a[:3,:3], actual_base_t_marker[:3,:3])) for b_t_a in base_t_marker_s]
 
     # plot results:
     fig = plt.figure(figsize = (12, 6))
@@ -241,42 +236,12 @@ if __name__ == "__main__":
         print(f"Using precomputed cam_t_gripper: \n {np.round(gripper_t_cam, 3)} \n from {args.gripper_t_cam_path}")
 
 
-    rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = None, None, None, None
+    proto_data = None
     if args.gather_data:
-        print("gathering data using the robot...")
-        if os.path.exists(f"{args.output_folder}"):
-            print(f"Output folder already exists, deleting it ...")
-            shutil.rmtree(f"{args.output_folder}")
-
         from robot_interface import gather_robot_data
-        _, _, _ , _ = gather_robot_data(output_folder=args.output_folder, number_of_positions = args.max_number_positions)
-
-    if not os.path.exists(f"{args.output_folder}"):
-        raise FileNotFoundError(f"{args.output_folder} does not exist")
-    print("loading data from disk for further processing ...")
-    folders = sorted(os.listdir(f"{args.output_folder}/robot"))
-
-    rgb_images = [cv2.imread(f"{args.output_folder}/robot/{folder}/rgb.png") for folder in folders]
-
-    base_t_gripper_s = []
-
-    for folder in folders:
-        with open(f"{args.output_folder}/robot/{folder}/poses.json", 'r') as f:
-            base_t_gripper_s.append(np.array(json.load(f)["base_t_gripper"]))
-
-    with open(f"{args.output_folder}/robot_cam_calibration.json", 'r') as f:
-        json_file = json.load(f)
-        rgb_cam_mat = np.array(json_file["rgb_camera_matrix"])
-        rgb_cam_dist_coef = json_file["rgb_distortion_coefficients"]
-
-    folders = sorted(os.listdir(f"{args.output_folder}/robot"))
-    depth_images = np.array([np.load(f"{args.output_folder}/robot/{folder}/depth.npy") for folder in folders])
-
-    with open(f"{args.output_folder}/robot_cam_calibration.json", 'r') as f:
-        json_file = json.load(f)
-        depth_cam_mat = np.array(json_file["depth_camera_matrix"])
-        depth_cam_dist_coef = json_file["depth_distortion_coefficients"]
-
+        proto_data = gather_robot_data(number_of_positions = args.max_number_positions,stabilisation_timeout=args.stabilisation_timeout)
+    else:
+        proto_data = ProtoRobotData.from_folder(args.output_folder)
 
     marker_detector = None
 
@@ -301,21 +266,13 @@ if __name__ == "__main__":
             json.dump({"Aruco/Charuco Type":None}, f, indent=4)
 
 
-    optimize_robot_data(
-        bgr_images=rgb_images,
-        base_t_gripper_s=base_t_gripper_s,
-        color_cam_mat=rgb_cam_mat,
-        color_cam_dist_coef=rgb_cam_dist_coef,
-        depth_images=depth_images,
-        depth_cam_mat=depth_cam_mat,
-        depth_cam_distortion_coefficients=depth_cam_dist_coef,
+    gd = optimize_robot_data(
+        proto_data=proto_data,
         gripper_t_cam=gripper_t_cam,
         marker_detector = marker_detector,
         base_t_gripper_outlier_quantiles=(args.pose_outlier_quants[0], args.pose_outlier_quants[1]),
-    ).save(folder=os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
-
-    gd = GatheredRobotData.from_folder(args.output_folder)
-
+    )
+    gd.save(folder=os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
     if args.analyze_results:
         check_output_data(
             gathered_data=gd,

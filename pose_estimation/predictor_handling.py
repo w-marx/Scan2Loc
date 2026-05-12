@@ -8,12 +8,12 @@ class PosePredictor:
     def __init__(self):
         pass
 
-    def predict_poses(self,
-                      cam1_bgr_image:np.ndarray,
-                      cam1_xyz_image:np.ndarray,
-                      cam2_bgr_image: np.ndarray,
-                      point_cloud:np.ndarray,
-                      ) -> np.ndarray | None:
+    def est_cam2_t_cam1(self,
+                        cam1_bgr_image:np.ndarray,
+                        cam1_xyz_image:np.ndarray,
+                        cam2_bgr_image: np.ndarray,
+                        point_cloud:np.ndarray,
+                        ) -> np.ndarray | None:
         """
         Predicts the homogenous transformation cam1_t_cam2
         """
@@ -33,8 +33,8 @@ def grade_predictions(predictions: list[np.ndarray], actual: np.ndarray) -> tupl
             translational_errors.append(None)
             continue
 
-        trans_dist = np.linalg.norm(prediction[:3,3]-actual[:3,3])*1000
-        rotational_dist = calc_rotational_difference(prediction[:3,:3], actual[:3,:3])*360
+        trans_dist = np.linalg.norm(prediction[:3,3]-actual[:3,3])
+        rotational_dist = calc_rotational_difference(prediction[:3,:3], actual[:3,:3])
 
         translational_errors.append(trans_dist)
         rotational_errors.append(rotational_dist)
@@ -51,20 +51,18 @@ def run_predictions(data:PredictionData, predictor:PosePredictor) -> list[np.nda
     robot_xyz_images = data.robot_xyz_images
     robot_base_t_robot_cam_s = data.robot_base_t_robot_camera_s
 
-
     predicted_poses = []
 
-    for xyz_img, bgr_img, b_t_c in zip(robot_xyz_images, robot_bgr_images, robot_base_t_robot_cam_s):
-        cam_robot_cam_t_headset_cam = predictor.predict_poses(
+    for xyz_img, bgr_img, rb_t_rc in zip(robot_xyz_images, robot_bgr_images, robot_base_t_robot_cam_s):
+        headset_cam_t_robot_cam = predictor.est_cam2_t_cam1(
             cam2_bgr_image=headset_image,
             cam1_bgr_image=bgr_img,
             cam1_xyz_image=xyz_img,
             point_cloud=point_cloud
         )
-        if cam_robot_cam_t_headset_cam is None:
+        if headset_cam_t_robot_cam is None:
             predicted_poses.append(None)
             continue
-        predicted_poses.append(b_t_c @ np.linalg.inv(cam_robot_cam_t_headset_cam))
-        #predicted_poses.append(b_t_c @ cam_robot_cam_t_headset_cam)
+        predicted_poses.append(rb_t_rc @ np.linalg.inv(headset_cam_t_robot_cam))
 
     return predicted_poses

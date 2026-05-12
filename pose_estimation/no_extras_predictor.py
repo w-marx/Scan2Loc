@@ -18,12 +18,12 @@ class NoExtrasPredictor(PosePredictor):
 
         self.cam2_mtx = cam2_mtx
 
-    def predict_poses(self,
-            cam1_bgr_image:np.ndarray,
-            cam1_xyz_image:np.ndarray,
-            cam2_bgr_image: np.ndarray,
-            point_cloud:np.ndarray,
-        ) -> np.ndarray | None:
+    def est_cam2_t_cam1(self,
+                        cam1_bgr_image:np.ndarray,
+                        cam1_xyz_image:np.ndarray,
+                        cam2_bgr_image: np.ndarray,
+                        point_cloud:np.ndarray,
+                        ) -> np.ndarray | None:
 
 
 
