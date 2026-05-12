@@ -1,0 +1,15 @@
+name: pred_env
+channels:
+  - pytorch
+  - conda-forge
+  - nvidia
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+    - numpy
+    - opencv-python
+    - scikit-learn
+    - torch >= 2
+

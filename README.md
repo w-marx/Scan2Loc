@@ -1,7 +1,5 @@
-## Setup:
-
-# Setup V2
-
+# Setup:
+In general:
 ```
 git clone git@github.com:w-marx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline.git
 cd AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline
@@ -34,10 +32,14 @@ cd ..
 
 ## For Pose estimation
 
-TODO
+````commandline
+cd pose_estimation
+conda env create -f environment.yml -p ./pose_est_env
+conda activate ./pose_est_env
+````
 
-```
+````commandline
 git clone https://github.com/cvg/LightGlue.git && cd LightGlue
 python -m pip install -e .
 cd ..
-```
+````
