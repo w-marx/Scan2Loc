@@ -1,15 +1,16 @@
 name: pred_env
 channels:
-  - pytorch
   - conda-forge
-  - nvidia
   - defaults
 dependencies:
   - python=3.12
   - pip
   - pip:
+    - torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+    - torchvision
+    - torchaudio
     - numpy
     - opencv-python
     - scikit-learn
-    - torch >= 2
+    - open3d
 

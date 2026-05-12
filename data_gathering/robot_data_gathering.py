@@ -249,25 +249,25 @@ if __name__ == "__main__":
             shutil.rmtree(f"{args.output_folder}")
 
         from robot_interface import gather_robot_data
-        rgb_images, base_t_gripper_s, rgb_cam_mat, rgb_cam_dist_coef = gather_robot_data(output_folder=args.output_folder, number_of_positions = args.max_number_positions)
-    else:
-        if not os.path.exists(f"{args.output_folder}"):
-            raise FileNotFoundError(f"{args.output_folder} does not exist")
-        print("loading data from disk for further processing ...")
-        folders = sorted(os.listdir(f"{args.output_folder}/robot"))
+        _, _, _ , _ = gather_robot_data(output_folder=args.output_folder, number_of_positions = args.max_number_positions)
 
-        rgb_images = [cv2.imread(f"{args.output_folder}/robot/{folder}/rgb.png") for folder in folders]
+    if not os.path.exists(f"{args.output_folder}"):
+        raise FileNotFoundError(f"{args.output_folder} does not exist")
+    print("loading data from disk for further processing ...")
+    folders = sorted(os.listdir(f"{args.output_folder}/robot"))
 
-        base_t_gripper_s = []
+    rgb_images = [cv2.imread(f"{args.output_folder}/robot/{folder}/rgb.png") for folder in folders]
 
-        for folder in folders:
-            with open(f"{args.output_folder}/robot/{folder}/poses.json", 'r') as f:
-                base_t_gripper_s.append(np.array(json.load(f)["base_t_gripper"]))
+    base_t_gripper_s = []
 
-        with open(f"{args.output_folder}/robot_cam_calibration.json", 'r') as f:
-            json_file = json.load(f)
-            rgb_cam_mat = np.array(json_file["rgb_camera_matrix"])
-            rgb_cam_dist_coef = json_file["rgb_distortion_coefficients"]
+    for folder in folders:
+        with open(f"{args.output_folder}/robot/{folder}/poses.json", 'r') as f:
+            base_t_gripper_s.append(np.array(json.load(f)["base_t_gripper"]))
+
+    with open(f"{args.output_folder}/robot_cam_calibration.json", 'r') as f:
+        json_file = json.load(f)
+        rgb_cam_mat = np.array(json_file["rgb_camera_matrix"])
+        rgb_cam_dist_coef = json_file["rgb_distortion_coefficients"]
 
     folders = sorted(os.listdir(f"{args.output_folder}/robot"))
     depth_images = np.array([np.load(f"{args.output_folder}/robot/{folder}/depth.npy") for folder in folders])

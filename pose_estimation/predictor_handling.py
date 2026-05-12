@@ -1,7 +1,7 @@
 import numpy as np
-
-from preprocessing_2_prediction import PredictionData
-from no_extras_predictor import NoExtrasPredictor
+import sys, os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from preprocessing_2_prediction import PredictionData, create_3d_camera
 
 
 class PosePredictor:
@@ -20,21 +20,24 @@ class PosePredictor:
         raise NotImplementedError
 
 
-def grade_predictions(predictions: list[np.ndarray], actual: list[np.ndarray]) -> tuple[list[float|None], list[float|None]]:
+def grade_predictions(predictions: list[np.ndarray], actual: np.ndarray) -> tuple[list[float|None], list[float|None]]:
+
+    calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2)
 
     rotational_errors = []
     translational_errors = []
 
-    for prediction, actual in zip(predictions, actual):
+    for prediction in predictions:
         if prediction is None:
             rotational_errors.append(None)
             translational_errors.append(None)
+            continue
 
-        rotational_dist = np.arccos((np.trace(prediction, np.linalg.inv(actual))-1)/2)
-        euclidean_dist = np.linalg.norm(prediction - actual)
+        trans_dist = np.linalg.norm(prediction[:3,3]-actual[:3,3])*1000
+        rotational_dist = calc_rotational_difference(prediction[:3,:3], actual[:3,:3])*360
 
+        translational_errors.append(trans_dist)
         rotational_errors.append(rotational_dist)
-        translational_errors.append(euclidean_dist)
 
     return rotational_errors, translational_errors
 
@@ -60,17 +63,8 @@ def run_predictions(data:PredictionData, predictor:PosePredictor) -> list[np.nda
         )
         if cam_robot_cam_t_headset_cam is None:
             predicted_poses.append(None)
-        predicted_poses.append(b_t_c @ cam_robot_cam_t_headset_cam)
+            continue
+        predicted_poses.append(b_t_c @ np.linalg.inv(cam_robot_cam_t_headset_cam))
+        #predicted_poses.append(b_t_c @ cam_robot_cam_t_headset_cam)
 
     return predicted_poses
-
-
-
-if __name__ == "__main__":
-    data = PredictionData.from_folder("../preprocessed_data/r2_aruco2")
-    predictor = NoExtrasPredictor(data.headset_intrinsics)
-    predicted_poses = run_predictions(data, predictor)
-
-    if data.robot_base_t_headset is not None:
-        r_err, t_err = grade_predictions(predicted_poses, data.robot_base_t_headset)
-        print(f"r_err: {r_err} \n\n t_err: {t_err}")

@@ -157,3 +157,4 @@ data_preprocessing/sam3.pt
 data_preprocessing/runs
 runs/
 processed_datasets
+pose_estimation/pose_est_env
