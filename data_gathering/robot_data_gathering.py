@@ -257,13 +257,6 @@ if __name__ == "__main__":
             marker_size=args.aruco_marker_side_length,
             aruco_dictionary=args.aruco_marker_dictionary
         )
-    
-    if marker_detector is not None:
-        with open(f"{args.output_folder}/metadata.json", 'w') as f:
-            json.dump(marker_detector.get_meta_data(), f, indent=4)
-    else:
-        with open(f"{args.output_folder}/metadata.json", 'w') as f:
-            json.dump({"Aruco/Charuco Type":None}, f, indent=4)
 
 
     gd = optimize_robot_data(
@@ -273,6 +266,7 @@ if __name__ == "__main__":
         base_t_gripper_outlier_quantiles=(args.pose_outlier_quants[0], args.pose_outlier_quants[1]),
     )
     gd.save(folder=os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
+
     if args.analyze_results:
         check_output_data(
             gathered_data=gd,
