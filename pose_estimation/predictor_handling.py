@@ -8,14 +8,14 @@ class PosePredictor:
     def __init__(self):
         pass
 
-    def est_cam2_t_cam1(self,
+    def est_base_t_cam2(self,
                         cam1_bgr_image:np.ndarray,
-                        cam1_xyz_image:np.ndarray,
+                        base_xyz_image:np.ndarray,
                         cam2_bgr_image: np.ndarray,
                         point_cloud:np.ndarray,
                         ) -> np.ndarray | None:
         """
-        Predicts the homogenous transformation cam1_t_cam2
+        Predicts the homogenous transformation base_t_cam2
         """
         raise NotImplementedError
 
@@ -54,15 +54,15 @@ def run_predictions(data:PredictionData, predictor:PosePredictor) -> list[np.nda
     predicted_poses = []
 
     for xyz_img, bgr_img, rb_t_rc in zip(robot_xyz_images, robot_bgr_images, robot_base_t_robot_cam_s):
-        headset_cam_t_robot_cam = predictor.est_cam2_t_cam1(
+        base_t_headset_cam = predictor.est_base_t_cam2(
             cam2_bgr_image=headset_image,
             cam1_bgr_image=bgr_img,
-            cam1_xyz_image=xyz_img,
+            base_xyz_image=xyz_img,
             point_cloud=point_cloud
         )
-        if headset_cam_t_robot_cam is None:
+        if base_t_headset_cam is None:
             predicted_poses.append(None)
             continue
-        predicted_poses.append(rb_t_rc @ np.linalg.inv(headset_cam_t_robot_cam))
+        predicted_poses.append(base_t_headset_cam)
 
     return predicted_poses

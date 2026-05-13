@@ -173,7 +173,8 @@ def process_data(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input-folder", type=str, default="../in_folder", help="Input Folder Location")
+    parser.add_argument("--robot-input-folder", type=str, default="./in_folder", help="Robot input Folder Location")
+    parser.add_argument("--headset-vrs-file", type=str, default="", help=".vrs file location")
     parser.add_argument("--output-folder", type=str, default="./out_data", help="Output Folder Location")
     parser.add_argument("--number-of-sampled-datapoints", type=int, default=9999, help="Max number of input points to be sampled")
     parser.add_argument("--dont-limit-to-only-aruco", action="store_false", dest="sample_only_w_aruco")
@@ -191,15 +192,10 @@ if __name__ == "__main__":
 
     start_time = time.perf_counter()
 
-    print(f"Loading the data from {os.path.abspath(args.input_folder)}")
-    robot_data = GatheredRobotData.from_folder(args.input_folder)
-
-    vrs_files = [file for file in os.listdir(f"{args.input_folder}") if file.endswith('.vrs')]
-    if len(vrs_files) == 0:
-        raise Exception(f"No VRS files found at {args.input_folder}", FileNotFoundError)
-    if len(vrs_files) > 1:
-        print(f"Found multiple .vrs files, using {vrs_files[0]}")
-    headset_data = HeadsetData.from_vrs_file(f"{args.input_folder}/{vrs_files[0]}")
+    print(f"Loading the data from {os.path.abspath(args.robot_input_folder)}")
+    
+    robot_data = GatheredRobotData.from_folder(args.robot_input_folder)
+    headset_data = HeadsetData.from_vrs_file(args.headset_vrs_file)
 
     processed_data = process_data(
         robot_data = robot_data,
