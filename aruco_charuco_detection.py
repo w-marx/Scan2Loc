@@ -236,10 +236,10 @@ class CharucoDetector(ArucoCharucoDetector):
 
         return camera_t_charuco_s
 
-    def remove_markers(self, images:list[np.ndarray])->list[np.ndarray]:
+    def remove_markers(self, images:list[np.ndarray], advanced:bool = False)->list[np.ndarray]:
 
         edited_images = []
-
+        hulls = []
         for image in images:
             charuco_corners, charuco_ids, marker_corners, marker_ids = self.detector.detectBoard(image)
 
@@ -257,15 +257,39 @@ class CharucoDetector(ArucoCharucoDetector):
             from scipy.spatial import ConvexHull
             hull = ConvexHull(marker_square_points)
             hull_points = marker_square_points[hull.vertices]
-
             img_copy = image.copy()
             cv2.fillPoly(img_copy, [hull_points.astype(np.int32)], color=(0, 0, 0))
+            hulls.append(hull_points)
 
             edited_images.append(img_copy)
+        if advanced:
+            edited_images = list(remove_advanced(np.array(images), np.array(hulls)))
+
         return edited_images
 
     def get_meta_data(self):
         return self.metadata
+
+def remove_advanced(bgr_images:np.ndarray, cnvx_hull_points_s:np.ndarray)->np.ndarray:
+    """
+    :param bgr_images: NHxWx3-uint8 numpy array
+    :param cnvx_hull_points_s: NxMx2 numpy array
+    """
+    from iopaint.model_manager import ModelManager
+    if not hasattr(remove_advanced, 'model'):
+        remove_advanced.model = ModelManager(name="lama", device="cpu")
+    masked_images = []
+
+
+    for bgr_img, hull_points in zip(bgr_images, cnvx_hull_points_s):
+        mask = np.zeros(bgr_img.shape[:2], dtype=np.uint8)
+        cv2.fillPoly(mask, [hull_points.astype(np.int32)], 255)
+
+        rgb_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
+        result_rgb = remove_advanced.model.inpaint(image=rgb_img, mask=mask)
+        masked_images.append(cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR))
+
+    return np.array(masked_images)
 
 if __name__ == "__main__":
     import os
