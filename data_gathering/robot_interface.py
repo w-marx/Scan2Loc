@@ -168,10 +168,10 @@ def gather_robot_data(
     pipeline.stop()
     gathered_data = ProtoRobotData(
         depth_images=np.array(depth_images),
-        depth_cam_intrinsic_mtx=depth_intrinsics,
+        depth_cam_intrinsic_mtx=depth_cam_mat,
         depth_cam_distortion_coefficients=depth_cam_dist_coef,
-        bgr_images=cv2.cvtColor(np.array(rgb_images), cv2.COLOR_RGB2BGR),
-        color_cam_intrinsic_mtx =rgb_intrinsics,
+        bgr_images=np.array([cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR) for img in rgb_images]),
+        color_cam_intrinsic_mtx =rgb_cam_mat,
         color_cam_distortion_coefficients=rgb_cam_dist_coef,
         base_t_gripper_s=np.array(base_t_gripper_s),
     )
