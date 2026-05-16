@@ -110,6 +110,8 @@ def gather_robot_imgs_eefs(
     rgb_images = []
     base_t_gripper_s = []
 
+    align = rs.align(rs.stream.color)
+
     for frame_idx, position in enumerate(robot_positions[:number_of_positions if number_of_positions is not None else len(robot_positions)]):
         print(f"moving to position {frame_idx} : {position}")
 
@@ -119,13 +121,16 @@ def gather_robot_imgs_eefs(
         base_t_gripper = robot_interface.last_eef_pose
 
         frames = image_pipeline.wait_for_frames()
-        rgb_frame = np.asanyarray(frames.get_color_frame().get_data())
-        depth_frame = np.asanyarray(frames.get_depth_frame().get_data())
+        aligned_frames = align.process(frames)
+
+        rgb_frame = np.asanyarray(aligned_frames.get_color_frame().get_data())
+        depth_frame = np.asanyarray(aligned_frames.get_depth_frame().get_data())
         depth_frame_scaled = depth_frame * depth_scale
-        print(f"depth_frame: {depth_frame_scaled.shape}")
+
         depth_images.append(depth_frame_scaled)
         rgb_images.append(cv2.cvtColor(rgb_frame, cv2.COLOR_BGR2RGB))
         base_t_gripper_s.append(base_t_gripper)
+
     return depth_images, rgb_images, base_t_gripper_s
 
 
@@ -152,10 +157,10 @@ def gather_robot_data(
 
     rgb_intrinsics = pipeline.get_active_profile().get_stream(
         rs.stream.color).as_video_stream_profile().get_intrinsics()
-    depth_intrinsics = pipeline.get_active_profile().get_stream(
-        rs.stream.depth).as_video_stream_profile().get_intrinsics()
+    #depth_intrinsics = pipeline.get_active_profile().get_stream(
+    #    rs.stream.depth).as_video_stream_profile().get_intrinsics()
     rgb_cam_mat, rgb_cam_dist_coef, depth_cam_mat, depth_cam_dist_coef = extract_intrinsics(rgb_intrinsics=rgb_intrinsics,
-                                                                                            depth_intrinsics=depth_intrinsics)
+                                                                                            depth_intrinsics=rgb_intrinsics)
 
     depth_scale = pipeline.get_active_profile().get_device().first_depth_sensor().get_depth_scale()
 
