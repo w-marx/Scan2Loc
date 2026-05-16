@@ -16,7 +16,7 @@ def process_data(
         headset_data:HeadsetData,
         number_of_sampled_datapoints: int = 10,
         only_sample_robot_datapoints_w_marker_estimates: bool = False,
-        markers_use_advanced_removal: bool = False, #TODO (optional)
+        markers_use_advanced_removal: bool = False,
         est3d_use_map_anything: bool = True,
         est3d_use_sam3_for_foreground_seg: bool = True,
         est3d_custom_sam3_prompts: list[tuple[str, int]] | None = None,
@@ -24,6 +24,9 @@ def process_data(
         est3d_xyz_img_upscaling:bool = False, #TODO (optional)
         est3d_xyz_img_camera_alginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama",
         est3d_xyz_img_confidence_threshold: int = 10,
+        est3d_xyz_do_icp_alignment:bool = True,
+        est3d_xyz_icp_point_dist_threshhold:float = 0.01,
+        est3d_xyz_icp_max_itterations:int = 1000,
         est3d_point_cloud_foreground_masks_conf_threshold: float = 0.5,
         est3d_point_cloud_foreground_object_detection_threshold: float = 0.5,
         est3d_point_cloud_iforest_confidence_threshold: float = 0.0,
@@ -36,13 +39,16 @@ def process_data(
     :param headset_data: HeadsetData instance
     :param number_of_sampled_datapoints: The number of datapoints in the resulting prediction data
     :param only_sample_robot_datapoints_w_marker_estimates: Will sample only images with markers -> might lead to less then `number_of_sampled_datapoints` datapoints.
-    :param markers_use_advanced_removal: Not implemented yet
+    :param markers_use_advanced_removal: If yes will use an ai-image inpainting tool and not just replace the marker with a black blob
     :param est3d_use_map_anything: If yes map-anything will be used for xyz-image generation (recommended method), if not crude Depth-based methods
     :param est3d_use_sam3_for_foreground_seg: If sam3 should be used to have only foreground objects in the pointcloud
     :param est3d_xyz_img_mapanything_crop_square: Wheather the color-images should be cropped square before being passed into map-anything
     :param est3d_xyz_img_upscaling: Not implemented yet
     :param est3d_xyz_img_camera_alginment_method: The method to match the map-anything camera poses to the actual camera poses and transform the points accordingly
     :param est3d_xyz_img_confidence_threshold: The confidence threshhold for points for map-anything 
+    :param est3d_xyz_do_icp_alignment: Wheather to align the 3D points for each image using icp or not
+    :param est3d_xyz_icp_point_dist_threshhold: The distance between points in meters, for consideration in icp
+    :param est3d_xyz_icp_max_itterations: The number of itterations for icp optimization per pointcloud
     :param est3d_point_cloud_foreground_masks_conf_threshold: The confidence threshhold for object detection by sam3
     :param est3d_point_cloud_foreground_object_detection_threshold: The confidence threshhold for the masks by sam3
     :param est3d_point_cloud_iforest_confidence_threshold: The expected contamination of the point cloud to be removed by iforest
@@ -58,10 +64,11 @@ def process_data(
     assert 0.0 <= est3d_point_cloud_foreground_object_detection_threshold <= 1.0, "est3d_pointcloud_foreground_object_detection_threshold out of range: 0.0-1.0"
     assert 0.0 <= est3d_point_cloud_foreground_masks_conf_threshold <= 1.0, "est3d_pointcloud_foreground_masks_conf_threshold out of range: 0.0-1.0"
     assert 0.0 <= est3d_point_cloud_iforest_confidence_threshold <= 1.0, "est3d_pointcloud_iforest_confidence_threshold out of range: 0.0-1.0"
+    assert 0 < est3d_xyz_icp_max_itterations
+    assert 0 < est3d_xyz_icp_point_dist_threshhold
 
     headset_images = headset_data.bgr_image_s
     headset_cam_mtx = headset_data.intrinsic_camera_matrix
-    headset_cam_dist_coef = headset_data.distortion_coefficients
 
     robot_bgr_images = robot_data.bgr_images
     robot_depth_images = robot_data.depth_images
@@ -71,6 +78,9 @@ def process_data(
     robot_bgr_cam_mtx = robot_data.color_cam_mtx
     robot_bgr_cam_dist_coef = robot_data.color_distortion_coefficients
     robot_depth_cam_mtx:np.ndarray = robot_data.depth_cam_mtx
+
+    if robot_data.marker_detector is not None:
+        robot_data.marker_detector.set_new_masker("LamaMasker" if markers_use_advanced_removal else "ImageMasker")
 
     # Marker handling
     headset_image = headset_images[int(len(headset_images)/2)]
@@ -116,6 +126,7 @@ def process_data(
     print("Generating point cloud...")
     robot_base_xyz_imgs = None
     point_cloud = None
+
     image_mask_generator = lambda imgs: create_foreground_masks(
                 images=imgs,
                 threshold=est3d_point_cloud_foreground_object_detection_threshold,
@@ -123,6 +134,17 @@ def process_data(
                 visualize_masks=est3d_debug_visualize_foreground_masks,
                 prompts=est3d_custom_sam3_prompts
     ) if est3d_use_sam3_for_foreground_seg else None
+
+    xyz_image_aligner = (lambda xyz_imgs: np.array([
+        xyz_img.reshape(xyz_imgs.shape[1:])
+        for xyz_img in 
+        align_point_clouds_icp(
+            point_clouds = [xyz_img.reshape(-1,3) for xyz_img in xyz_imgs],
+            icp_threshhold = est3d_xyz_icp_point_dist_threshhold,
+            icp_max_number_itterations = est3d_xyz_icp_max_itterations,
+            visualize=False
+        )
+    ])) if est3d_xyz_do_icp_alignment else None
 
     if est3d_use_map_anything:
         robot_bgr_images, robot_base_xyz_imgs, point_cloud, robot_bgr_cam_mtx = create_point_cloud(
@@ -132,8 +154,9 @@ def process_data(
             camera_intrinsics=robot_bgr_cam_mtx,
             confidence_threshold_percent=est3d_xyz_img_confidence_threshold,
             image_mask_generator=image_mask_generator,
+            xyz_image_aligner=xyz_image_aligner,
             visualize_point_cloud=est3d_debug_point_cloud_visualize_result,
-            alginment_method="kabsch-umeyama",
+            alginment_method=est3d_xyz_img_camera_alginment_method,
             crop_square=est3d_xyz_img_mapanything_crop_square
         )
         # Use Iforest on pointcloud
@@ -182,6 +205,8 @@ if __name__ == "__main__":
     parser.add_argument("--dont-limit-to-only-aruco", action="store_false", dest="sample_only_w_aruco")
     parser.add_argument("--dont-use-map-anything", action="store_false", dest="use_map_anything")
     parser.add_argument("--dont-use-sam3", action="store_false", dest="use_sam3")
+    parser.add_argument("--dont-use-icp", action="store_false", dest="use_icp")
+    parser.add_argument("--dont-use-ai-marker-removal", action="store_false", dest="use_advanced_marker_removal")
     parser.add_argument("--dont-crop-to-square", action="store_false", dest="crop_square")
     parser.add_argument("--camera-alignment-method", type=str, default="kabsch-umeyama", help="What algorithm to use to align mapanything and real world cameras: none, simple, kabsch-umeyama")
     parser.add_argument("--mapanything-point-conf-threshhold", type=int, default=10)
@@ -211,6 +236,8 @@ if __name__ == "__main__":
         est3d_point_cloud_foreground_object_detection_threshold = args.sam3_object_threshhold,
         est3d_point_cloud_iforest_confidence_threshold = args.iforest_contamination,
         est3d_use_depth_images = args.use_depth_images,
+        markers_use_advanced_removal = args.use_advanced_marker_removal,
+        est3d_xyz_do_icp_alignment = args.use_icp
     )
     processed_data.save(os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
     pd = PredictionData.from_folder(args.output_folder)

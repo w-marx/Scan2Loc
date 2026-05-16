@@ -5,8 +5,11 @@ import open3d as o3d
 from PIL import Image
 import warnings
 import cv2
-
+import sys, os
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from gathering_2_preprocessing import compute_pose_pseudo_median
 
 def get_image_type_hxw(img:np.ndarray) -> str:
     """
@@ -135,6 +138,68 @@ def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> Callable[[np.ndarray], np.ndar
 
     return lambda points: (t.reshape(3,1) + c * R @ points.T).T
 
+def align_point_clouds_icp(
+        point_clouds:list[np.ndarray], 
+        icp_threshhold:float = 0.01,
+        icp_max_number_itterations:int = 1000,
+        visualize:bool = True
+    )->list[np.ndarray]:
+    """
+    Takes M > 1 Pointclouds and returns them aligned around the geometric median of the pointclouds.
+    Aligns all of the point_clouds with point_cloud_0 using ICP 
+    and then applies the geometric median of the transformations on all pointclouds
+    :param point_clouds a list of N_i x 3-float numpy arrays
+    :param icp_threshhold
+    :param icp_max_number_itterations
+    :param visualize wheather to visualize the unaligned and aligned pointclouds
+    :returns a list of the aligned point clouds (same size & order of clouds and their points as input)
+    """
+    assert len(point_clouds) > 1
+    assert all([pc.ndim == 2 and pc.shape[-1] == 3 for pc in point_clouds])
+
+    o3d_point_clouds = []
+    for i, point_cloud in enumerate(point_clouds):
+        o3d_point_clouds.append(o3d.geometry.PointCloud())
+        o3d_point_clouds[-1].points = o3d.utility.Vector3dVector(point_cloud)
+
+    ref_pc = o3d_point_clouds[0]
+
+    pci_t_ref_s = [np.eye(4)]
+
+    print("aligning pointclouds using ICP")
+    for pci in tqdm(o3d_point_clouds[1:]):
+        reg_p2p = o3d.pipelines.registration.registration_icp(
+            pci, 
+            ref_pc, 
+            icp_threshhold, 
+            np.eye(4), 
+            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+            o3d.pipelines.registration.ICPConvergenceCriteria(
+                max_iteration=icp_max_number_itterations
+            )
+        )
+        pci_t_ref_s.append(reg_p2p.transformation)
+    
+    ref_t_median_pci = np.linalg.inv(compute_pose_pseudo_median(pci_t_ref_s))
+
+    pci_t_median_pci_s = [pci_t_ref @ ref_t_median_pci for pci_t_ref in pci_t_ref_s]
+
+    hom_point_clouds = [np.hstack([pci, np.ones((pci.shape[0],1))]) for pci in point_clouds]
+    aligned_point_clouds = [((pci_t_median_pci @ pci.T).T)[:,:3] for pci_t_median_pci, pci in zip(pci_t_median_pci_s, hom_point_clouds)]
+
+    if visualize:
+        aligned_o3d_point_clouds = []
+        for point_cloud in aligned_point_clouds:
+            aligned_o3d_point_clouds.append(o3d.geometry.PointCloud())
+            aligned_o3d_point_clouds[-1].points = o3d.utility.Vector3dVector(point_cloud)
+            aligned_o3d_point_clouds[-1].paint_uniform_color([0, 0, 0])
+        o3d.visualization.draw_geometries(o3d_point_clouds+aligned_o3d_point_clouds)
+
+    return aligned_point_clouds
+
+    
+
+
 
 def create_point_cloud(
         bgr_images:np.ndarray,
@@ -143,6 +208,7 @@ def create_point_cloud(
         camera_intrinsics:np.ndarray = None,
         confidence_threshold_percent:int = 10,
         image_mask_generator:Callable[[np.ndarray], np.ndarray]|None = None,
+        xyz_image_aligner:Callable[[np.ndarray], np.ndarray] | None = None,
         visualize_point_cloud:bool = False,
         alginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama",
         crop_square:bool = True
@@ -153,7 +219,8 @@ def create_point_cloud(
     :param depth_images: A NxHxW-float32 numpy array of depth images (in meters) or None, SHOULD NOT BE USED IF DEPTH AND BGR ARE NOT ALIGNED
     :param camera_intrinsics: A 3x3-float numpy-matrix of the camera intrinsics
     :param confidence_threshold_percent: Percentage of low confidence points to be removed (between 0 and 100)
-    :param image_mask_generator: A Function that takes a NxHxW-uint8 image array and returns a NxHxW-bool numpy array of masks
+    :param image_mask_generator: A Function that takes a NxHxWx3-uint8 image array and returns a NxHxW-bool numpy array of masks
+    :param xyz_image_aligner: A Function that takes a NxHxW-float xyz image array and aligns the images and returns the aligned images
     :param visualize_point_cloud: Whether to visualize the generated point cloud
     :param crop_square: Crops the bgr images to be sqare to utilize the full ~500x500 image size allowed by mapanything (dont use if distortion is not 0)
     :return 
@@ -250,12 +317,17 @@ def create_point_cloud(
             world_points = (base_t_cam @ cam_points_hom.T).T
             world_xyz_images.append(world_points[:, :3].reshape(cam_img.shape[0], cam_img.shape[1], cam_img.shape[2]))
         world_xyz_images = np.array(world_xyz_images)
-
-    if alginment_method == "kabsch-umeyama":
+    elif alginment_method == "kabsch-umeyama":
         camera_true_positions = base_t_cam_s[:,:3,3]
         camera_new_positions = np.array([view['cam_trans'][0].cpu().numpy() for view in predictions])
         transform_points_to_old = kabsch_umeyama(camera_true_positions, camera_new_positions)
         world_xyz_images = transform_points_to_old(world_xyz_images.reshape(-1,3)).reshape(world_xyz_images.shape)
+    else:
+        print("didnt to camera alignment")
+
+
+    if xyz_image_aligner is not None:
+        world_xyz_images = xyz_image_aligner(world_xyz_images)
 
     # Generate pointcloud
     point_cloud = world_xyz_images.reshape(-1, 3)

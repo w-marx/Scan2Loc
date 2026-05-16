@@ -4,7 +4,7 @@ import numpy as np
 from aruco_charuco_detection import ArucoCharucoDetector
 from preprocessing_2_prediction import assert_intrinsic_mat, assert_homogeneous_mat
 
-calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2)
+calc_rotational_difference = lambda x, y: np.arccos(np.clip((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2, -1.0, 1.0))
 def compute_pose_pseudo_median(poses:list[np.ndarray])->np.ndarray | None:
     """
     Takes a numpy array of poses and computes the median pose.
@@ -16,7 +16,8 @@ def compute_pose_pseudo_median(poses:list[np.ndarray])->np.ndarray | None:
     if len(poses) == 0:
         return None
     assert all([assert_homogeneous_mat(m) for m in poses])
-    median_pose = min(poses, key = lambda x: sum([np.linalg.norm(x[:3,3]-y[:3,3]) for y in poses]))
+    median_pose = np.eye(4)
+    median_pose[:3,3] = min(poses, key = lambda x: sum([np.linalg.norm(x[:3,3]-y[:3,3]) for y in poses]))[:3,3]
     median_pose[:3,:3] = min(poses, key = lambda x: sum([calc_rotational_difference(x,y) for y in poses]))[:3,:3]
     return median_pose
 
