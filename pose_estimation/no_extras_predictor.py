@@ -6,6 +6,7 @@ from lightglue import LightGlue, SuperPoint, DISK, SIFT, ALIKED, DoGHardNet
 from lightglue.utils import load_image, rbd, numpy_image_to_torch
 from lightglue import viz2d
 from predictor_handling import *
+import matplotlib.pyplot as plt
 
 
 
@@ -36,6 +37,7 @@ class NoExtrasPredictor(PosePredictor):
                         base_xyz_image:np.ndarray,
                         cam2_bgr_image: np.ndarray,
                         point_cloud:np.ndarray,
+                        plot_matchings:bool = True
                         ) -> np.ndarray | None:
 
         h, w = cam2_bgr_image.shape[:2]
@@ -64,9 +66,16 @@ class NoExtrasPredictor(PosePredictor):
 
             feats_cam1_keypoints = feats_cam1['keypoints']
             feats_cam2_keypoints = feats_cam2['keypoints']
-
             image_points_cam1_cpu = feats_cam1_keypoints[matches12['matches'][..., 0]].cpu()
             image_points_cam2_cpu = feats_cam2_keypoints[matches12['matches'][..., 1]].cpu()
+
+            if plot_matchings:
+                axes = viz2d.plot_images([cv2.cvtColor(cam1_bgr_image, cv2.COLOR_BGR2RGB), cv2.cvtColor(r_forward_t(cam2_bgr_image), cv2.COLOR_BGR2RGB)])
+                viz2d.plot_matches(
+                    feats_cam1_keypoints[matches12['matches'][..., 0]],
+                    feats_cam2_keypoints[matches12['matches'][..., 1]],lw=0.1
+                )
+                plt.show()
 
 
             world_obj_points = np.array([base_xyz_image[int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1_cpu.numpy()])
@@ -105,7 +114,7 @@ class NoExtrasPredictor(PosePredictor):
 
 
 if __name__ == "__main__":
-    data = PredictionData.from_folder("../processed_datasets/r3_small_aruco1")
+    data = PredictionData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data")
     predictor = NoExtrasPredictor(data.headset_intrinsics)
     est_base_t_headset_s = run_predictions(data, predictor)
 

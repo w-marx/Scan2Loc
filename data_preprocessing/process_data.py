@@ -89,7 +89,6 @@ def process_data(
             headset_image = headset_images[headset_w_marker_img_idx]
 
         headset_image = robot_data.marker_detector.remove_markers([headset_image])[0]
-        robot_bgr_images = robot_data.marker_detector.remove_markers(list(robot_bgr_images))
 
 
     # Choose the robot images smartly
@@ -109,6 +108,9 @@ def process_data(
     robot_depth_images = [robot_depth_images[i] for i in chosen_indices]
     robot_camera_t_marker_s = [robot_camera_t_marker_s[i] for i in chosen_indices]
     robot_base_t_robot_camera_s = [robot_base_t_robot_camera_s[i] for i in chosen_indices]
+
+    if robot_data.marker_detector is not None:
+        robot_bgr_images = robot_data.marker_detector.remove_markers(robot_bgr_images)
 
     # Generate 3D Point cloud
     print("Generating point cloud...")
@@ -191,8 +193,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     start_time = time.perf_counter()
-
-    print(f"Loading the data from {os.path.abspath(args.robot_input_folder)}")
     
     robot_data = GatheredRobotData.from_folder(args.robot_input_folder)
     headset_data = HeadsetData.from_vrs_file(args.headset_vrs_file)

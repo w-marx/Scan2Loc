@@ -23,8 +23,58 @@ def assemble_homogeneous_matrix(rvec:np.ndarray, tvec:np.ndarray) -> np.ndarray:
     transformation[:3, 3] = tvec.flatten()
     return transformation
 
+class ImageMasker:
+    def remove_area(self,bgr_images:np.ndarray, hulls:list[np.ndarray]):
+        """
+        Paints the area inside the hulls black
+        :param images an NxHxWx3-uint8 numpy array of BGR images
+        :param hulls: A list of Mx2 array of image coordinates that form a hull, or None that has length N
+        """
+        assert bgr_images.ndim == 4 and bgr_images.shape[0] > 0
+        assert len(hulls) == bgr_images.shape[0]
+        assert all([hull is None or (hull.ndim == 2 and hull.shape[0] > 0 and hull.shape[-1] == 2) for hull in hulls])
+
+        edited_images = []
+        for bgr_image, hull in zip(bgr_images, hulls):
+            img_copy = bgr_image.copy()
+            cv2.fillPoly(img_copy, [hull.astype(np.int32)], color=(0, 0, 0))
+            edited_images.append(img_copy)
+        return np.array(edited_images)
+
+
+class LamaMasker(ImageMasker):
+    def __init__(self):
+        from simple_lama_inpainting import SimpleLama
+        self.model = SimpleLama()
+
+    def remove_area(self, bgr_images:np.ndarray, hulls:np.ndarray):
+        assert bgr_images.ndim == 4 and bgr_images.shape[0] > 0
+        assert len(hulls) == bgr_images.shape[0]
+        assert all([hull is None or (hull.ndim == 2 and hull.shape[0] > 0 and hull.shape[-1] == 2) for hull in hulls])
+
+        masked_images = []
+        for bgr_img, hull_points in zip(bgr_images, hulls):
+            mask = np.zeros(bgr_img.shape[:2], dtype=np.uint8)
+            cv2.fillPoly(mask, [hull_points.astype(np.int32)], 255)
+            cv2.polylines(mask, [hull_points.astype(np.int32)], isClosed=True, color=255, thickness=5)
+            result = self.model(bgr_img, mask)
+            masked_images.append(result)
+        return np.array(masked_images)
+
+
 
 class ArucoCharucoDetector:
+    def __init__(self):
+        self.marker_remover = LamaMasker()
+    
+    def set_new_masker(self, masker:str):
+        if masker == "ImageMasker":
+            self.marker_remover = ImageMasker()
+        elif masker == "LamaMasker":
+            self.marker_remover = LamaMasker()
+        else:
+            raise Exception(f"Masker {masker} not found")
+
     def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float])->list[np.ndarray | None]:
         """
         Returns the pose camera_t_marker or for each image in the list as a list of 4x4 homogeneous matrices
@@ -139,8 +189,7 @@ class ArucoDetector(ArucoCharucoDetector):
             image_copy = image.copy()
             if marker_corners:
                 for corners in marker_corners:
-                    cv2.fillPoly(image_copy, [corners.reshape(4,2).astype(np.int32)], color=(0, 0, 0))
-
+                    image_copy = self.marker_remover.remove_area(np.array([image_copy]), [corners.reshape(4,2).astype(np.int32)])[0]
             masked_images.append(image_copy)
         return masked_images
 
@@ -236,9 +285,7 @@ class CharucoDetector(ArucoCharucoDetector):
 
         return camera_t_charuco_s
 
-    def remove_markers(self, images:list[np.ndarray], advanced:bool = False)->list[np.ndarray]:
-
-        edited_images = []
+    def remove_markers(self, images:list[np.ndarray], advanced:bool = True)->list[np.ndarray]:
         hulls = []
         for image in images:
             charuco_corners, charuco_ids, marker_corners, marker_ids = self.detector.detectBoard(image)
@@ -250,46 +297,19 @@ class CharucoDetector(ArucoCharucoDetector):
                 marker_square = marker_avg+((marker-marker_avg)*self.square_size/self.marker_size)*2
                 marker_squares.append(marker_square)
             if len(marker_squares) == 0:
-                edited_images.append(image.copy())
+                hulls.append(None)
                 continue
-            marker_square_points = np.vstack(marker_squares)
 
+            marker_square_points = np.vstack(marker_squares)
             from scipy.spatial import ConvexHull
             hull = ConvexHull(marker_square_points)
             hull_points = marker_square_points[hull.vertices]
-            img_copy = image.copy()
-            cv2.fillPoly(img_copy, [hull_points.astype(np.int32)], color=(0, 0, 0))
             hulls.append(hull_points)
 
-            edited_images.append(img_copy)
-        if advanced:
-            edited_images = list(remove_advanced(np.array(images), np.array(hulls)))
-
-        return edited_images
+        return self.marker_remover.remove_area(np.array(images), np.array(hulls))
 
     def get_meta_data(self):
         return self.metadata
-
-def remove_advanced(bgr_images:np.ndarray, cnvx_hull_points_s:np.ndarray)->np.ndarray:
-    """
-    :param bgr_images: NHxWx3-uint8 numpy array
-    :param cnvx_hull_points_s: NxMx2 numpy array
-    """
-    from iopaint.model_manager import ModelManager
-    if not hasattr(remove_advanced, 'model'):
-        remove_advanced.model = ModelManager(name="lama", device="cpu")
-    masked_images = []
-
-
-    for bgr_img, hull_points in zip(bgr_images, cnvx_hull_points_s):
-        mask = np.zeros(bgr_img.shape[:2], dtype=np.uint8)
-        cv2.fillPoly(mask, [hull_points.astype(np.int32)], 255)
-
-        rgb_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
-        result_rgb = remove_advanced.model.inpaint(image=rgb_img, mask=mask)
-        masked_images.append(cv2.cvtColor(result_rgb, cv2.COLOR_RGB2BGR))
-
-    return np.array(masked_images)
 
 if __name__ == "__main__":
     import os
