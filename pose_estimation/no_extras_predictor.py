@@ -2,18 +2,37 @@ import cv2
 import numpy as np
 import torch
 import open3d as o3d
-from lightglue import LightGlue, SuperPoint, DISK, SIFT, ALIKED, DoGHardNet
-from lightglue.utils import load_image, rbd, numpy_image_to_torch
-from lightglue import viz2d
 from predictor_handling import *
 import matplotlib.pyplot as plt
+from extractors_and_matchers import *
+from typing import Callable
 
+class Augmentation:
+    def forward(self,img:np.ndarray)->tuple[np.ndarray, Callable[[np.ndarray], np.ndarray]]:
+        return img, lambda x:x
 
+class Rotate180Deg(Augmentation):
+    def forward(self,img:np.ndarray)->tuple[np.ndarray, Callable[[np.ndarray], np.ndarray]]:
+        w, h = img.shape[:2]
+        img = cv2.rotate(img, cv2.ROTATE_180)
+        backward = lambda img_points: np.array([[w-x, h-y] for x,y in img_points])
+        return img, backward
+
+class CropImage(Augmentation):
+    def __init__(self, relative_crop_amount:float = 0):
+        self.relative_crop_amount = relative_crop_amount
+
+    def forward(self,img:np.ndarray)->tuple[np.ndarray, Callable[[np.ndarray], np.ndarray]]:
+        crop_pixels = int(self.relative_crop_amount * np.min(img.shape[:2])/2)
+        img = img[crop_pixels:-crop_pixels,crop_pixels:-crop_pixels,:]
+        backward = lambda img_points: img_points + crop_pixels
+        return img, backward
 
 class NoExtrasPredictor(PosePredictor):
     def __init__(
-            self, 
+            self,
             cam2_mtx:np.ndarray,
+            extract_and_match:ExtractAndMatch = ExtractAndLightGlue(extractor="SuperPoint"),
             use_rotation_augmentations:bool = True,
             min_number_inlier:int = 6,
             ransac_itterations:int = 10000,
@@ -21,11 +40,8 @@ class NoExtrasPredictor(PosePredictor):
             ransac_confidence:float = 0.99
         ):
         super().__init__()
-        self.extractor = SuperPoint(max_num_keypoints=2048).eval().cuda()
-        self.matcher = LightGlue(features='superpoint').eval().cuda()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         self.cam2_mtx = cam2_mtx
+        self.extract_and_match = extract_and_match
         self.min_number_inlier = min_number_inlier
         self.ransac_itterations = ransac_itterations
         self.ransac_reprojection_error = ransac_reprojection_error
@@ -37,52 +53,34 @@ class NoExtrasPredictor(PosePredictor):
                         base_xyz_image:np.ndarray,
                         cam2_bgr_image: np.ndarray,
                         point_cloud:np.ndarray,
-                        plot_matchings:bool = True
                         ) -> np.ndarray | None:
 
-        h, w = cam2_bgr_image.shape[:2]
 
-
-        rotation_augmentations = [("identity",lambda img: img, lambda img_points:img_points)]
+        rotation_augmentations = [Augmentation()]
         if self.use_rotation_augmentations:
-            rotation_augmentations += [
-                ("rot 180°",lambda img: cv2.rotate(img, cv2.ROTATE_180), lambda img_points: np.array([[w-x, h-y] for x,y in img_points])),
-            ]
+            rotation_augmentations.append(Rotate180Deg())
 
+        crop_augmentations = [Augmentation(), CropImage(0.1), CropImage(0.2), CropImage(0.3)]        
         
         augmentation_options_names = []
         world_obj_points_options = []
         image_points_cam2_options = []
 
-        for (r_aug_name, r_forward_t, r_backward_t) in rotation_augmentations:
-            cam1_image = numpy_image_to_torch(cv2.cvtColor(cam1_bgr_image, cv2.COLOR_BGR2RGB))
-            cam2_image = numpy_image_to_torch(cv2.cvtColor(r_forward_t(cam2_bgr_image), cv2.COLOR_BGR2RGB))
+        for c_aug in crop_augmentations:
+            for r_aug in rotation_augmentations:
+                augmented_image, backward_aug2 = c_aug.forward(cam2_bgr_image)
+                augmented_image, backward_aug1 = r_aug.forward(augmented_image)
 
-            feats_cam1 = self.extractor.extract(cam1_image.to(self.device))
-            feats_cam2 = self.extractor.extract(cam2_image.to(self.device))
-
-            matches12 = self.matcher({'image0': feats_cam1, 'image1': feats_cam2, })
-            feats_cam1, feats_cam2, matches12 = [rbd(x) for x in [feats_cam1, feats_cam2, matches12]]
-
-            feats_cam1_keypoints = feats_cam1['keypoints']
-            feats_cam2_keypoints = feats_cam2['keypoints']
-            image_points_cam1_cpu = feats_cam1_keypoints[matches12['matches'][..., 0]].cpu()
-            image_points_cam2_cpu = feats_cam2_keypoints[matches12['matches'][..., 1]].cpu()
-
-            if plot_matchings:
-                axes = viz2d.plot_images([cv2.cvtColor(cam1_bgr_image, cv2.COLOR_BGR2RGB), cv2.cvtColor(r_forward_t(cam2_bgr_image), cv2.COLOR_BGR2RGB)])
-                viz2d.plot_matches(
-                    feats_cam1_keypoints[matches12['matches'][..., 0]],
-                    feats_cam2_keypoints[matches12['matches'][..., 1]],lw=0.1
+                image_points_cam1, image_points_cam2 = self.extract_and_match.get_matched_points(
+                    cv2.cvtColor(cam1_bgr_image, cv2.COLOR_BGR2RGB),
+                    cv2.cvtColor(augmented_image, cv2.COLOR_BGR2RGB)
                 )
-                plt.show()
 
-
-            world_obj_points = np.array([base_xyz_image[int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1_cpu.numpy()])
-            if world_obj_points.shape[0] > 5:
-                augmentation_options_names.append(r_aug_name)
-                world_obj_points_options.append(world_obj_points)
-                image_points_cam2_options.append(r_backward_t(image_points_cam2_cpu.numpy()))
+                world_obj_points = np.array([base_xyz_image[int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1])
+                if world_obj_points.shape[0] > 5:
+                    augmentation_options_names.append(f"{type(c_aug).__name__}x{type(r_aug).__name__}")
+                    world_obj_points_options.append(world_obj_points)
+                    image_points_cam2_options.append(backward_aug2(backward_aug1(image_points_cam2)))
         
         if len(world_obj_points_options) < 1:
             return None
@@ -103,7 +101,6 @@ class NoExtrasPredictor(PosePredictor):
         if not success or len(inliers) < self.min_number_inlier:
            return None
         
-        # build results
         cam2_t_base = np.eye(4)
         cam2_t_base[:3, :3] = cv2.Rodrigues(r_img_t_obj)[0]
         cam2_t_base[:3, 3] = t_img_t_obj.flatten()
