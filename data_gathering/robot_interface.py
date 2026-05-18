@@ -132,7 +132,6 @@ def gather_robot_imgs_eefs(
 
     return depth_images, bgr_images, base_t_gripper_s
 
-
 def gather_robot_data(
         number_of_positions:None|int = None,
         stabilisation_timeout:float = 0.0
@@ -156,9 +155,8 @@ def gather_robot_data(
 
     rgb_intrinsics = pipeline.get_active_profile().get_stream(
         rs.stream.color).as_video_stream_profile().get_intrinsics()
-    
-    rgb_cam_mat, rgb_cam_dist_coef = extract_intrinsics(rgb_intrinsics)
 
+    rgb_cam_mat, rgb_cam_dist_coef = extract_intrinsics(rgb_intrinsics)
     depth_scale = pipeline.get_active_profile().get_device().first_depth_sensor().get_depth_scale()
 
     depth_images, bgr_images, base_t_gripper_s = gather_robot_imgs_eefs(robot_interface=robot_interface,
