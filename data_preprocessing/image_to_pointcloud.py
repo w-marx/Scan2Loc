@@ -61,7 +61,7 @@ def create_foreground_masks(
     processor = Sam3Processor.from_pretrained("facebook/sam3")
 
     masks = []
-    for idx, image in enumerate(images):
+    for image in tqdm(images):
         pil_rgb_image = Image.fromarray(cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2RGB))
         mask = np.zeros((image.shape[0], image.shape[1]), dtype=int)
         for text, score in prompts:
@@ -142,6 +142,7 @@ def align_point_clouds_icp(
         point_clouds:list[np.ndarray], 
         icp_threshhold:float = 0.01,
         icp_max_number_itterations:int = 1000,
+        icp_voxel_size:float = 0.0,
         visualize:bool = True
     )->list[np.ndarray]:
     """
@@ -151,6 +152,7 @@ def align_point_clouds_icp(
     :param point_clouds a list of N_i x 3-float numpy arrays
     :param icp_threshhold
     :param icp_max_number_itterations
+    :param icp_voxel_size, the voxel size to downsample to before doing icp, if 0 no downsampling will be done
     :param visualize wheather to visualize the unaligned and aligned pointclouds
     :returns a list of the aligned point clouds (same size & order of clouds and their points as input)
     """
@@ -161,10 +163,12 @@ def align_point_clouds_icp(
     for i, point_cloud in enumerate(point_clouds):
         o3d_point_clouds.append(o3d.geometry.PointCloud())
         o3d_point_clouds[-1].points = o3d.utility.Vector3dVector(point_cloud)
+        if icp_voxel_size > 1e-6:
+            o3d_point_clouds[-1] = o3d_point_clouds[-1].voxel_down_sample(voxel_size=icp_voxel_size)
 
     ref_pc = o3d_point_clouds[0]
 
-    pci_t_ref_s = [np.eye(4)]
+    ref_t_pci_s = [np.eye(4)]
 
     print("aligning pointclouds using ICP")
     for pci in tqdm(o3d_point_clouds[1:]):
@@ -178,11 +182,11 @@ def align_point_clouds_icp(
                 max_iteration=icp_max_number_itterations
             )
         )
-        pci_t_ref_s.append(reg_p2p.transformation)
+        ref_t_pci_s.append(np.linalg.inv(reg_p2p.transformation))
     
-    ref_t_median_pci = np.linalg.inv(compute_pose_pseudo_median(pci_t_ref_s))
+    ref_t_median_pci = compute_pose_pseudo_median(ref_t_pci_s)
 
-    pci_t_median_pci_s = [pci_t_ref @ ref_t_median_pci for pci_t_ref in pci_t_ref_s]
+    pci_t_median_pci_s = [np.linalg.inv(ref_t_pci) @ ref_t_median_pci for ref_t_pci in ref_t_pci_s]
 
     hom_point_clouds = [np.hstack([pci, np.ones((pci.shape[0],1))]) for pci in point_clouds]
     aligned_point_clouds = [((pci_t_median_pci @ pci.T).T)[:,:3] for pci_t_median_pci, pci in zip(pci_t_median_pci_s, hom_point_clouds)]
@@ -235,9 +239,6 @@ def create_point_cloud(
     assert camera_intrinsics.shape == (3,3), f"Camera intrinsics shape is not 3x3: {camera_intrinsics.shape}"
     assert 0 <= confidence_threshold_percent <= 100, f"confidence_threshhold_percent should be between 0 and 100 is {confidence_threshold_percent}"
 
-    if crop_square and depth_images is not None:
-        warnings.warn("Depth images and cropping only color images will missalign the depth & color camera -> bad reconstruction", UserWarning)
-
     if crop_square:
         h_orig = bgr_images.shape[1]
         w_orig = bgr_images.shape[2]
@@ -245,10 +246,12 @@ def create_point_cloud(
         if w_orig > h_orig+2:
             crop_amount = int((w_orig-h_orig)/2)
             bgr_images = bgr_images[:,:,crop_amount:-crop_amount,:]
+            depth_images = depth_images[:,:,crop_amount:-crop_amount]
             camera_intrinsics[0,2] -= crop_amount
         elif h_orig > w_orig+2:
             crop_amount = int((h_orig-w_orig)/2)
             bgr_images = bgr_images[:,crop_amount:-crop_amount,:,:]
+            depth_images = depth_images[:, crop_amount:-crop_amount,:]
             camera_intrinsics[1,2] -= crop_amount
 
     import os

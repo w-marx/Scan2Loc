@@ -21,12 +21,12 @@ def process_data(
         est3d_use_sam3_for_foreground_seg: bool = True,
         est3d_custom_sam3_prompts: list[tuple[str, int]] | None = None,
         est3d_xyz_img_mapanything_crop_square:bool = False,
-        est3d_xyz_img_upscaling:bool = False, #TODO (optional)
         est3d_xyz_img_camera_alginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama",
         est3d_xyz_img_confidence_threshold: int = 10,
         est3d_xyz_do_icp_alignment:bool = True,
         est3d_xyz_icp_point_dist_threshhold:float = 0.01,
         est3d_xyz_icp_max_itterations:int = 1000,
+        est3d_xyz_icp_voxel_size:float = 0.001,
         est3d_point_cloud_foreground_masks_conf_threshold: float = 0.5,
         est3d_point_cloud_foreground_object_detection_threshold: float = 0.5,
         est3d_point_cloud_iforest_confidence_threshold: float = 0.0,
@@ -43,12 +43,12 @@ def process_data(
     :param est3d_use_map_anything: If yes map-anything will be used for xyz-image generation (recommended method), if not crude Depth-based methods
     :param est3d_use_sam3_for_foreground_seg: If sam3 should be used to have only foreground objects in the pointcloud
     :param est3d_xyz_img_mapanything_crop_square: Wheather the color-images should be cropped square before being passed into map-anything
-    :param est3d_xyz_img_upscaling: Not implemented yet
     :param est3d_xyz_img_camera_alginment_method: The method to match the map-anything camera poses to the actual camera poses and transform the points accordingly
     :param est3d_xyz_img_confidence_threshold: The confidence threshhold for points for map-anything 
     :param est3d_xyz_do_icp_alignment: Wheather to align the 3D points for each image using icp or not
     :param est3d_xyz_icp_point_dist_threshhold: The distance between points in meters, for consideration in icp
     :param est3d_xyz_icp_max_itterations: The number of itterations for icp optimization per pointcloud
+    :param est3d_xyz_icp_voxel_size: If not 0, the pointclouds will be downsampled to that voxel size for quicker realignment
     :param est3d_point_cloud_foreground_masks_conf_threshold: The confidence threshhold for object detection by sam3
     :param est3d_point_cloud_foreground_object_detection_threshold: The confidence threshhold for the masks by sam3
     :param est3d_point_cloud_iforest_confidence_threshold: The expected contamination of the point cloud to be removed by iforest
@@ -75,10 +75,6 @@ def process_data(
     robot_camera_t_marker_s = robot_data.camera_t_marker_s
     robot_base_t_robot_camera_s = robot_data.base_t_camera_s
 
-    robot_bgr_cam_mtx = robot_data.color_cam_mtx
-    robot_bgr_cam_dist_coef = robot_data.color_distortion_coefficients
-    robot_depth_cam_mtx:np.ndarray = robot_data.depth_cam_mtx
-
     if robot_data.marker_detector is not None:
         robot_data.marker_detector.set_new_masker("LamaMasker" if markers_use_advanced_removal else "ImageMasker")
 
@@ -90,7 +86,6 @@ def process_data(
         headset_t_markers = robot_data.marker_detector.get_camera_t_marker(
             images=list(headset_images),
             camera_matrix=headset_cam_mtx,
-            distortion_coefficients = robot_bgr_cam_dist_coef
         )
         headset_t_markers_idx_none_filtered = [idx for idx, h_t_m in enumerate(headset_t_markers) if h_t_m is not None]
         if len(headset_t_markers_idx_none_filtered) > 0:
@@ -127,13 +122,13 @@ def process_data(
     robot_base_xyz_imgs = None
     point_cloud = None
 
-    image_mask_generator = lambda imgs: create_foreground_masks(
+    image_mask_generator = (lambda imgs: create_foreground_masks(
                 images=imgs,
                 threshold=est3d_point_cloud_foreground_object_detection_threshold,
                 mask_threshold = est3d_point_cloud_foreground_masks_conf_threshold,
                 visualize_masks=est3d_debug_visualize_foreground_masks,
                 prompts=est3d_custom_sam3_prompts
-    ) if est3d_use_sam3_for_foreground_seg else None
+    )) if est3d_use_sam3_for_foreground_seg else None
 
     xyz_image_aligner = (lambda xyz_imgs: np.array([
         xyz_img.reshape(xyz_imgs.shape[1:])
@@ -142,16 +137,18 @@ def process_data(
             point_clouds = [xyz_img.reshape(-1,3) for xyz_img in xyz_imgs],
             icp_threshhold = est3d_xyz_icp_point_dist_threshhold,
             icp_max_number_itterations = est3d_xyz_icp_max_itterations,
+            icp_voxel_size = est3d_xyz_icp_voxel_size,
             visualize=False
         )
     ])) if est3d_xyz_do_icp_alignment else None
 
+    robot_cam_intrinsic_mtx = robot_data.cam_intrinsic_mtx
     if est3d_use_map_anything:
-        robot_bgr_images, robot_base_xyz_imgs, point_cloud, robot_bgr_cam_mtx = create_point_cloud(
+        robot_bgr_images, robot_base_xyz_imgs, point_cloud, robot_cam_intrinsic_mtx = create_point_cloud(
             bgr_images=np.array(robot_bgr_images),
             base_t_cam_s=np.array(robot_base_t_robot_camera_s),
             depth_images=np.array(robot_depth_images) if est3d_use_depth_images else None,
-            camera_intrinsics=robot_bgr_cam_mtx,
+            camera_intrinsics=robot_cam_intrinsic_mtx,
             confidence_threshold_percent=est3d_xyz_img_confidence_threshold,
             image_mask_generator=image_mask_generator,
             xyz_image_aligner=xyz_image_aligner,
@@ -167,7 +164,7 @@ def process_data(
     else:
         robot_base_xyz_imgs, point_cloud = create_point_cloud_simple(
             depth_images=np.array(robot_depth_images),
-            depth_cam_mtx=np.array(robot_depth_cam_mtx),
+            depth_cam_mtx=robot_cam_intrinsic_mtx,
             base_t_camera_s=np.array(robot_base_t_robot_camera_s),
             image_masks=image_mask_generator(np.array(robot_bgr_images)) if image_mask_generator else None,
             distance_cutoff=1.0,
@@ -185,7 +182,7 @@ def process_data(
     return PredictionData(
         name = "",
         robot_bgr_images=np.array(robot_bgr_images),
-        robot_bgr_intrinsics=robot_bgr_cam_mtx,
+        robot_bgr_intrinsics=robot_cam_intrinsic_mtx,
         headset_bgr_image=headset_image,
         headset_intrinsics=headset_cam_mtx,
         robot_xyz_images=np.array(robot_base_xyz_imgs),

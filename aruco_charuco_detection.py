@@ -75,7 +75,7 @@ class ArucoCharucoDetector:
         else:
             raise Exception(f"Masker {masker} not found")
 
-    def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float])->list[np.ndarray | None]:
+    def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float]|None = None)->list[np.ndarray | None]:
         """
         Returns the pose camera_t_marker or for each image in the list as a list of 4x4 homogeneous matrices
         :param images: list of HxWx3 RGB images
@@ -151,7 +151,7 @@ class ArucoDetector(ArucoCharucoDetector):
         detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.detector = cv2.aruco.ArucoDetector(self.aruco_marker_dictionary, detector_params)
 
-    def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float])->list[np.ndarray | None]:
+    def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float]|None = None)->list[np.ndarray | None]:
 
         marker_points = np.array([[-1,1,0], [1,1,0], [1,-1,0], [-1,-1,0]])*0.5*self.aruco_marker_side_length
 
@@ -169,7 +169,7 @@ class ArucoDetector(ArucoCharucoDetector):
                 objectPoints=marker_points,
                 imagePoints=marker_corners[0][0],
                 cameraMatrix=camera_matrix,
-                distCoeffs=np.array(distortion_coefficients),
+                distCoeffs=np.array(([0,0,0,0,0] if distortion_coefficients is None else distortion_coefficients)),
                 flags=cv2.SOLVEPNP_IPPE_SQUARE
             )
             camera_t_aruco_s.append(assemble_homogeneous_matrix(rvec=rvec, tvec=tvec))
@@ -227,7 +227,7 @@ class CharucoDetector(ArucoCharucoDetector):
         }
 
 
-    def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float])->list[np.ndarray | None]:
+    def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float]|None = None)->list[np.ndarray | None]:
         """
         :param images: NxWxHx3-uint8 RGB images
         :param camera_matrix: 3x3 camera matrix
