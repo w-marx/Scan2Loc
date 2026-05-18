@@ -26,11 +26,8 @@ class GatheredRobotData:
         self,
         name:str,
         bgr_images:np.ndarray,
-        color_cam_mtx:np.ndarray,
-        color_cam_distortion_coefficients: list[float],
+        cam_intrinsic_mtx:np.ndarray,
         depth_images:np.ndarray,
-        depth_cam_mtx:np.ndarray,
-        depth_cam_distortion_coefficients:list[float],
         base_t_gripper_s:np.ndarray,
         camera_t_marker_s:list[None | np.ndarray],
         marker_detector: None | ArucoCharucoDetector,
@@ -39,11 +36,8 @@ class GatheredRobotData:
         """
         :param name: The name of the dataset (will be used for saving)
         :param bgr_images: Robot BGR images as an NxHxW-uint8 numpy array
-        :param color_cam_mtx: Robot BGR camera intrinsics 3x3 matrix
-        :param color_cam_distortion_coefficients: Robot BGR distortion coefficients, as a list of floats
+        :param cam_intrinsic_mtx: Robot BGR camera intrinsics 3x3 matrix
         :param depth_images: Robot depth images as an NxHxW-float numpy array (in meters)
-        :param depth_cam_mtx: Robot depth camera intrinsics 3x3 matrix
-        :param depth_cam_distortion_coefficients: Robot depth distortion coefficients, as a list of floats
         :param base_t_gripper_s: The homogeneous 4x4 transformation base->camera matrices (Nx4x4-float numpy array)
         :param camera_t_marker_s: A list of homogeneous 4x4-float camera->marker transformation matrices or None
         :param marker_detector: Aruco charuco detector instance.
@@ -55,21 +49,12 @@ class GatheredRobotData:
         assert bgr_images.dtype == np.uint8, f"Wrong dtype for bgr images {bgr_images.dtype}"
         self._bgr_images = bgr_images
 
-        assert assert_intrinsic_mat(color_cam_mtx, bgr_images[0])
-        self._color_cam_mtx = color_cam_mtx
-
-        assert isinstance(color_cam_distortion_coefficients, list) and len(color_cam_distortion_coefficients) > 0
-        self._color_cam_distortion_coefficients = color_cam_distortion_coefficients
+        assert assert_intrinsic_mat(cam_intrinsic_mtx, bgr_images[0])
+        self._cam_intrinsic_mtx = cam_intrinsic_mtx
 
         assert depth_images.shape[:3] == bgr_images.shape[:3] and depth_images.ndim == 3
         assert np.issubdtype(depth_images.dtype, np.floating)
         self._depth_images = depth_images
-
-        assert assert_intrinsic_mat(depth_cam_mtx, depth_images[0])
-        self._depth_cam_mtx = depth_cam_mtx
-
-        assert isinstance(depth_cam_distortion_coefficients, list) and len(depth_cam_distortion_coefficients) > 0
-        self._depth_cam_distortion_coefficients = depth_cam_distortion_coefficients
 
         assert base_t_gripper_s.shape[0] == bgr_images.shape[0]
         assert all([assert_homogeneous_mat(m) for m in base_t_gripper_s])
@@ -104,7 +89,7 @@ class GatheredRobotData:
         └── robot_cam_calibration.json
 
         The robot_cam_calibration.json file should contain the fields:
-        `rgb_camera_matrix`, `depth_camera_matrix`, `rgb_distortion_coefficients` and `depth_distortion_coefficients`.`
+        `camera_intrinsic_matrix`
 
         The `poses.json` files should contain the field:
         -`base_t_gripper`
@@ -139,11 +124,8 @@ class GatheredRobotData:
         instance = cls(
             name=os.path.dirname(folder_path),
             bgr_images=np.array(robot_bgr_images),
-            color_cam_mtx=np.array(robot_cam_calibration["rgb_camera_matrix"]),
-            color_cam_distortion_coefficients=robot_cam_calibration["rgb_distortion_coefficients"],
+            cam_intrinsic_mtx=np.array(robot_cam_calibration["camera_intrinsic_matrix"]),
             depth_images=np.array(robot_depth_images),
-            depth_cam_mtx=np.array(robot_cam_calibration["depth_camera_matrix"]),
-            depth_cam_distortion_coefficients=robot_cam_calibration["depth_distortion_coefficients"],
             base_t_gripper_s=np.array(base_t_gripper_s),
             camera_t_marker_s=robot_camera_t_marker_s,
             marker_detector=marker_detector,
@@ -152,7 +134,7 @@ class GatheredRobotData:
         return instance
 
 
-    def save(self, folder, new_name=None):
+    def save(self, folder:str, new_name:str=None, dist_coeff:list[float] = None):
         import shutil, cv2, json
         location = f"{folder}/{self.name}" if new_name is None else f"{folder}/{new_name}"
 
@@ -178,16 +160,41 @@ class GatheredRobotData:
         with open(f"{location}/metadata.json", 'w') as f:
             json.dump(self.marker_detector.get_meta_data() if self.marker_detector is not None else None, f, indent=4)
 
-        robot_cam_calibration = {
-            "rgb_camera_matrix":self.color_cam_mtx.tolist(),
-            "rgb_distortion_coefficients":self.color_distortion_coefficients,
-            "depth_camera_matrix":self.depth_cam_mtx.tolist(),
-            "depth_distortion_coefficients":self.depth_cam_distortion_coefficients
-        }
+        robot_cam_calibration = {"camera_intrinsic_matrix":self.cam_intrinsic_mtx.tolist()}
+        if dist_coeff is not None:
+            robot_cam_calibration.update({'camera_distortion_coefficients': dist_coeff})
+
         with open(f"{location}/robot_cam_calibration.json", 'w') as f:
             json.dump(robot_cam_calibration, f, indent=4)
 
         np.save(f"{location}/gripper_t_cam.npy", self._gripper_t_cam)
+    
+    def see_color_depth_alignment(self,frame_idx:int = 0):
+        assert frame_idx >= 0
+        if frame_idx >= self.bgr_images.shape[0]:
+            return
+        bgr_image = self.bgr_images[frame_idx].copy()
+        depth_image = self.depth_images[frame_idx].copy()
+
+        import matplotlib.pyplot as plt
+        import cv2
+
+        gray_bgr = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2GRAY)
+    
+        # Depth image as color gradient
+        depth_image_norm = (depth_image - np.min(depth_image))/(np.max(depth_image) - np.min(depth_image)+0.001)
+        depth_gradient = plt.cm.jet(depth_image_norm)[:,:, :3]
+        
+        
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        
+        alpha = 0.6 
+        ax1.imshow(depth_gradient * alpha + (np.stack([gray_bgr/255.0]*3, axis=2)) * (1-alpha))
+        ax1.set_title('Grayscale BGR + Gradient Depth')
+
+        ax2.imshow(depth_gradient)
+        ax2.set_title('Only depth gradient')
+        plt.show()
 
 
     @property
@@ -199,24 +206,12 @@ class GatheredRobotData:
         return self._bgr_images
 
     @property
-    def color_cam_mtx(self) -> np.ndarray:
-        return self._color_cam_mtx
-
-    @property
-    def color_distortion_coefficients(self) -> list[float]:
-        return self._color_cam_distortion_coefficients
+    def cam_intrinsic_mtx(self) -> np.ndarray:
+        return self._cam_intrinsic_mtx
 
     @property
     def depth_images(self) -> np.ndarray:
         return self._depth_images
-
-    @property
-    def depth_cam_mtx(self) -> np.ndarray:
-        return self._depth_cam_mtx
-
-    @property
-    def depth_cam_distortion_coefficients(self) -> list[float]:
-        return self._depth_cam_distortion_coefficients
 
     @property
     def base_t_gripper_s(self) -> np.ndarray:

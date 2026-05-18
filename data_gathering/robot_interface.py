@@ -76,16 +76,14 @@ positions = [
     [0.12325, -0.00228, -0.09325, -2.13569, -0.02817, 2.01549, 0.82194],
 ]
 
-def extract_intrinsics(rgb_intrinsics, depth_intrinsics) -> tuple[np.ndarray,list[float],np.ndarray, list[float]]:
+def extract_intrinsics(cam_intrinsics) -> tuple[np.ndarray,list[float],np.ndarray, list[float]]:
     """
-    Returns the intrinsic rgb_camera_mat & coefficients and the intrinsic depth_camera_mat and coefficients
-    :param rgb_intrinsics: The intrinsics of a rgb camera
+    :param cam_intrinsics: The intrinsics of a rgb camera
     :param depth_intrinsics: The intrinsics of a depth camera
-    :return: he intrinsic rgb_camera_mat & distortion_coefficients & depth_camera_mat and distortion_coefficients
+    :return: The cam_intrinsics & distortion_coefficients
     """
-    rgb_camera_mat = np.array([[rgb_intrinsics.fx, 0, rgb_intrinsics.ppx], [0, rgb_intrinsics.fy, rgb_intrinsics.ppy], [0,0,1]])
-    depth_camera_mat = np.array([[depth_intrinsics.fx, 0, depth_intrinsics.ppx], [0, depth_intrinsics.fy, depth_intrinsics.ppy], [0,0,1]])
-    return rgb_camera_mat, rgb_intrinsics.coeffs, depth_camera_mat, depth_intrinsics.coeffs
+    camera_mat = np.array([[cam_intrinsics.fx, 0, cam_intrinsics.ppx], [0, cam_intrinsics.fy, cam_intrinsics.ppy], [0,0,1]])
+    return camera_mat, cam_intrinsics.coeffs
 
 def gather_robot_imgs_eefs(
         robot_interface,
@@ -104,11 +102,13 @@ def gather_robot_imgs_eefs(
     :param depth_scale: A factor to multiply the depth image by to get the depth in meters
     :param number_of_positions: The number of positions to gather images for. If None it will gather images for all passed positions
     :param robot_positions: A list of positions in joint coordinates (7 floats)
-    :return: tuple: list of depth images, list of rgb_images, list of base-to-gripper homogeneous matrices
+    :return: tuple: list of depth images, list of bgr, list of base-to-gripper homogeneous matrices
     """
     depth_images = []
-    rgb_images = []
+    bgr_images = []
     base_t_gripper_s = []
+
+    align = rs.align(rs.stream.color)
 
     for frame_idx, position in enumerate(robot_positions[:number_of_positions if number_of_positions is not None else len(robot_positions)]):
         print(f"moving to position {frame_idx} : {position}")
@@ -119,14 +119,18 @@ def gather_robot_imgs_eefs(
         base_t_gripper = robot_interface.last_eef_pose
 
         frames = image_pipeline.wait_for_frames()
-        rgb_frame = np.asanyarray(frames.get_color_frame().get_data())
-        depth_frame = np.asanyarray(frames.get_depth_frame().get_data())
+        aligned_frames = align.process(frames)
+
+        bgr_frame = np.ascontiguousarray(aligned_frames.get_color_frame().get_data())
+        depth_frame = np.asanyarray(aligned_frames.get_depth_frame().get_data())
         depth_frame_scaled = depth_frame * depth_scale
-        print(f"depth_frame: {depth_frame_scaled.shape}")
-        depth_images.append(depth_frame_scaled)
-        rgb_images.append(cv2.cvtColor(rgb_frame, cv2.COLOR_BGR2RGB))
+
+        depth_images.append(depth_frame_scaled.copy())
+        bgr_images.append(bgr_frame.copy())
+
         base_t_gripper_s.append(base_t_gripper)
-    return depth_images, rgb_images, base_t_gripper_s
+
+    return depth_images, bgr_images, base_t_gripper_s
 
 
 def gather_robot_data(
@@ -152,14 +156,12 @@ def gather_robot_data(
 
     rgb_intrinsics = pipeline.get_active_profile().get_stream(
         rs.stream.color).as_video_stream_profile().get_intrinsics()
-    depth_intrinsics = pipeline.get_active_profile().get_stream(
-        rs.stream.depth).as_video_stream_profile().get_intrinsics()
-    rgb_cam_mat, rgb_cam_dist_coef, depth_cam_mat, depth_cam_dist_coef = extract_intrinsics(rgb_intrinsics=rgb_intrinsics,
-                                                                                            depth_intrinsics=depth_intrinsics)
+    
+    rgb_cam_mat, rgb_cam_dist_coef = extract_intrinsics(rgb_intrinsics)
 
     depth_scale = pipeline.get_active_profile().get_device().first_depth_sensor().get_depth_scale()
 
-    depth_images, rgb_images, base_t_gripper_s = gather_robot_imgs_eefs(robot_interface=robot_interface,
+    depth_images, bgr_images, base_t_gripper_s = gather_robot_imgs_eefs(robot_interface=robot_interface,
                                                                         image_pipeline=pipeline,
                                                                         depth_scale=depth_scale,
                                                                         robot_positions=positions,
@@ -168,11 +170,9 @@ def gather_robot_data(
     pipeline.stop()
     gathered_data = ProtoRobotData(
         depth_images=np.array(depth_images),
-        depth_cam_intrinsic_mtx=depth_cam_mat,
-        depth_cam_distortion_coefficients=depth_cam_dist_coef,
-        bgr_images=np.array([cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR) for img in rgb_images]),
-        color_cam_intrinsic_mtx =rgb_cam_mat,
-        color_cam_distortion_coefficients=rgb_cam_dist_coef,
+        cam_intrinsic_mtx=rgb_cam_mat,
+        cam_distortion_coefficients=rgb_cam_dist_coef,
+        bgr_images=np.array(bgr_images),
         base_t_gripper_s=np.array(base_t_gripper_s),
     )
     return gathered_data

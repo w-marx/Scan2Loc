@@ -39,8 +39,8 @@ def optimize_robot_data(
     if marker_detector is not None:
         camera_t_marker_s = marker_detector.get_camera_t_marker(
             images=list(proto_data.bgr_images),
-            camera_matrix=proto_data.color_cam_intrinsic_mtx,
-            distortion_coefficients=proto_data.color_cam_distortion_coefficients
+            camera_matrix=proto_data.cam_intrinsic_mtx,
+            distortion_coefficients=proto_data.cam_distortion_coefficients
         )
 
     if gripper_t_cam is None:
@@ -82,11 +82,8 @@ def optimize_robot_data(
     return GatheredRobotData(
         name = name,
         bgr_images=proto_data.bgr_images,
-        color_cam_mtx=proto_data.color_cam_intrinsic_mtx,
-        color_cam_distortion_coefficients=proto_data.color_cam_distortion_coefficients,
+        cam_intrinsic_mtx=proto_data.cam_intrinsic_mtx,
         depth_images=proto_data.depth_images,
-        depth_cam_mtx=proto_data.depth_cam_intrinsic_mtx,
-        depth_cam_distortion_coefficients=proto_data.depth_cam_distortion_coefficients,
         base_t_gripper_s=proto_data.base_t_gripper_s,
         camera_t_marker_s=camera_t_marker_s,
         marker_detector=marker_detector,
@@ -156,13 +153,13 @@ Translation in mm cov & corr matrix:
 
     # Translational errors
     t_err_plt = fig.add_subplot(gs[3,0:2])
-    t_err_plt.hist(translational_errors_mm, bins = np.arange(int(min(translational_errors_mm)), int(max(translational_errors_mm)))+1)
+    t_err_plt.hist(translational_errors_mm)
     t_err_plt.set_xlabel(f"Distance to {'mean' if use_mean else 'median' } in mm")
     t_err_plt.set_ylabel("Frequency")
 
     # Rotational errors
     r_err_plt = fig.add_subplot(gs[3,2:4])
-    r_err_plt.hist(rotational_errors_deg, bins = np.arange(int(min(translational_errors_mm)), int(max(translational_errors_mm)+1)))
+    r_err_plt.hist(rotational_errors_deg)
     r_err_plt.set_xlabel(f"Rotational distance to {'mean' if use_mean else 'median' } in degrees")
     r_err_plt.set_ylabel("Frequency")
 
@@ -265,7 +262,8 @@ if __name__ == "__main__":
         marker_detector = marker_detector,
         base_t_gripper_outlier_quantiles=(args.pose_outlier_quants[0], args.pose_outlier_quants[1]),
     )
-    gd.save(folder=os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
+    gd.see_color_depth_alignment()
+    gd.save(folder=os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder), dist_coeff = proto_data.cam_distortion_coefficients)
 
     if args.analyze_results:
         check_output_data(
