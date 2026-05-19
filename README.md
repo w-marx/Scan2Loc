@@ -34,12 +34,21 @@ cd ..
 
 ````commandline
 cd pose_estimation
-conda env create -f environment.yml -p ./pose_est_env
+conda env create -f environment_3090.yml -p ./pose_est_env
 conda activate ./pose_est_env
 ````
 
+When using LightGlue for matching:
 ````commandline
 git clone https://github.com/cvg/LightGlue.git && cd LightGlue
 python -m pip install -e .
 cd ..
+````
+
+When using LoMa for matching:
+````commandline
+git clone https://github.com/davnords/LoMa.git && cd LoMa
+pip install -e . --no-deps
+cd ..
+pip install einops tyro
 ````
