@@ -13,5 +13,5 @@ dependencies:
     - opencv-python
     - scikit-learn
     - open3d
-    - simple-lama-inpainting
+    - uv
 
