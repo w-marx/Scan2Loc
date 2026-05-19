@@ -1,8 +1,14 @@
-import torch, cv2
+import torch
 from typing import Literal
+import numpy as np
 
 class ExtractAndMatch:
-    def get_matched_points(self,img1, img2):
+    def get_matched_points(self,img1_rgb:np.ndarray, img2_rgb:np.ndarray)->tuple[np.ndarray, np.ndarray]:
+        """
+        :param img1_rgb: An RGB image as HxWx3-uint8 numpy array
+        :param img2_rgb: An RGB image as HxWx3-uint8 numpy array
+        :return: a tuple of image Points as 2 Nx2 numpy arrays
+        """
         raise NotImplementedError("Not implemented in base class")
 
 class ExtractAndLightGlue(ExtractAndMatch):
@@ -32,7 +38,7 @@ class ExtractAndLightGlue(ExtractAndMatch):
         self.matcher = LightGlue(features=self.feature_name).eval().cuda()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    def get_matched_points(self, img1_rgb, img2_rgb):
+    def get_matched_points(self,img1_rgb:np.ndarray, img2_rgb:np.ndarray)->tuple[np.ndarray, np.ndarray]:
             cam1_image = self._numpy_image_to_torch(img1_rgb)
             cam2_image = self._numpy_image_to_torch(img2_rgb)
 
@@ -48,3 +54,17 @@ class ExtractAndLightGlue(ExtractAndMatch):
             image_points_cam2_cpu_np = feats_cam2_keypoints[matches12['matches'][..., 1]].cpu().numpy()
 
             return image_points_cam1_cpu_np, image_points_cam2_cpu_np
+
+class ExtractAndMatchLoma(ExtractAndMatch):
+    def __init__(self):
+        from loma import LoMa, LoMaB
+        self.model = LoMa(LoMaB)
+
+    def get_matched_points(self,img1_rgb:np.ndarray, img2_rgb:np.ndarray)->tuple[np.ndarray, np.ndarray]:
+        img1_tensor = torch.from_numpy(img1_rgb).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+        img2_tensor = torch.from_numpy(img2_rgb).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+
+        print(f"tensor shapes: {img1_tensor.shape}, {img2_tensor.shape}")
+
+        kpts1, kpts2 = self.model.match(img1_tensor, img2_tensor)
+        return kpts1, kpts2
