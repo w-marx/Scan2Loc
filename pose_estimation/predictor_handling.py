@@ -87,6 +87,18 @@ class OnePredictorOneDatasetGrader:
     
     def median_translational_error(self) -> float | None:
         return np.median(self.translational_errors()) if len(self.translational_errors()) > 0 else None
+    
+    def average_sub_median_translat_error(self)->float | None:
+        median_error = self.median_translational_error()
+        if median_error is None:
+            return None
+        return np.mean([e for e in self.translational_errors() if e <= median_error])
+    
+    def average_sub_median_rotational_error(self)->float | None:
+        median_error = self.median_rotational_error()
+        if median_error is None:
+            return None
+        return np.mean([e for e in self.rotational_errors() if e <= median_error])
 
     def median_rotational_error(self) -> float | None:
         return np.median(self.rotational_errors()) if len(self.rotational_errors()) > 0 else None
