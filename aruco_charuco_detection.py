@@ -47,7 +47,7 @@ class LamaMasker(ImageMasker):
         from simple_lama_inpainting import SimpleLama
         self.model = SimpleLama()
 
-    def remove_area(self, bgr_images:np.ndarray, hulls:np.ndarray):
+    def remove_area(self, bgr_images:np.ndarray, hulls:list[np.ndarray]):
         assert bgr_images.ndim == 4 and bgr_images.shape[0] > 0
         assert len(hulls) == bgr_images.shape[0]
         assert all([hull is None or (hull.ndim == 2 and hull.shape[0] > 0 and hull.shape[-1] == 2) for hull in hulls])
@@ -55,8 +55,9 @@ class LamaMasker(ImageMasker):
         masked_images = []
         for bgr_img, hull_points in zip(bgr_images, hulls):
             mask = np.zeros(bgr_img.shape[:2], dtype=np.uint8)
-            cv2.fillPoly(mask, [hull_points.astype(np.int32)], 255)
-            cv2.polylines(mask, [hull_points.astype(np.int32)], isClosed=True, color=255, thickness=5)
+            if hull_points is not None:
+                cv2.fillPoly(mask, [hull_points.astype(np.int32)], 255)
+                cv2.polylines(mask, [hull_points.astype(np.int32)], isClosed=True, color=255, thickness=5)
             result = self.model(bgr_img, mask)
             masked_images.append(result)
         return np.array(masked_images)
@@ -275,7 +276,7 @@ class CharucoDetector(ArucoCharucoDetector):
                 combined_obj_points,
                 combined_img_points,
                 camera_matrix,
-                np.array(distortion_coefficients),
+                np.array(([0,0,0,0,0] if distortion_coefficients is None else distortion_coefficients)),
             )
 
             if valid:
@@ -306,8 +307,8 @@ class CharucoDetector(ArucoCharucoDetector):
             hull_points = marker_square_points[hull.vertices]
             hulls.append(hull_points)
 
-        return self.marker_remover.remove_area(np.array(images), np.array(hulls))
-
+        return self.marker_remover.remove_area(np.array(images), hulls)
+    
     def get_meta_data(self):
         return self.metadata
 

@@ -26,7 +26,7 @@ class Reproj(nn.Module):
         self.register_buffer('lines_3d', torch.tensor(lines_3d))
 
 
-    def forward(self, observed_points_2d, observed_lines_2d):
+    def forward(self, observed_points_2d, observed_lines_2d, line_relevance):
         # Point error
         proj_points, valid_z_mask = Reproj.reproject_points(
             points3d=self.xyz_points,
@@ -37,6 +37,7 @@ class Reproj(nn.Module):
         point_error = proj_points-observed_points_2d[valid_z_mask]
 
         if observed_lines_2d.shape[0] == 0:
+            print(f"used points instead")
             return point_error
 
         # Line error
@@ -54,8 +55,7 @@ class Reproj(nn.Module):
             for line, points in zip(observed_lines_2d, proj_line_end_points)
         ])
 
-        #return torch.cat([point_error, line_distances], dim = 0)
-        return line_distances
+        return torch.cat([(1-line_relevance)*point_error, line_relevance*line_distances], dim = 0)
     
     @staticmethod
     def reproject_points(
@@ -98,7 +98,7 @@ class Reproj(nn.Module):
 
         point_distances = (points[:, 0] * dy - points[:, 1]*dx + c)/line_points_dist
 
-        return torch.abs(point_distances)
+        return point_distances
 
 
 
@@ -124,6 +124,7 @@ def optimize_pnpl(
         intrinsic_cam_mat:np.ndarray,
         steps:int = 20,
         reject:int = 30,
+        line_relevance:float = 1.0
 )->np.ndarray:
     """
     :param initial_cam_t_base: 4x4 homogeneous matrix of the initial camera position
@@ -134,6 +135,7 @@ def optimize_pnpl(
     :param intrinsic_cam_mat: 3x3 Intrinsic camera matrix
     :param steps: The max number of steps the optimizer does
     :param reject: ?
+    :param line_relevance: multiplier before the line relevance (point relevance = 1-line_relevance)
     """
 
     assert points_3d.shape[0] == points_2d.shape[0]
@@ -149,6 +151,7 @@ def optimize_pnpl(
 
     assert steps > 0
 
+    assert 0 <= line_relevance <= 1
 
     model = Reproj(
         cam_intrinsic= intrinsic_cam_mat,
@@ -159,7 +162,8 @@ def optimize_pnpl(
 
     inp = {
         "observed_points_2d": torch.tensor(points_2d, dtype = torch.float64),
-        "observed_lines_2d": torch.tensor(lines_2d, dtype = torch.float64)
+        "observed_lines_2d": torch.tensor(lines_2d, dtype = torch.float64),
+        "line_relevance": line_relevance
     }
 
     strategy = pp.optim.strategy.TrustRegion(up=2.0, down=0.5)
