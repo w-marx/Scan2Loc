@@ -31,7 +31,7 @@ class ExtractAndLightGlue(ExtractAndMatch):
             "SIFT": SIFT,
             "ALIKED": ALIKED,
             "DogHardNet": DoGHardNet
-        }
+        }# TODO add ORB
 
         self.feature_name = extractor.lower()
 

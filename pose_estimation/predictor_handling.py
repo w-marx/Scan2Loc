@@ -1,9 +1,10 @@
 import numpy as np
-import sys, os
+import sys, os, time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from preprocessing_2_prediction import PredictionData, create_3d_camera
 from gathering_2_preprocessing import calc_rotational_difference, compute_pose_pseudo_median
 from tqdm import tqdm
+from time_tracker import TimeTracker
 
 class PosePredictor:
     def __init__(self):
@@ -14,6 +15,7 @@ class PosePredictor:
                         base_xyz_image:np.ndarray,
                         cam2_bgr_image: np.ndarray,
                         point_cloud:np.ndarray,
+                        time_tracker:TimeTracker
                         ) -> np.ndarray | None:
         """
         Predicts the homogenous transformation base_t_cam2
@@ -25,6 +27,7 @@ class PosePredictor:
                         cam1_base_xyz_image_s:np.ndarray,
                         cam2_bgr_image_s: np.ndarray,
                         point_cloud:np.ndarray,
+                        time_tracker:TimeTracker
                         ) -> list[np.ndarray | None]:
         """
         Predicts the homogenous transformations base_t_cam2
@@ -47,11 +50,12 @@ class PosePredictor:
                 cam1_bgr_image=cam1_img,
                 base_xyz_image=xyz_img,
                 cam2_bgr_image=cam2_img,
-                point_cloud=point_cloud
+                point_cloud=point_cloud,
+                time_tracker=time_tracker
             ))
         return predicted_base_t_cam2_s
     
-    def est_robot_base_t_headset_s(self, data:PredictionData)->list[np.ndarray | None]:
+    def est_robot_base_t_headset_s(self, data:PredictionData, time_tracker:TimeTracker)->list[np.ndarray | None]:
         """
         Returns robot_base_t_robot_headset for all robot images in prediction data
         :param data: The data to be acted upon
@@ -61,16 +65,23 @@ class PosePredictor:
             cam2_bgr_image_s=np.tile(data.headset_bgr_image, (data.robot_bgr_images.shape[0], 1, 1, 1)),
             cam1_bgr_image_s=data.robot_bgr_images,
             cam1_base_xyz_image_s=data.robot_xyz_images,
-            point_cloud=data.point_cloud
+            point_cloud=data.point_cloud,
+            time_tracker=time_tracker
         )
 
 
 class OnePredictorOneDatasetGrader:
-    def __init__(self, predictor:PosePredictor, data:PredictionData) -> None:
+    def __init__(self, predictor:PosePredictor, data:PredictionData, time_tracker:TimeTracker = None) -> None:
         self._predictor = predictor
         self._data = data
-        self._base_t_headsets = predictor.est_robot_base_t_headset_s(data)
+        start_time = time.perf_counter()
+        self._time_tracker = TimeTracker() if time_tracker is None else time_tracker
+        self._base_t_headsets = predictor.est_robot_base_t_headset_s(data, self._time_tracker)
+        end_time = time.perf_counter()
         self._base_t_headsets_no_none = [x for x in self._base_t_headsets if x is not None]
+        self._avg_time_per_started_prediction = (end_time-start_time)/len(self._base_t_headsets)
+        self._avg_time_per_successful_prediction = (end_time-start_time)/len(self._base_t_headsets_no_none)
+
 
     def __str__(self):
         return f"{self.predictor} on {self._data.name}"
@@ -137,4 +148,17 @@ class OnePredictorOneDatasetGrader:
         to_vis.append(headset_frame)
 
         o3d.visualization.draw_geometries(to_vis, f"Predictions visualization")
+
+    def average_time_per_started_prediction(self):
+        return self._avg_time_per_started_prediction
+    
+    def average_time_per_successful_prediction(self):
+        return self._avg_time_per_successful_prediction
+    
+    def sucess_ratio(self):
+        return len(self._base_t_headsets_no_none)/len(self._base_t_headsets)
+    
+    def print_prediction_time_tracker(self):
+        self._time_tracker.print_report()
+    
     
