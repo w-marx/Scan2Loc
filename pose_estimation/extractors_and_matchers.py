@@ -109,3 +109,18 @@ class CropImage(Augmentation):
         img = img[crop_pixels:-crop_pixels,crop_pixels:-crop_pixels,:]
         backward = lambda img_points: img_points + crop_pixels
         return img, backward
+
+
+def crop_image(img:np.ndarray, intrinsic_mtx:np.ndarray, percentage:float)->tuple[np.ndarray, np.ndarray]:
+
+    h, w = img.shape[:2]
+
+    cropx = int(min(percentage/2 * w, (w-4)/2))
+    cropy = int(min(percentage/2 * h, (h-4)/2))
+
+    img_cropped = img[cropy:h-cropy,cropx:w-cropx,:]
+    intrinsic_mtx_cropped = intrinsic_mtx.copy()
+    intrinsic_mtx_cropped[0, 2] -= cropx
+    intrinsic_mtx_cropped[1, 2] -= cropy
+
+    return img_cropped, intrinsic_mtx_cropped

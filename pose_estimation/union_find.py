@@ -5,7 +5,8 @@ class UnionFind:
         """
         :param n: the number of indices/max element indice to control, has to be > 0
         """
-        assert n > 0
+        assert n > 0, f"{n} is no valid size for a UnionFind structure"
+        self.n = n
         self.parent = np.arange(n)
         self.rank = np.zeros(n, dtype=int)
 
@@ -15,6 +16,7 @@ class UnionFind:
         :param e: the indice of which to return the representative idx
         :return the index of the representative
         """
+        assert 0 <= e < self.n, f"Index {e} is not in UnionFind of size {self.n}"
         while self.parent[e] != e:
             self.parent[e] = self.parent[self.parent[e]]
             e = self.parent[e]
@@ -26,6 +28,9 @@ class UnionFind:
         :param e1, the index of element 1 to merge
         :param e2, the index of the second element to merge
         """
+        assert 0 <= e1 < self.n, f"Index {e1} is not in UnionFind of size {self.n}"
+        assert 0 <= e2 < self.n, f"Index {e2} is not in UnionFind of size {self.n}"
+        
         representative_e1 = self.find(e1)
         representative_e2 = self.find(e2)
 
