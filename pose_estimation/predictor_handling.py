@@ -1,5 +1,6 @@
 import numpy as np
-import sys, os, time
+from dataclasses import dataclass
+import sys, os, time, cv2
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from preprocessing_2_prediction import PredictionData
 from shared_utilities import *
@@ -14,7 +15,6 @@ class PosePredictor:
                         cam1_bgr_image:np.ndarray,
                         base_xyz_image:np.ndarray,
                         cam2_bgr_image: np.ndarray,
-                        point_cloud:np.ndarray,
                         time_tracker:TimeTracker
                         ) -> np.ndarray | None:
         """
@@ -26,7 +26,6 @@ class PosePredictor:
                         cam1_bgr_image_s:np.ndarray,
                         cam1_base_xyz_image_s:np.ndarray,
                         cam2_bgr_image_s: np.ndarray,
-                        point_cloud:np.ndarray,
                         time_tracker:TimeTracker
                         ) -> list[np.ndarray | None]:
         """
@@ -34,14 +33,12 @@ class PosePredictor:
         :param cam1_bgr_image_s: An NxHxWx3-uint8 numpy array of the images from the POV of cam1
         :param cam1_base_xyz_image_s: An NxHxWx3-float numpy array of the world xyz-coordinates of the pixels in cam1_bgr_images
         :param cam2_bgr_image_s: An NxHxWx3-uint8 numpy array of the images from the POV of cam2
-        :param point_cloud: A Nx3-float point-cloud of the sorroundings in base-frame coordinates
         """
         num_datapoints = cam1_bgr_image_s.shape[0]
         assert num_datapoints > 0
         assert cam1_bgr_image_s.ndim == 4 and cam1_bgr_image_s.shape[-1] == 3
         assert cam1_base_xyz_image_s.shape == cam1_bgr_image_s.shape
         assert cam2_bgr_image_s.shape[0] == num_datapoints and cam2_bgr_image_s.ndim == 4 and cam2_bgr_image_s.shape[-1] == 3
-        assert point_cloud.ndim == 2 and point_cloud.shape[-1] == 3
 
         predicted_base_t_cam2_s = []
         print("predicting base_t_cam2_s batched")
@@ -50,7 +47,6 @@ class PosePredictor:
                 cam1_bgr_image=cam1_img,
                 base_xyz_image=xyz_img,
                 cam2_bgr_image=cam2_img,
-                point_cloud=point_cloud,
                 time_tracker=time_tracker
             ))
         return predicted_base_t_cam2_s
@@ -65,9 +61,80 @@ class PosePredictor:
             cam2_bgr_image_s=np.tile(data.headset_bgr_image, (data.robot_bgr_images.shape[0], 1, 1, 1)),
             cam1_bgr_image_s=data.robot_bgr_images,
             cam1_base_xyz_image_s=data.robot_xyz_images,
-            point_cloud=data.point_cloud,
             time_tracker=time_tracker
         )
+    
+
+@dataclass(frozen=True, kw_only=True)
+class RansacPoseEstimationConfig:
+    """
+    Sets the parameters for an RANSAAC 3d pose estimation.
+    """
+    min_number_inlier_afterwards:int = 6
+    itterations:int = 500
+    reprojection_error:float = 5.0
+    confidence:float = 0.9
+    method = cv2.SOLVEPNP_EPNP
+
+    def __post_init__(self):
+        assert 0 < self.min_number_inlier_afterwards
+        assert 0 < self.itterations
+        assert 0 <= self.reprojection_error
+        assert 0 <= self.confidence <= 1.0
+
+pose_estimation_ransaac_config_10ms = RansacPoseEstimationConfig(
+    min_number_inlier_afterwards = 6,
+    itterations = 500,
+    reprojection_error = 5.0,
+    confidence = 0.9
+)
+
+pose_estimation_ransaac_config_precise = RansacPoseEstimationConfig(
+    min_number_inlier_afterwards = 6,
+    itterations = 10000,
+    reprojection_error = 5.0,
+    confidence = 0.99
+)
+
+def estimate_point_pose_ransac(
+        img_points:np.ndarray, 
+        world_points:np.ndarray,
+        intrinsic_matrix:np.ndarray, 
+        config:RansacPoseEstimationConfig
+    )->tuple[np.ndarray, np.ndarray]|None:
+    """
+    Solves for the cam_t_world position using ransac
+    :param img_points: Nx2 array of 2d points [[x1, y1], ...] wher pi in img_points corresponds to pi in world_points
+    :param world_points: Nx3 array of 3d points [[x1, y1, z1], ...]
+    :param intrinsic_matrix: 3x3 intrinsic matrix
+    :param config: The RANSAAC configuration to use
+    :return None if optimisation fails, else tuple[cam_t_base, inlier_indices] (cam_t_base is 4x4 hom)
+    """
+
+    number_points = img_points.shape[0]
+    assert world_points.shape[0] == number_points, f"cant solve: {number_points} & {world_points.shape[0]} points"
+    assert img_points.ndim == 2 and img_points.shape[-1] == 2, f"wrong 2d pc shape: {img_points.shape}"
+    assert world_points.ndim == 2 and world_points.shape[-1] == 3, f"wrong 2d pc shape: {world_points.shape}"
+
+
+    if world_points.shape[0] < min(5, config.min_number_inlier_afterwards):
+        return None
+
+    success, r_img_t_obj, t_img_t_obj, inliers = cv2.solvePnPRansac(
+        world_points, img_points, intrinsic_matrix, None,
+        iterationsCount = config.itterations,
+        reprojectionError=config.reprojection_error,
+        confidence = config.confidence,
+        flags = config.method
+    )
+        
+    if not success or len(inliers) < config.min_number_inlier_afterwards:
+        return None
+    
+    cam_t_world= np.eye(4)
+    cam_t_world[:3, :3] = cv2.Rodrigues(r_img_t_obj)[0]
+    cam_t_world[:3, 3] = t_img_t_obj.flatten()
+    return cam_t_world, inliers.flatten()
 
 
 class OnePredictorOneDatasetGrader:

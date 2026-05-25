@@ -11,18 +11,12 @@ class NoExtrasPredictor(PosePredictor):
             extract_and_match:ExtractAndMatch = ExtractAndMatchLoMa(),
             use_rotation_augmentations:bool = False,
             crop_augmentations:list[float] | None = None,
-            min_number_inlier:int = 6,
-            ransac_itterations:int = 10000,
-            ransac_reprojection_error:float = 5.0,
-            ransac_confidence:float = 0.99
+            ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise
         ):
         super().__init__()
         self.cam2_mtx = cam2_mtx
         self.extract_and_match = extract_and_match
-        self.min_number_inlier = min_number_inlier
-        self.ransac_itterations = ransac_itterations
-        self.ransac_reprojection_error = ransac_reprojection_error
-        self.ransac_confidence = ransac_confidence
+        self.ransac_config = ransac_config
 
         self.rotation_augmentations = [Augmentation()]
         if use_rotation_augmentations:
@@ -38,7 +32,6 @@ class NoExtrasPredictor(PosePredictor):
                         cam1_bgr_image:np.ndarray,
                         base_xyz_image:np.ndarray,
                         cam2_bgr_image: np.ndarray,
-                        point_cloud:np.ndarray,
                         time_tracker:TimeTracker
                         ) -> np.ndarray | None:
         
@@ -78,22 +71,15 @@ class NoExtrasPredictor(PosePredictor):
         image_points_cam2 = image_points_cam2_options[best_option_idx]
 
         time_tracker.reset_elapsed_time()
-        success, r_img_t_obj, t_img_t_obj, inliers = cv2.solvePnPRansac(
-            world_obj_points, image_points_cam2, self.cam2_mtx, None,
-            iterationsCount = self.ransac_itterations,
-            reprojectionError=self.ransac_reprojection_error,
-            confidence = self.ransac_confidence,
-            flags = cv2.SOLVEPNP_EPNP
+        cam2_t_base__inliers = estimate_point_pose_ransac(
+            world_points=world_obj_points,
+            img_points=image_points_cam2,
+            intrinsic_matrix=self.cam2_mtx,
+            config=self.ransac_config
         )
-        time_tracker.add_time_stamp("Solve RANSAAC")
-        if not success or len(inliers) < self.min_number_inlier:
-           return None
-        
-        cam2_t_base = np.eye(4)
-        cam2_t_base[:3, :3] = cv2.Rodrigues(r_img_t_obj)[0]
-        cam2_t_base[:3, 3] = t_img_t_obj.flatten()
-
-        return np.linalg.inv(cam2_t_base)
+        if cam2_t_base__inliers is None:
+            return None
+        return np.linalg.inv(cam2_t_base__inliers[0])
 
 
 

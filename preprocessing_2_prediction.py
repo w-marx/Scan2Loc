@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-
+import os, shutil, json
 from shared_utilities import assert_intrinsic_mat, assert_homogeneous_mat, create_3d_camera
 
 
@@ -13,7 +13,6 @@ class PredictionData:
             headset_bgr_image: np.ndarray,
             headset_intrinsics: np.ndarray,
             robot_xyz_images:np.ndarray,
-            point_cloud:np.ndarray,
             robot_base_t_robot_camera_s:np.ndarray,
             robot_base_t_headset:np.ndarray | None,
     ):
@@ -24,7 +23,6 @@ class PredictionData:
         :param headset_bgr_image: One headset BGR image as a HxWx3-uint8 numpy array
         :param headset_intrinsics: Intrinsics BGR camera matrix of the headset (3x3 numpy array)
         :param robot_xyz_images: XYZ images from the pov of the robot as a NxHxWx3-float numpy array
-        :param point_cloud: A point cloud of the surroundings as a Nx3-float numpy array
         :param robot_base_t_robot_camera_s: The homogeneous robot_base->robot_camera transformation matrix as a Nx4x4-float numpy array
         :param robot_base_t_headset: The homogeneous robot_base->robot_headset transformation matrix as a 4x4 matrix or None
         """
@@ -52,10 +50,6 @@ class PredictionData:
         assert np.issubdtype(robot_xyz_images.dtype, np.floating)
         self._robot_xyz_images = robot_xyz_images
 
-        assert point_cloud.ndim == 2 and point_cloud.shape[0] > 0 and point_cloud.shape[-1] == 3, f"Wrong shape of point cloud {point_cloud.shape}"
-        assert np.issubdtype(point_cloud.dtype, np.floating)
-        self._point_cloud = point_cloud
-
         assert robot_base_t_robot_camera_s.shape == (robot_bgr_images.shape[0],4,4), f"Wrong shape of robot_base_t_robot_camera_s {robot_base_t_robot_camera_s.shape}"
         assert all([assert_homogeneous_mat(m) for m in robot_base_t_robot_camera_s])
         self._robot_base_t_robot_camera_s = robot_base_t_robot_camera_s
@@ -80,7 +74,6 @@ class PredictionData:
         ├── A label.json file with the robot base -> headset pose truth (might be missing)
         └── point_cloud.ply
         """
-        import os, json, open3d
 
         robot_cam_cal = json.load(open(f"{load_folder}/robot_cam_calibration.json"))
         headset_cam_cal = json.load(open(f"{load_folder}/headset_cam_calibration.json"))
@@ -92,7 +85,6 @@ class PredictionData:
         robot_bgr_images = np.array([cv2.imread(f"{folder}/rgb.png") for folder in robot_folders])
         robot_xyz_images = np.array([np.load(f"{folder}/xyz.npy") for folder in robot_folders])
         robot_base_t_robot_cam_s = np.array([json.load(open(f"{folder}/robot_base_t_robot_camera.json")) for folder in robot_folders])
-        point_cloud = np.asarray(open3d.io.read_point_cloud(f"{load_folder}/pointcloud.ply").points)
 
         instance = cls(
             name = os.path.basename(load_folder),
@@ -101,7 +93,6 @@ class PredictionData:
             headset_bgr_image=cv2.imread(f"{load_folder}/headset.png"),
             headset_intrinsics=np.array(headset_cam_cal["intrinsic_camera_matrix"]),
             robot_xyz_images=robot_xyz_images,
-            point_cloud=point_cloud,
             robot_base_t_robot_camera_s=robot_base_t_robot_cam_s,
             robot_base_t_headset= robot_base_t_headset
         )
@@ -114,8 +105,6 @@ class PredictionData:
         :param folder_path: The folder in which the instance should be saved
         :param new_name: The new name of the output_folder if not they will just use the name
         """
-        import os, shutil, json
-        import open3d
         location = f"{folder_path}/{new_name if new_name is not None else self.name}"
 
         if os.path.exists(location):
@@ -146,19 +135,15 @@ class PredictionData:
             with open(f"{robot_folder}/robot_base_t_robot_camera.json", 'w') as f:
                 json.dump(self.robot_base_t_robot_camera_s[i].tolist(), f, indent=4)
 
-        point_cloud_o3d = open3d.geometry.PointCloud()
-        point_cloud_o3d.points = open3d.utility.Vector3dVector(self.point_cloud)
-        open3d.io.write_point_cloud(f"{location}/pointcloud.ply", point_cloud_o3d, write_ascii=True)
-
     def visualize_3d_data(self):
         import open3d as o3d
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(self.point_cloud)
+        pcd.points = o3d.utility.Vector3dVector(self.robot_xyz_images.reshape(-1,3))
 
         base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
 
         robot_camera_s = []
-        for idx, b_t_c in enumerate(self.robot_base_t_robot_camera_s):
+        for b_t_c in self.robot_base_t_robot_camera_s:
             cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
             cam_frame.transform(b_t_c)
             robot_camera_s.append(cam_frame)
@@ -207,10 +192,6 @@ class PredictionData:
     @property
     def robot_xyz_images(self)->np.ndarray:
         return self._robot_xyz_images
-
-    @property
-    def point_cloud(self)->np.ndarray:
-        return self._point_cloud
 
     @property
     def robot_base_t_robot_camera_s(self)->np.ndarray:

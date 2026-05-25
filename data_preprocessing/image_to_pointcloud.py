@@ -1,95 +1,15 @@
 from typing import Callable, Literal
+from dataclasses import dataclass
 import torch
 import numpy as np
 import open3d as o3d
 from PIL import Image
-import warnings
 import cv2
 import sys, os
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from gathering_2_preprocessing import compute_pose_pseudo_median
-
-def get_image_type_hxw(img:np.ndarray) -> str:
-    """
-    Takes an numpy image array and returns its image type (mostly for debugging)
-    :param img: NxHxWx...
-    :return: portrait/square/landscape
-    """
-    assert img.ndim >= 2
-    if img.shape[0] > img.shape[1]:
-        return "portrait"
-    if img.shape[0] == img.shape[1]:
-        return "square"
-    return "landscape"
-
-def create_foreground_masks(
-        images:np.ndarray,
-        threshold:float = 0.5,
-        mask_threshold:float = 0.5,
-        visualize_masks:bool = False,
-        prompts:list[tuple[str, int]] | None = None
-    ) -> np.ndarray:
-    """
-    Uses Sam3 to detect objects/the foreground and returns a mask for each image, which is `True` where an object was detected
-    :param images: NxHxWx3-uint8/float16/float32/float64 numpy array for the images (BGR)
-    :param threshold: certainty needed by sam3 to detect an object
-    :param mask_threshold certainty for mask generation by sam3
-    :param visualize_masks: Whether to visualize the masks for debugging
-    :param promts: A list of (sam3prompt, score) tuples, the scores over the different prompts will be added and only pixels with positive values will 
-    be positive in the mask. 
-    Default: [("distinct objects", 1),("foreground", 1),("tabletop", -1),("background", -1),("big plain surfaces", -2),("white paper", -2)]
-    :return: NxHxW boolean numpy array of the foreground masks
-    """
-    assert images.ndim == 4 and images.shape[0] > 0
-    assert 0 <= threshold <= 1.0
-    assert 0 <= mask_threshold <= 1.0
-
-    if prompts is None:
-        prompts = [("distinct objects", 1),("foreground", 1),("tabletop", -1),("background", -1),("big plain surfaces", -2),("white paper", -2)]
-
-    print(f"generating foreground masks for {images.shape[0]} {get_image_type_hxw(images[0])}images")
-    if images.dtype in [np.float16,np.float32, np.float64]:
-        images = (images*255).astype(np.uint8)
-
-    from transformers import Sam3Processor, Sam3Model
-    
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    model = Sam3Model.from_pretrained("facebook/sam3").to(device)
-    processor = Sam3Processor.from_pretrained("facebook/sam3")
-
-    masks = []
-    for image in tqdm(images):
-        pil_rgb_image = Image.fromarray(cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2RGB))
-        mask = np.zeros((image.shape[0], image.shape[1]), dtype=int)
-        for text, score in prompts:
-            inputs = processor(images=pil_rgb_image, text = text,return_tensors="pt").to(device)
-            
-            with torch.inference_mode():
-                outputs = model(**inputs)
-
-                results = processor.post_process_instance_segmentation(
-                    outputs,
-                    threshold=threshold,
-                    mask_threshold=mask_threshold,
-                    target_sizes=inputs.get("original_sizes").tolist()
-                )[0]
-
-            if 'masks' in results and len(results['masks']) > 0:
-                instance_masks = results['masks'].cpu().numpy()
-                aggregated_mask = np.any(instance_masks, axis=0)
-                mask = mask + score * aggregated_mask.astype(int)
-
-        masks.append(mask > 0)
-        if visualize_masks:
-            plt.figure(figsize=(15, 5))
-            plt.imshow(pil_rgb_image)
-            plt.imshow(masks[-1], alpha=0.5, cmap='jet')
-            plt.show()
-    
-    return np.array(masks)
+from shared_utilities import get_image_type_hxw, compute_pose_pseudo_median
 
 def remove_outliers_from_point_cloud(points:np.ndarray, contamination:float = 0.05)->np.ndarray:
     """
@@ -138,11 +58,32 @@ def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> Callable[[np.ndarray], np.ndar
 
     return lambda points: (t.reshape(3,1) + c * R @ points.T).T
 
+
+@dataclass(frozen=True, kw_only=True)
+class ICPAlignmentConfig:
+    """
+    :param neighboar_dist_threshhold: The distance between points in meters, for consideration in icp
+    :param max_number_itterations: The number of itterations for icp optimization per pointcloud
+    :param presample_voxel_size: If bigger then 0, the pointclouds will be downsampled to that voxel size for quicker realignment
+    """
+    neighboar_dist_threshhold:float = 0.01
+    max_number_itterations:int = 1000
+    presample_voxel_size:float = 0.0
+
+    def __post__init__(self):
+        assert 0 < self.max_number_itterations, f"Number of ICP itterations must be positive: {self.max_number_itterations}"
+        assert 0 < self.neighboar_dist_threshhold, f"ICP neighboar distance must be positive: {self.neighboar_dist_threshhold}"
+
+ICPAlignmentConfigs = {
+    "standard": ICPAlignmentConfig(),
+    "downsample_1mm": ICPAlignmentConfig(presample_voxel_size = 0.001),
+    "downsample_5mm": ICPAlignmentConfig(presample_voxel_size = 0.005)
+}
+
+
 def align_point_clouds_icp(
         point_clouds:list[np.ndarray], 
-        icp_threshhold:float = 0.01,
-        icp_max_number_itterations:int = 1000,
-        icp_voxel_size:float = 0.0,
+        config:ICPAlignmentConfig = ICPAlignmentConfig(),
         visualize:bool = True
     )->list[np.ndarray]:
     """
@@ -163,8 +104,8 @@ def align_point_clouds_icp(
     for i, point_cloud in enumerate(point_clouds):
         o3d_point_clouds.append(o3d.geometry.PointCloud())
         o3d_point_clouds[-1].points = o3d.utility.Vector3dVector(point_cloud)
-        if icp_voxel_size > 1e-6:
-            o3d_point_clouds[-1] = o3d_point_clouds[-1].voxel_down_sample(voxel_size=icp_voxel_size)
+        if config.presample_voxel_size > 1e-9:
+            o3d_point_clouds[-1] = o3d_point_clouds[-1].voxel_down_sample(voxel_size=config.presample_voxel_size)
 
     ref_pc = o3d_point_clouds[0]
 
@@ -175,11 +116,11 @@ def align_point_clouds_icp(
         reg_p2p = o3d.pipelines.registration.registration_icp(
             pci, 
             ref_pc, 
-            icp_threshhold, 
+            config.neighboar_dist_threshhold, 
             np.eye(4), 
             o3d.pipelines.registration.TransformationEstimationPointToPoint(),
             o3d.pipelines.registration.ICPConvergenceCriteria(
-                max_iteration=icp_max_number_itterations
+                max_iteration=config.max_number_itterations
             )
         )
         ref_t_pci_s.append(np.linalg.inv(reg_p2p.transformation))
@@ -201,8 +142,6 @@ def align_point_clouds_icp(
 
     return aligned_point_clouds
 
-    
-
 
 
 def create_point_cloud(
@@ -211,7 +150,6 @@ def create_point_cloud(
         depth_images:np.ndarray | None = None,
         camera_intrinsics:np.ndarray = None,
         confidence_threshold_percent:int = 10,
-        image_mask_generator:Callable[[np.ndarray], np.ndarray]|None = None,
         xyz_image_aligner:Callable[[np.ndarray], np.ndarray] | None = None,
         visualize_point_cloud:bool = False,
         alginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama",
@@ -230,8 +168,7 @@ def create_point_cloud(
     :return 
     1. NxWxHx3-uint8 BGR images as numpy array
     2. NxWxHx3-float larray of xyz world point images
-    3. a point cloud as a Nx3 numpy array
-    4. the updated camera matrix (3x3 numpy array)
+    3. the updated camera matrix (3x3 numpy array)
     """
 
     assert bgr_images.shape[0] == base_t_cam_s.shape[0] , f"Number of bgr images and poses dont match: {bgr_images.shape}, {base_t_cam_s.shape}"
@@ -333,24 +270,20 @@ def create_point_cloud(
         world_xyz_images = xyz_image_aligner(world_xyz_images)
 
     # Generate pointcloud
-    point_cloud = world_xyz_images.reshape(-1, 3)
-    if image_mask_generator is not None:
-        point_cloud = point_cloud[image_mask_generator(np.array(bgr_images)).reshape(-1)]
     if visualize_point_cloud:
         vis_point_cloud = o3d.geometry.PointCloud()
-        vis_point_cloud.points = o3d.utility.Vector3dVector(point_cloud)
+        vis_point_cloud.points = o3d.utility.Vector3dVector(world_xyz_images.reshape(-1, 3))
         o3d.visualization.draw_geometries([vis_point_cloud], window_name = "3D Point cloud visualization")
 
     print(f"xyz images shape: {world_xyz_images.shape}")
     assert np.array(bgr_images).shape == np.array(world_xyz_images).shape, f"bgr: {np.array(bgr_images).shape} xyz {np.array(world_xyz_images).shape}"
-    return bgr_images, world_xyz_images,point_cloud, camera_intrinsics
+    return bgr_images, world_xyz_images, camera_intrinsics
 
 
-def create_point_cloud_simple(
+def create_point_cloud_depth_reproject(
         depth_images:np.ndarray,
         depth_cam_mtx:np.ndarray,
         base_t_camera_s:np.ndarray,
-        image_masks: np.ndarray | None = None,
         distance_cutoff:float = 1.0,
         visualize_point_cloud:bool = True,
 ):
@@ -360,13 +293,11 @@ def create_point_cloud_simple(
     :param depth_images: an array of NxHxW-float numpy arrays
     :param depth_cam_mtx: the intrinsic matrix of the depth camera
     :param base_t_camera_s: the homogeneous transformation matrices from base to camera
-    :param image_masks: A NxHxW-bool numpy array of what parts of the images to occlude from point cloud generation
     :param distance_cutoff: rays in the depth_images that are longer will be replaced with np.nan and won't be in the point cloud
     :param visualize_point_cloud: whether to visualize point cloud or not
     """
     assert depth_images.ndim == 3
     assert base_t_camera_s.shape == (depth_images.shape[0],4,4)
-    assert image_masks is None or image_masks.shape == depth_images.shape and image_masks.dtype == np.bool
     assert 0 <= distance_cutoff
     assert depth_cam_mtx.shape == (3,3)
     print(f"Creating simple point cloud with {depth_images.shape[0]}, {get_image_type_hxw(depth_images[0])} depth images")
@@ -387,13 +318,10 @@ def create_point_cloud_simple(
         base_xyz_images.append(base_xyz1_points[:, :3].reshape((h,w,3)))
 
     point_cloud = np.array(base_xyz_images).reshape(-1,3)
-    if image_masks is not None:
-        point_cloud = point_cloud[image_masks.reshape(-1)]
-    point_cloud = point_cloud[~np.isnan(point_cloud[:, 0])]
 
     if visualize_point_cloud:
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(point_cloud)
         o3d.visualization.draw_geometries([pcd], "PointCloud visualization")
 
-    return base_xyz_images, point_cloud
+    return base_xyz_images

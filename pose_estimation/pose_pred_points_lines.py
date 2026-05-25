@@ -59,30 +59,6 @@ line_merging_2d_config_for_longer_lines = LineMerging2dConfig(
     use_quick_merge = False
 )
 
-@dataclass(frozen=True, kw_only=True)
-class PoseEstimationRansaacConfig:
-    """
-    Sets the parameters for an RANSAAC 3d pose estimation.
-    """
-    min_number_inlier_afterwards:int = 6
-    itterations:int = 500
-    reprojection_error:float = 5.0
-    confidence:float = 0.9
-
-    def __post_init__(self):
-        assert 0 < self.min_number_inlier_afterwards
-        assert 0 < self.itterations
-        assert 0 <= self.reprojection_error
-        assert 0 <= self.confidence <= 1.0
-
-pose_estimation_ransaac_config_10ms = PoseEstimationRansaacConfig(
-    min_number_inlier_afterwards = 6,
-    itterations = 500,
-    reprojection_error = 5.0,
-    confidence = 0.9
-)
-
-
 
 class LinePredictor(PosePredictor):
     def __init__(
@@ -103,8 +79,6 @@ class LinePredictor(PosePredictor):
             line_fitting_3d_inlier_distance:float = 0.005,
 
             pnpl_optimisation_conf:PnPLOptimizerConfig = PnPLOptimizerConfig(),
-
-            pose_optimization_line_vs_point_relevance:float = 0.5,
 
             debug_dont_refine_ransac:bool = False,
             debug_visualize_2d:bool = False,
@@ -287,7 +261,6 @@ class LinePredictor(PosePredictor):
             cam1_bgr_image:np.ndarray,
             base_xyz_image:np.ndarray,
             cam2_bgr_image: np.ndarray,
-            point_cloud:np.ndarray,
             time_tracker:TimeTracker
         ) -> np.ndarray | None:
         time_tracker.reset_elapsed_time()
@@ -303,25 +276,18 @@ class LinePredictor(PosePredictor):
 
         world_obj_points = np.array([base_xyz_image[int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1])
 
-        if world_obj_points.shape[0] < min(5, self.initial_raansac_guess_config.min_number_inlier_afterwards):
-            return None
-
-        success, r_img_t_obj, t_img_t_obj, inliers = cv2.solvePnPRansac(
-            world_obj_points, image_points_cam2, self.cam2_intrinsic_mtx, None,
-            iterationsCount = self.initial_raansac_guess_config.itterations,
-            reprojectionError=self.initial_raansac_guess_config.reprojection_error,
-            confidence = self.initial_raansac_guess_config.confidence,
-            flags = cv2.SOLVEPNP_EPNP
+        cam2_t_base_pnp__inliers = estimate_point_pose_ransac(
+            img_points=image_points_cam2, 
+            world_points=world_obj_points, 
+            intrinsic_matrix=self.cam2_intrinsic_mtx, 
+            config=self.initial_raansac_guess_config
         )
-        
-        if not success or len(inliers) < self.initial_raansac_guess_config.min_number_inlier_afterwards:
-           return None
+        if cam2_t_base_pnp__inliers is None:
+            return None
+        cam2_t_base_pnp, inliers = cam2_t_base_pnp__inliers
+
         
         time_tracker.add_time_stamp("Pose estimation RAANSAC")
-
-        cam2_t_base_pnp = np.eye(4)
-        cam2_t_base_pnp[:3, :3] = cv2.Rodrigues(r_img_t_obj)[0]
-        cam2_t_base_pnp[:3, 3] = t_img_t_obj.flatten()
 
         if self.dont_refine_ransac:
             return np.linalg.inv(cam2_t_base_pnp)
@@ -389,18 +355,17 @@ class LinePredictor(PosePredictor):
             )
         if self.debug_visualize_3d:
             self.visualize_features_3d(
-                point_cloud=point_cloud, 
+                point_cloud=base_xyz_image.reshape(-1,3), 
                 line_points_3d=[line_seg_2d_to_3d_points(line_pair[0], base_xyz_image) for line_pair in line_pairs],
                 line_segments_3d=matched_lines_3d
             )
         
         time_tracker.reset_elapsed_time()
 
-        inlier_indices = inliers.flatten()
         cam2_t_base_bundle_adjustment = optimize_pnpl(
             initial_cam_t_base=cam2_t_base_pnp.copy(),
-            points_3d=world_obj_points[inlier_indices].copy(),
-            points_2d=image_points_cam2[inlier_indices].copy(),
+            points_3d=world_obj_points[inliers].copy(),
+            points_2d=image_points_cam2[inliers].copy(),
             intrinsic_cam_mat=self.cam2_intrinsic_mtx.copy(),
             lines_2d = matched_lines_2d,
             lines_3d = matched_lines_3d,
@@ -423,7 +388,6 @@ if __name__ == "__main__":
     #    extract_and_match=ExtractAndMatchLoMa(),    
         lsd_cleanup_passes_configs=[line_merging_2d_config_for_short_lines, line_merging_2d_config_for_longer_lines],
         debug_visualize_2d=False, 
-        pose_optimization_line_vs_point_relevance=0.9,
         debug_dont_refine_ransac=False,
         line_fitting_3d_use_ransaac=False,
         debug_visualize_pnpl=True

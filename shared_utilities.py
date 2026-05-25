@@ -44,6 +44,19 @@ def assert_mxnx3_np_uint8_image(img:np.ndarray)->bool:
     assert img.dtype == np.uint8, f"wrong img dtype: {img.dtype}"
     return True
 
+def get_image_type_hxw(img:np.ndarray) -> str:
+    """
+    Takes an numpy image array and returns its image type (mostly for debugging)
+    :param img: NxHxWx...
+    :return: portrait/square/landscape
+    """
+    assert img.ndim >= 2
+    if img.shape[0] > img.shape[1]:
+        return "portrait"
+    if img.shape[0] == img.shape[1]:
+        return "square"
+    return "landscape"
+
 def create_3d_camera(
         base_t_camera:np.ndarray,
         intrinsics: np.ndarray,
