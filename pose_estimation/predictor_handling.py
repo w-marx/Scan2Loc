@@ -1,8 +1,8 @@
 import numpy as np
 import sys, os, time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from preprocessing_2_prediction import PredictionData, create_3d_camera
-from gathering_2_preprocessing import calc_rotational_difference, compute_pose_pseudo_median
+from preprocessing_2_prediction import PredictionData
+from shared_utilities import *
 from tqdm import tqdm
 from time_tracker import TimeTracker
 
@@ -80,7 +80,11 @@ class OnePredictorOneDatasetGrader:
         end_time = time.perf_counter()
         self._base_t_headsets_no_none = [x for x in self._base_t_headsets if x is not None]
         self._avg_time_per_started_prediction = (end_time-start_time)/len(self._base_t_headsets)
-        self._avg_time_per_successful_prediction = (end_time-start_time)/len(self._base_t_headsets_no_none)
+
+        if len(self._base_t_headsets_no_none) > 0:
+            self._avg_time_per_successful_prediction = (end_time-start_time)/len(self._base_t_headsets_no_none)
+        else:
+            self._avg_time_per_successful_prediction = np.inf
 
 
     def __str__(self):

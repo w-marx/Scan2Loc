@@ -1,47 +1,7 @@
 import cv2
 import numpy as np
 
-def assert_intrinsic_mat(m:np.ndarray, hxw_img: np.ndarray | None)->bool:
-    assert m.shape == (3, 3), f"M not 3x3 {m.shape}"
-    assert m[0, 0] > 0 and m[1, 1] > 0, f"fx and fy must be positive"
-    assert np.allclose(m[2, :],[0, 0, 1]), f"bottom row of M incorrect: {m[2:]}"
-    assert 0 < m[0, 2] < hxw_img.shape[1] and 0 < m[1, 2] < hxw_img.shape[0], f"center in wrong location {m[0, 2]}, {m[1, 2]} in {hxw_img.shape}"
-    return True
-
-def assert_homogeneous_mat(m:np.ndarray, abs_tolerance:float = 0.001) -> bool:
-    assert m.shape == (4, 4), f"M not 4x4 {m.shape}"
-    assert np.allclose(m[3, :],[0, 0, 0, 1]), f"bottom row of M incorrect: {m[3, :]}"
-    assert np.allclose(m[:3, :3] @ m[:3, :3].T, np.eye(3), atol=abs_tolerance), f"Rot part not invertible by transpose: {m[:3, :3] @ m[:3, :3].T}"
-    assert np.isclose(np.linalg.det(m[:3, :3]), 1, atol=abs_tolerance), f"Determinant is not 1: {np.linalg.det(m[:3, :3])}"
-    return True
-
-def create_3d_camera(
-        base_t_camera:np.ndarray,
-        intrinsics: np.ndarray,
-        hxw_img: np.ndarray,
-        scale:float = 0.1
-    ):
-    import open3d as o3d
-    assert assert_intrinsic_mat(intrinsics, hxw_img)
-    assert assert_homogeneous_mat(base_t_camera)
-    assert np.abs(scale) > 1e-6
-    fx, fy, cx, cy = intrinsics[0,0], intrinsics[1,1], intrinsics[0,2], intrinsics[1,2]
-    w, h = hxw_img.shape[1], hxw_img.shape[0]
-
-    corners_hom = np.array([
-        [-cx/fx, -cy/fy, 1.0, 1.0/scale],
-        [(w-cx)/fx, -cy/fy, 1.0, 1.0/scale],
-        [(w-cx)/fx, (h-cy)/fy, 1.0, 1.0/scale],
-        [-cx/fx, (h-cy)/fy, 1.0, 1.0/scale],
-        [0,0,0, 1.0/scale]
-    ])*scale
-    corners = (base_t_camera @ corners_hom.T)[:3, :]
-    lines = o3d.geometry.LineSet()
-    lines.points = o3d.utility.Vector3dVector(corners.T)
-    lines.lines = o3d.utility.Vector2iVector(
-        [[0,1], [1,2], [2,3], [3,0], [4,0], [4,1], [4,2], [4,3]]
-    )
-    return lines
+from shared_utilities import assert_intrinsic_mat, assert_homogeneous_mat, create_3d_camera
 
 
 class PredictionData:

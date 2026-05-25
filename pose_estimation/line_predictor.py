@@ -5,31 +5,95 @@ from extractors_and_matchers import *
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
-from pose_estimation.pnpl_optimizer import optimize_pnpl
+from pose_estimation.pnpl_optimizer import *
 from line_utilities import * 
+from dataclasses import dataclass
 
-import time
+@dataclass(frozen=True, kw_only=True)
+class LineMerging2dConfig:
+    """
+    Discribes a line merging pass, that merges the lines and then removes
+    lines with line_length < min_line_length
+    """
+    max_angle_diff_deg:float = 3
+    max_midpoint_dist_px:float = 3
+    max_endpoint_dist_px:float = 20
+    min_line_length:float = 20
+    use_quick_merge:bool = False
+
+    def __post_init__(self):
+        assert 0 <= self.max_angle_diff_deg <= 180
+        assert 0 <= self.max_midpoint_dist_px
+        assert 0 <= self.max_endpoint_dist_px
+        assert 0 <= self.min_line_length
+
+line_merging_2d_config_for_short_lines_quick_merge = LineMerging2dConfig(
+    max_angle_diff_deg = 1,
+    max_midpoint_dist_px = 2,
+    max_endpoint_dist_px = 5,
+    min_line_length = 10,
+    use_quick_merge = True
+)
+
+line_merging_2d_config_for_longer_lines_quick_merge = LineMerging2dConfig(
+    max_angle_diff_deg = 2,
+    max_midpoint_dist_px = 3,
+    max_endpoint_dist_px = 10,
+    min_line_length = 40,
+    use_quick_merge = True
+)
+
+line_merging_2d_config_for_short_lines = LineMerging2dConfig(
+    max_angle_diff_deg = 2,
+    max_midpoint_dist_px = 3,
+    max_endpoint_dist_px = 5,
+    min_line_length = 10,
+    use_quick_merge = False
+)
+
+line_merging_2d_config_for_longer_lines = LineMerging2dConfig(
+    max_angle_diff_deg = 3,
+    max_midpoint_dist_px = 4,
+    max_endpoint_dist_px = 15,
+    min_line_length = 40,
+    use_quick_merge = False
+)
+
+@dataclass(frozen=True, kw_only=True)
+class PoseEstimationRansaacConfig:
+    """
+    Sets the parameters for an RANSAAC 3d pose estimation.
+    """
+    min_number_inlier_afterwards:int = 6
+    itterations:int = 500
+    reprojection_error:float = 5.0
+    confidence:float = 0.9
+
+    def __post_init__(self):
+        assert 0 < self.min_number_inlier_afterwards
+        assert 0 < self.itterations
+        assert 0 <= self.reprojection_error
+        assert 0 <= self.confidence <= 1.0
+
+pose_estimation_ransaac_config_10ms = PoseEstimationRansaacConfig(
+    min_number_inlier_afterwards = 6,
+    itterations = 500,
+    reprojection_error = 5.0,
+    confidence = 0.9
+)
+
+
 
 class LinePredictor(PosePredictor):
     def __init__(
             self,
             cam2_intrinsic_mtx:np.ndarray,
             extract_and_match:ExtractAndMatch = ExtractAndMatchLoMa(),
-
-            initial_guess_min_number_inlier_after_ransac:int = 6,
-            initial_guess_ransac_itterations:int = 500,
-            initial_guess_ransac_reprojection_error:float = 5.0,
-            initial_guess_ransac_confidence:float = 0.9,
-
-            pass1_line_merging_2d_max_angle_diff_deg:float = 3,
-            pass1_line_merging_2d_max_midpoint_dist_px:float = 3,
-            pass1_line_merging_2d_max_endpoint_dist_px:float = 20,
-            pass1_min_line_length:float = 20,
-
-            pass2_line_merging_2d_max_angle_diff_deg:float = 10,
-            pass2_line_merging_2d_max_midpoint_dist_px:float = 5,
-            pass2_line_merging_2d_max_endpoint_dist_px:float = 30,
-            pass2_min_line_length:float = 50,
+            initial_pose_guess_ransaac_config = pose_estimation_ransaac_config_10ms,
+            lsd_cleanup_passes_configs:list[LineMerging2dConfig] = [
+                line_merging_2d_config_for_short_lines_quick_merge, 
+                line_merging_2d_config_for_longer_lines_quick_merge
+            ],
 
             line_matching_max_dist_line_to_point_px:float = 5,
             line_matching_min_number_supporting_points:int = 2,
@@ -38,46 +102,20 @@ class LinePredictor(PosePredictor):
             line_fitting_3d_iterations:int = 100,
             line_fitting_3d_inlier_distance:float = 0.005,
 
+            pnpl_optimisation_conf:PnPLOptimizerConfig = PnPLOptimizerConfig(),
+
             pose_optimization_line_vs_point_relevance:float = 0.5,
 
             debug_dont_refine_ransac:bool = False,
             debug_visualize_2d:bool = False,
+            debug_visualize_pnpl:bool = False,
             debug_visualize_3d:bool = False
         ):
-        super().__init__()
         self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
         self.extract_and_match = extract_and_match
 
-        self.initial_guess_min_number_inlier_after_ransac = initial_guess_min_number_inlier_after_ransac
-        self.initial_guess_ransac_itterations = initial_guess_ransac_itterations
-        self.initial_guess_ransac_reprojection_error = initial_guess_ransac_reprojection_error
-        self.initial_guess_ransac_confidence = initial_guess_ransac_confidence
-
-
-        line_refinement_pass = lambda line_segs_2d, max_ang_diff, max_ep_diff, max_mp_diff, min_line_length: (
-            remove_short_2d_line_segments(
-                merge_close_line_segments(
-                    line_segs_2d=line_segs_2d, max_angle_diff=max_ang_diff,
-                    max_endpoint_dist=max_ep_diff, max_midpoint_dist=max_mp_diff
-                ),
-            min_line_length_px= min_line_length
-        ))
-
-        self.line_refinement = lambda line_segs_2d: (
-            line_refinement_pass(
-                line_refinement_pass(
-                    line_segs_2d=line_segs_2d,
-                    max_ep_diff=pass1_line_merging_2d_max_endpoint_dist_px,
-                    max_ang_diff=pass1_line_merging_2d_max_angle_diff_deg,
-                    max_mp_diff=pass1_line_merging_2d_max_midpoint_dist_px,
-                    min_line_length=pass1_min_line_length
-                ),
-                max_ep_diff=pass2_line_merging_2d_max_endpoint_dist_px,
-                max_ang_diff=pass2_line_merging_2d_max_angle_diff_deg,
-                max_mp_diff=pass2_line_merging_2d_max_midpoint_dist_px,
-                min_line_length=pass2_min_line_length
-            )
-        )
+        self.initial_raansac_guess_config = initial_pose_guess_ransaac_config
+        self.lsd_cleanup_passes = lsd_cleanup_passes_configs
 
         self.line_matching_max_dist_line_to_point_px = line_matching_max_dist_line_to_point_px
         self.line_matching_min_number_supporting_points = line_matching_min_number_supporting_points
@@ -90,12 +128,13 @@ class LinePredictor(PosePredictor):
             )
         )) if line_fitting_3d_use_ransaac else lambda points3d: robust_pca_2d_3d_points_lineseg_regression(points=points3d)
 
-        self.pose_optimization_line_vs_point_relevance = pose_optimization_line_vs_point_relevance
+        self.pnpl_optimisation_conf = pnpl_optimisation_conf
 
 
         self.dont_refine_ransac = debug_dont_refine_ransac
         self.debug_visualize_2d = debug_visualize_2d
         self.debug_visualize_3d = debug_visualize_3d
+        self.debug_visualize_pnpl = debug_visualize_pnpl
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.line_seg_detector = cv2.createLineSegmentDetector(cv2.LSD_REFINE_NONE)
@@ -124,8 +163,8 @@ class LinePredictor(PosePredictor):
         if lines_img1.shape[0] == 0 or lines_img2.shape[0] == 0 or points_img1.shape[0] == 0 or points_img2.shape[0] == 0:
             return np.empty((0,2,4))
 
-        lines_1_point_distances_mask = np.array([line_to_points_distances_2d(line_seg_2d=l1, points=points_img1) < self.line_matching_max_dist_line_to_point_px for l1 in lines_img1])
-        lines_2_point_distances_mask = np.array([line_to_points_distances_2d(line_seg_2d=l2, points=points_img2) < self.line_matching_max_dist_line_to_point_px for l2 in lines_img2])
+        lines_1_point_distances_mask = np.array([line_segment_to_points_distances_2d(line_seg_2d=l1, points_2d=points_img1) < self.line_matching_max_dist_line_to_point_px for l1 in lines_img1])
+        lines_2_point_distances_mask = np.array([line_segment_to_points_distances_2d(line_seg_2d=l2, points_2d=points_img2) < self.line_matching_max_dist_line_to_point_px for l2 in lines_img2])
 
         agreement_matrix = np.sum(lines_1_point_distances_mask[:, None, :] & lines_2_point_distances_mask[None, :, :], axis=2)
 
@@ -159,7 +198,6 @@ class LinePredictor(PosePredictor):
             lines2_processed:np.ndarray, 
             points1:np.ndarray, 
             points2:np.ndarray,
-            line_pairs:np.ndarray,
         ):
         """
         :param img1: NxHxWx3 BGR image as numpy array
@@ -172,38 +210,35 @@ class LinePredictor(PosePredictor):
 
         # Display the raw lines
         lines_xy1_raw = [((line[0], line[1]), (line[2], line[3])) for line in lines1_raw]
-        lc1_raw = LineCollection(lines_xy1_raw, linewidths=1, alpha=0.4, color = plt.cm.jet(np.linspace(0, 1, lines1_raw.shape[0])))
+        lc1_raw = LineCollection(lines_xy1_raw, linewidths=2, alpha=0.8, color = plt.cm.jet(np.linspace(0, 1, lines1_raw.shape[0])))
         axes[0, 0].imshow(cv2.cvtColor(img1, cv2.COLOR_BGR2RGB))
         axes[0, 0].add_collection(lc1_raw)
         axes[0, 0].set_title("Raw lines cam1")
 
         lines_xy2_raw = [((line[0], line[1]), (line[2], line[3])) for line in lines2_raw]
-        lc2_raw = LineCollection(lines_xy2_raw, linewidths=1, alpha=0.4, color = plt.cm.jet(np.linspace(0, 1, lines2_raw.shape[0])))
+        lc2_raw = LineCollection(lines_xy2_raw, linewidths=2, alpha=0.8, color = plt.cm.jet(np.linspace(0, 1, lines2_raw.shape[0])))
         axes[0, 1].imshow(cv2.cvtColor(img2, cv2.COLOR_BGR2RGB))
         axes[0, 1].add_collection(lc2_raw)
         axes[0, 1].set_title("Raw lines cam1")
 
         # Display the processed lines
+        point_colors = plt.cm.jet(np.linspace(0, 1, points1.shape[0]))
+        line_colors = plt.cm.jet(np.linspace(0, 1, lines1_processed.shape[0]))
+
         lines_xy1 = [((line[0], line[1]), (line[2], line[3])) for line in lines1_processed]
-        lc1 = LineCollection(lines_xy1, linewidths=1, alpha=0.4, color = plt.cm.jet(np.linspace(0, 1, lines1_processed.shape[0])))
+        lc1 = LineCollection(lines_xy1, linewidths=2, alpha=0.8, color = line_colors)
         axes[1, 0].imshow(cv2.cvtColor(img1, cv2.COLOR_BGR2RGB))
         axes[1, 0].add_collection(lc1)
-        axes[1, 0].set_title("Matched & Joined lines cam1")
-
-        matched_lines_1 = [((line[0], line[1]), (line[2], line[3])) for line in line_pairs[:, 0, :]]
-        lc1m = LineCollection(matched_lines_1, linewidths=3, alpha=1.0, color = plt.cm.viridis(np.linspace(0, 1, line_pairs.shape[0])))
-        axes[1, 0].add_collection(lc1m)
+        axes[1, 0].set_title("Processed features cam1")
+        axes[1, 0].scatter(points1[:, 0], points1[:, 1], s = 2, color = point_colors, alpha = 0.8)
 
 
         lines_xy2 = [((line[0], line[1]), (line[2], line[3])) for line in lines2_processed]
-        lc2 = LineCollection(lines_xy2, linewidths=1, alpha=0.4, color = plt.cm.jet(np.linspace(0, 1, lines2_processed.shape[0])))
+        lc2 = LineCollection(lines_xy2, linewidths=2, alpha=0.8, color = line_colors)
         axes[1, 1].imshow(cv2.cvtColor(img2, cv2.COLOR_BGR2RGB))
         axes[1, 1].add_collection(lc2)
-        axes[1, 1].set_title("Matched & Joined lines cam2")
-
-        matched_lines_2 = [((line[0], line[1]), (line[2], line[3])) for line in line_pairs[:, 1, :]]
-        lc2m = LineCollection(matched_lines_2, linewidths=3, alpha=1.0,  color = plt.cm.viridis(np.linspace(0, 1, line_pairs.shape[0])))
-        axes[1, 1].add_collection(lc2m)
+        axes[1, 1].set_title("Processed features cam2")
+        axes[1, 1].scatter(points2[:, 0], points2[:, 1], s = 2, color = point_colors, alpha = 0.8)
 
         plt.show()
     
@@ -257,27 +292,29 @@ class LinePredictor(PosePredictor):
         ) -> np.ndarray | None:
         time_tracker.reset_elapsed_time()
 
-        image_points_cam1, image_points_cam2 = self.extract_and_match.get_matched_points(
-            cv2.cvtColor(cam1_bgr_image, cv2.COLOR_BGR2RGB),
-            cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
-        )
+        cam1_rgb_image = cv2.cvtColor(cam1_bgr_image, cv2.COLOR_BGR2RGB)
+        cam2_rgb_image = cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
 
+        image_points_cam1, image_points_cam2 = self.extract_and_match.get_matched_points(
+            img1_rgb=cam1_rgb_image, img2_rgb=cam2_rgb_image, plot_results = False
+        )
         time_tracker.add_time_stamp("Extract and Match")
 
 
         world_obj_points = np.array([base_xyz_image[int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1])
 
-        if world_obj_points.shape[0] < min(5, self.initial_guess_min_number_inlier_after_ransac):
+        if world_obj_points.shape[0] < min(5, self.initial_raansac_guess_config.min_number_inlier_afterwards):
             return None
 
         success, r_img_t_obj, t_img_t_obj, inliers = cv2.solvePnPRansac(
             world_obj_points, image_points_cam2, self.cam2_intrinsic_mtx, None,
-            iterationsCount = self.initial_guess_ransac_itterations,
-            reprojectionError=self.initial_guess_ransac_reprojection_error,
-            confidence = self.initial_guess_ransac_confidence,
+            iterationsCount = self.initial_raansac_guess_config.itterations,
+            reprojectionError=self.initial_raansac_guess_config.reprojection_error,
+            confidence = self.initial_raansac_guess_config.confidence,
             flags = cv2.SOLVEPNP_EPNP
         )
-        if not success or len(inliers) < self.initial_guess_min_number_inlier_after_ransac:
+        
+        if not success or len(inliers) < self.initial_raansac_guess_config.min_number_inlier_afterwards:
            return None
         
         time_tracker.add_time_stamp("Pose estimation RAANSAC")
@@ -297,8 +334,21 @@ class LinePredictor(PosePredictor):
         lines_img2_raw = self.line_seg_detector.detect(cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2GRAY))[0].squeeze(1)
         time_tracker.add_time_stamp("LSD image 2")
 
-        lines_img1 = self.line_refinement(lines_img1_raw)
-        lines_img2 = self.line_refinement(lines_img2_raw)
+        lines_img1 = lines_img1_raw
+        lines_img2 = lines_img2_raw
+
+        for ref_conf in self.lsd_cleanup_passes:
+            lines_img1 = remove_short_2d_line_segments(
+                merge_close_line_segments(
+                    lines_img1,ref_conf.max_angle_diff_deg,ref_conf.max_midpoint_dist_px, ref_conf.max_endpoint_dist_px, ref_conf.use_quick_merge
+                ),
+            min_line_length_px= ref_conf.min_line_length)
+            lines_img2 = remove_short_2d_line_segments(
+                merge_close_line_segments(
+                    lines_img2,ref_conf.max_angle_diff_deg,ref_conf.max_midpoint_dist_px, ref_conf.max_endpoint_dist_px, ref_conf.use_quick_merge
+                ),
+            min_line_length_px= ref_conf.min_line_length)
+
         time_tracker.add_time_stamp("Line Refinement")
 
 
@@ -334,9 +384,8 @@ class LinePredictor(PosePredictor):
                 lines2_processed=lines_img2,
                 lines1_raw=lines_img1_raw,
                 lines2_raw=lines_img2_raw,
-                line_pairs = line_pairs,
-                points1=[],
-                points2=[]
+                points1=image_points_cam1,
+                points2=image_points_cam2
             )
         if self.debug_visualize_3d:
             self.visualize_features_3d(
@@ -354,8 +403,9 @@ class LinePredictor(PosePredictor):
             points_2d=image_points_cam2[inlier_indices].copy(),
             intrinsic_cam_mat=self.cam2_intrinsic_mtx.copy(),
             lines_2d = matched_lines_2d,
-            lines_3d = matched_lines_3d, 
-            line_relevance=self.pose_optimization_line_vs_point_relevance
+            lines_3d = matched_lines_3d,
+            config=self.pnpl_optimisation_conf,
+            visualize_result= cam2_rgb_image if self.debug_visualize_pnpl else None
         )
 
         time_tracker.add_time_stamp("Bundle adjustment")
@@ -369,11 +419,14 @@ if __name__ == "__main__":
     data = PredictionData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data")
     predictor = LinePredictor(
         data.headset_intrinsics, 
-        extract_and_match=ExtractAndLightGlue(),#ExtractAndMatchLoMa(loma_variant="LoMaB"),
+        extract_and_match=ExtractAndLightGlue(),
+    #    extract_and_match=ExtractAndMatchLoMa(),    
+        lsd_cleanup_passes_configs=[line_merging_2d_config_for_short_lines, line_merging_2d_config_for_longer_lines],
         debug_visualize_2d=False, 
-        pose_optimization_line_vs_point_relevance=0.5,
+        pose_optimization_line_vs_point_relevance=0.9,
         debug_dont_refine_ransac=False,
-        line_fitting_3d_use_ransaac=False
+        line_fitting_3d_use_ransaac=False,
+        debug_visualize_pnpl=True
     )
     grader = OnePredictorOneDatasetGrader(predictor=predictor, data=data)
     

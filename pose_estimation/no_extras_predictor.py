@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from predictor_handling import *
 from extractors_and_matchers import *
+from image_augmentation import *
 
 class NoExtrasPredictor(PosePredictor):
     def __init__(

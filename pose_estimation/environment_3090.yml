@@ -17,3 +17,6 @@ dependencies:
     - torch-ransac3d
     - scikit-image
     - pypose
+    - einops
+    - tyro
+    - transformers

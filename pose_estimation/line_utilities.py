@@ -44,11 +44,12 @@ def line_segment_to_points_distances_2d(line_seg_2d:np.ndarray, points_2d:np.nda
     return np.linalg.norm(projections-points_2d, axis = 1)
 
 
-def line_to_points_distances_2d(line_seg_2d:np.ndarray, points:np.ndarray) -> np.ndarray:
+def line_to_points_distances_2d(line_seg_2d:np.ndarray, points:np.ndarray, signed:bool = False) -> np.ndarray:
     """
     Computes the absolute distance euclidian between each point and the infinite line spanned by the 2 line points
     :param line_seg_2d: Numpy array of the structure: [x1, y1, x2, y2]
     :param points: Nx2 numpy array of the points [[xi, yi], ...]
+    :param signed: if true will return the signed distances else the absolute distances
     :return array of length N of the distances
     """
     assert line_seg_2d.shape == (4,)
@@ -58,6 +59,8 @@ def line_to_points_distances_2d(line_seg_2d:np.ndarray, points:np.ndarray) -> np
     dx, dy = x2-x1, y2-y1
     line_points_dist = np.hypot(dx,dy)
     c = x2*y1-y2*x1
+    if signed:
+        return (points[:, 0] * dy - points[:, 1]*dx + c)/line_points_dist
     return np.abs((points[:, 0] * dy - points[:, 1]*dx + c)/line_points_dist)
 
 
@@ -119,6 +122,38 @@ def merge_line_seg_cluster_into_one(line_segs_2d:np.ndarray)->np.ndarray:
         return line_segs_2d[0]
     
     return pca_2d_3d_points_lineseg_regression(line_segs_2d.reshape(-1,2))
+
+
+def merge_line_seg_cluster_into_one_weighted(line_segs_2d:np.ndarray)->np.ndarray:
+    """
+    Joins multiple 2d line segments into one
+    :param line_segs_2d: Nx4 array of the structure: [[x1, y1, x2, y2], ...] (with N > 0)
+    :return a numpy array: [x1, y1, x2, y2] of the new line
+    """
+    assert line_segs_2d.ndim == 2 and line_segs_2d.shape[-1] == 4, f"invalid shape: {line_segs_2d.shape} != (N,4)"
+    assert line_segs_2d.shape[0] > 0, f"Can join {line_segs_2d.shape[0]}<1 segments"
+
+    if line_segs_2d.shape[0] == 1:
+        return line_segs_2d[0]
+    
+    dxdy = line_segs_2d[:, 2:] - line_segs_2d[:, :2]
+
+    line_segment_lengths = np.linalg.norm(dxdy, axis = 1)
+
+    line_segment_relevances = line_segment_lengths/line_segment_lengths.sum()
+
+    weighted_direction = np.mean(dxdy[:, :]/line_segment_lengths[:, None] * line_segment_relevances[:, None], axis = 0)
+    weighted_direction = weighted_direction/np.linalg.norm(weighted_direction)
+
+    weighted_center = np.sum((line_segs_2d[:, :2]+dxdy/2)*line_segment_relevances[:, None], axis = 0)
+
+    centered_points = line_segs_2d.reshape(-1,2)-weighted_center
+    dists_to_center = centered_points @ weighted_direction
+
+    start_p = weighted_center + dists_to_center.min()*weighted_direction
+    end_p = weighted_center + dists_to_center.max()*weighted_direction
+
+    return np.concatenate([start_p, end_p])
 
 
 def pca_2d_3d_points_lineseg_regression(points:np.ndarray):
@@ -215,12 +250,23 @@ def line_segment_regression_3d_ransaac(xyz_points:np.ndarray|torch.Tensor, inlie
 
     return torch.cat([start_p, end_p]).cpu().numpy()
 
+def project_point_onto_line_slow(px, py, x1, y1, x2, y2):
+    """
+    Project point (px, py) onto line defined by (x1,y1)-(x2,y2).
+    :returns the closest point on the infinite line.
+    """
+    dx = x2 - x1
+    dy = y2 - y1
+    t = ((px - x1) * dx + (py - y1) * dy) / (dx*dx + dy*dy)
+    return x1 + t * dx, y1 + t * dy
+
 
 def merge_close_line_segments(
         line_segs_2d:np.ndarray,
         max_angle_diff:float = 5,
         max_midpoint_dist:float = 5,
-        max_endpoint_dist:float = 15
+        max_endpoint_dist:float = 15,
+        quick_join:bool = False
     ) -> np.ndarray:
     """
     Clusters lines and merges each cluster.
@@ -233,12 +279,15 @@ def merge_close_line_segments(
     :param max_angle_diff: maximum angle between 2 lines to be joined (in degrees)
     :param max_midpoint_dist: maximum angle between 2 midpoints, higher causes less colinear lines to be joined
     :param max_endpoint_dist: maximum distance between 2 line-endpoints to be joined, higher causes lines with more distance to be joined
+    :param quick_join: if false the line clusters will be segmented further, can help when chaining is a problem (takes ~1/4 longer)
     :return Mx4 array of the same structure with M <= N
     """
     assert line_segs_2d.ndim == 2 and line_segs_2d.shape[-1] == 4, f"invalid shape: {line_segs_2d.shape} != (N,4)"
     assert 0 <= max_angle_diff <= 360, f"invalid angle: {max_angle_diff}°"
     assert 0 <= max_midpoint_dist, f"max midpoint dist must be non-negative: {max_midpoint_dist}"
     assert 0 <= max_endpoint_dist, f"max endpoint dist must be non-negative: {max_endpoint_dist}"
+
+    n_lines = line_segs_2d.shape[0]
 
     angle_thresh_rad = np.deg2rad(max_angle_diff)
     line_segs_2d = line_segs_2d.copy()
@@ -266,7 +315,7 @@ def merge_close_line_segments(
     midpoint_dist_matrix_mask = lines_to_points_distances_2d(
         line_segs_2d=line_segs_2d,
         points=mid_points
-    ) < max_endpoint_dist
+    ) < max_midpoint_dist
 
     # End points
     ep1 = line_segs_2d[:, :2]
@@ -279,6 +328,7 @@ def merge_close_line_segments(
     ) < max_endpoint_dist ** 2
 
     merge_adj_list = []
+    merge_adj_matrix = np.zeros((n_lines, n_lines), dtype = bool)
     for i1,l1 in enumerate(line_segs_2d):
         poss_indices = np.arange(i1+1, line_segs_2d.shape[0])
         mask = angle_diff_mask[i1, i1+1:]
@@ -296,15 +346,56 @@ def merge_close_line_segments(
         else:
             overlaps = (l1_ep1[1] <= l_other_ep2[:,1]) & (l_other_ep1[:,1] <= l1_ep2[1])
 
-        merge_adj_list.append(poss_indices[mask & midpoint_mask & (overlaps | gap_sq_matrix_mask[i1, poss_indices])])
+        combined_mask = mask & midpoint_mask & (overlaps | gap_sq_matrix_mask[i1, poss_indices])
+        merge_adj_list.append(poss_indices[combined_mask])
+        merge_adj_matrix[i1, i1+1:] = combined_mask[:]
 
     # Combine all similar Lines
     union_find = UnionFind(line_segs_2d.shape[0])
     for i1, adjecent_idx in enumerate(merge_adj_list):
         for i2 in adjecent_idx:
             union_find.union(i1, i2)
-    merged_lines = np.array([
-    merge_line_seg_cluster_into_one(line_segs_2d[np.array(line_cluster)])
-        for line_cluster in union_find.return_clusters()
+    
+    or_clusters =  union_find.return_clusters()
+
+    if quick_join:
+        return np.array([merge_line_seg_cluster_into_one_weighted(line_segs_2d[np.array(line_cluster)])
+            for line_cluster in or_clusters
+        ])
+    
+
+    line_lengths = np.linalg.norm(dxy_s, axis = 1)
+    adj_matrix = merge_adj_matrix | merge_adj_matrix.T
+
+    line_unused = np.ones(line_segs_2d.shape[0], dtype = bool)
+    cluster_representative = np.arange(0, n_lines)
+
+
+    for cluster in or_clusters:
+        cluster = np.array(cluster)
+        line_unused = np.ones(cluster.shape[0], dtype = bool)
+
+        while np.any(line_unused):
+            unused_lines = cluster[line_unused]
+            line_seed = unused_lines[np.argmax(line_lengths[unused_lines])]
+            to_add_mask = adj_matrix[line_seed, cluster] & line_unused
+
+            seed_pos = np.where(cluster == line_seed)[0][0]
+            to_add_mask[seed_pos] = True
+
+
+            new_lines = cluster[to_add_mask]
+            cluster_representative[new_lines] = cluster_representative[line_seed]
+            line_unused &=  ~ to_add_mask
+    
+    clusters = {}
+    for idx in range(n_lines):
+        representative = cluster_representative[idx]
+        if representative in clusters:
+            clusters[representative].append(idx)
+        else:
+            clusters[representative] = [idx]
+
+    return np.array([merge_line_seg_cluster_into_one_weighted(line_segs_2d[np.array(line_cluster)])
+        for line_cluster in list(clusters.values())
     ])
-    return merged_lines
