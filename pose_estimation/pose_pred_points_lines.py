@@ -67,7 +67,7 @@ class LinePredictor(PosePredictor):
             extract_and_match:ExtractAndMatch = ExtractAndMatchLoMa(),
             initial_pose_guess_ransaac_config = pose_estimation_ransaac_config_10ms,
             lsd_cleanup_passes_configs:list[LineMerging2dConfig] = [
-                line_merging_2d_config_for_short_lines_quick_merge, 
+                line_merging_2d_config_for_short_lines_quick_merge,
                 line_merging_2d_config_for_longer_lines_quick_merge
             ],
 
@@ -85,6 +85,7 @@ class LinePredictor(PosePredictor):
             debug_visualize_pnpl:bool = False,
             debug_visualize_3d:bool = False
         ):
+        super().__init__()
         self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
         self.extract_and_match = extract_and_match
 

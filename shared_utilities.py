@@ -1,5 +1,22 @@
 import numpy as np
 
+def r_t_to_hom(r:np.ndarray, t:np.ndarray) -> np.ndarray:
+    """
+    Takes an rotation and translation vector and returns the homogeneous transformation matrix
+    :param r: rotation vector (length n)
+    :param t: translation vector (length n)
+    :return: N+1xN+1 numpy array
+    """
+    n = t.shape[0]
+    assert r.shape == (n, n), f"R not {n}x{n}: {r.shape}"
+    assert t.shape == (n,), f"T not {n}: {t.shape}"
+
+    m = np.eye(n+1)
+    m[0:n, 0:n] = r
+    m[0:n, n] = t
+    _ = assert_homogeneous_mat(m)
+    return m
+
 def assert_intrinsic_mat(m:np.ndarray, hxw_img: np.ndarray | None = None)->bool:
     """
     Asserts that a matrix is of the style:
@@ -20,18 +37,20 @@ def assert_intrinsic_mat(m:np.ndarray, hxw_img: np.ndarray | None = None)->bool:
 
 def assert_homogeneous_mat(m:np.ndarray, abs_tolerance:float = 0.001) -> bool:
     """
-    Asserts that a matrix is 4x4 and of the style:
-    |  SO3    t  |
-    |  0,0,0  1  |
+    Asserts that a matrix is NxN and of the style:
+    |  SO(N-1)   t  |
+    |  0 ... 0   1  |
 
     :param m: A homogeneous matrix
-    :param abs_tolerance: The tolerance for det = 1 & SO3 @ SO3.T = unity matrix
+    :param abs_tolerance: The tolerance for det = 1 & SON @ SON.T = unity matrix
     :return True
     """
-    assert m.shape == (4, 4), f"M not 4x4 {m.shape}"
-    assert np.allclose(m[3, :],[0, 0, 0, 1]), f"bottom row of M incorrect: {m[3, :]}"
-    assert np.allclose(m[:3, :3] @ m[:3, :3].T, np.eye(3), atol=abs_tolerance), f"Rot part not invertible by transpose: {m[:3, :3] @ m[:3, :3].T}"
-    assert np.isclose(np.linalg.det(m[:3, :3]), 1, atol=abs_tolerance), f"Determinant is not 1: {np.linalg.det(m[:3, :3])}"
+    n = m.shape[0]
+    assert m.shape == (n, n), f"M not 4x4 {m.shape}"
+    assert np.isclose(m[-1,-1], 1), f"Corner 1 missing: {m}"
+    assert np.allclose(m[n-1, :-1],np.zeros(n-1)), f"bottom row of M incorrect: {m[n-1, :]}"
+    assert np.allclose(m[:n-1, :n-1] @ m[:n-1, :n-1].T, np.eye(n-1), atol=abs_tolerance), f"Rot part not invertible by transpose: {m[:3, :3] @ m[:3, :3].T}"
+    assert np.isclose(np.linalg.det(m[:n-1, :n-1]), 1, atol=abs_tolerance), f"Determinant is not 1: {np.linalg.det(m[:3, :3])}"
     return True
 
 def assert_mxnx3_np_uint8_image(img:np.ndarray)->bool:
