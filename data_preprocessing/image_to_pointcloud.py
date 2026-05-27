@@ -11,27 +11,6 @@ from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared_utilities import get_image_type_hxw, compute_pose_pseudo_median
 
-def remove_outliers_from_point_cloud(points:np.ndarray, contamination:float = 0.05)->np.ndarray:
-    """
-    Uses I-Forest to remove points deemed as outliers
-    :param contamination: The percentage of points to remove
-    :param points: A Nx3-float numpy array of x,y,z points
-    :return: A Mx3-float numpy array of x,y,z points with M <= N
-    """
-    assert 0 <= contamination <= 1.0
-    assert points.ndim == 2 and points.shape[1] == 3
-
-    if contamination == 0:
-        return points
-    if contamination == 1.0:
-        return np.empty((0,3))
-
-    from sklearn.ensemble import IsolationForest
-    forest = IsolationForest(contamination=contamination)
-    forest.fit(points)
-    prediction = forest.predict(points)
-    return points[prediction==1]
-
 
 def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
     """
