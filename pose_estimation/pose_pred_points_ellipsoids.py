@@ -12,7 +12,7 @@ from pne_optimizer import optimize_pne, PnEOptimizerConfig
 
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from foreground_segmentation import get_object_masks, Sam3Prompt
+from foreground_segmentation import get_object_masks, Sam3Prompt, display_image_masks
 
 from ellipsoid_utilities import * 
 
@@ -22,7 +22,6 @@ def images_to_objects(
         xyz_images:np.ndarray,
         prompt:Sam3Prompt,
         max_centroid_dist: float = 0.05,
-        debug_vis_3d:bool = False,
         visualize_masks:bool = False,
         min_number_points_per_detected_object:int = 1000,
         min_cluster_size:int = 2
@@ -33,7 +32,6 @@ def images_to_objects(
     :param xyz_images: An NxHxWx3-float array of 3d points in the base frame
     :param prompt: The Sam3Prompt to detect objects in an image
     :param max_centroid_dist: The maximum distance in meters between two object centers in different images to be considered the same
-    :param debug_vis_3d: Whether to visualize the objects as point-clouds or not
     :return: the base_t_ellipsoid hom. matrices (Mx4x4) and the primal quadratics (Mx4x4)
     """
     assert all([assert_mxnx3_np_uint8_image(bgr_img) for bgr_img in bgr_images])
@@ -110,6 +108,147 @@ def images_to_objects(
 
     return fused_base_t_ellipsoid_s, fused_primal_quaddratic_s
 
+
+class ImageMaskStorage:
+    """
+    Stores boolean masks memory efficient (1 bit per bool)
+    """
+
+    def __init__(self, height:int, width:int):
+        self.h = height
+        self.w = width
+        self.storage = []
+        self.id_storage = {}
+        self.c_idx = 0
+
+    def add_new_mask(self,mask:np.ndarray):
+        """
+        Adds the uint8/bool mask to storage
+        """
+        assert mask.shape == (self.h, self.w), f"got {mask.shape} instead of {self.h},{self.w}"
+
+        list_idx = int(self.c_idx/8)
+        bit_idx = self.c_idx % 8
+
+        if bit_idx == 0:
+            self.storage.append(np.zeros((self.h, self.w), dtype = np.uint8))
+        if mask.dtype != bool:
+            mask = (mask != 0).astype(np.uint8)
+
+        self.storage[list_idx] |= mask << bit_idx
+
+        self.c_idx += 1
+    
+    def see_mask(self, idx:int)->np.ndarray:
+        assert idx < self.c_idx
+        list_idx = int(idx/8)
+        bit_idx = idx % 8
+        return ((self.storage[list_idx] >> bit_idx) & 1).astype(bool)
+
+
+
+
+
+
+def images_to_primal_quadratics(
+        bgr_images:np.ndarray,
+        xyz_images:np.ndarray,
+        prompt:Sam3Prompt,
+        max_centroid_dist: float = 0.03,
+        max_color_dist:float = 500,
+        visualize_masks:bool = False,
+        min_number_points_per_detected_object:int = 1000,
+        min_cluster_size:int = 1,
+        allow_joining_in_same_img:bool = False
+)-> tuple[np.ndarray, np.ndarray]:
+    """
+    Generates M ellipsoids from an environment
+    :param bgr_images: An NxHxWx3-uint8 array of BGR images
+    :param xyz_images: An NxHxWx3-float array of 3d points in the base frame
+    :param prompt: The Sam3Prompt to detect objects in an image
+    :param max_centroid_dist: The maximum distance in meters between two object centers in different images to be considered the same
+    :return: the base_t_ellipsoid hom. matrices (Mx4x4) and the primal quadratics (Mx4x4)
+    """
+    assert all([assert_mxnx3_np_uint8_image(bgr_img) for bgr_img in bgr_images])
+    assert xyz_images.ndim == 4 and xyz_images.shape[-1] == 3
+    assert bgr_images.shape[:3] == xyz_images.shape[:3]
+
+    # Generate objects
+
+    # (n-all-objs)xHxW-bool masks
+    mask_storage = ImageMaskStorage(bgr_images.shape[1], bgr_images.shape[2])
+
+
+    object_avg_colors = []
+    object_avg_centers = []
+    object_image_idxs = []
+
+    for i, (bgr_img, xyz_img) in enumerate(zip(bgr_images, xyz_images)):
+        print(f"started mask generation")
+        object_masks = get_object_masks(bgr_img, prompt)
+        for object_mask in object_masks:
+            pc = xyz_img[object_mask > 0]
+            if pc.shape[0] < min_number_points_per_detected_object:
+                continue
+            mask_storage.add_new_mask(object_mask)
+            object_avg_colors.append(np.mean(bgr_img[object_mask > 0], axis = 0))
+            object_avg_centers.append(np.mean(pc, axis = 0))
+            object_image_idxs.append(i)
+        if visualize_masks:
+            display_image_masks(bgr_img=bgr_img, masks=object_masks)
+
+    object_avg_centers = np.stack(object_avg_centers, axis = 0)
+    object_avg_colors = np.stack(object_avg_colors, axis = 0)
+
+
+    # Join similar objects
+    n = object_avg_colors.shape[0]
+
+    # NxN adjecency matrix
+
+    centroid_distance_matrix = np.linalg.norm(
+        object_avg_centers[:, None] - object_avg_centers[None, :], axis=-1
+    )
+    centroid_distance_matrix_mask = centroid_distance_matrix < max_centroid_dist
+
+    color_distance_matrix = np.mean(np.sum(np.abs(
+        object_avg_colors[:, None] - object_avg_colors[None, :]
+    ), axis = -1), axis = -1)
+    color_distance_matrix_mask = color_distance_matrix < max_color_dist
+    join_mask = centroid_distance_matrix_mask & color_distance_matrix_mask
+
+    union_find = UnionFind(n)
+    for row_idx in range(n):
+        for col_idx in range(row_idx+1, n):
+            if join_mask[row_idx, col_idx]:
+                union_find.union(row_idx, col_idx)
+
+    fused_base_t_ellipsoid_s = []
+    fused_primal_quaddratic_s = []
+    for i,cluster in enumerate(union_find.return_clusters()):
+        if len(cluster) < min_cluster_size:
+            continue
+        b_t_e, p_q = fit_ellipsoid_to_3d_point_cloud(
+            np.concatenate(
+                [xyz_images[object_image_idxs[i]][mask_storage.see_mask(i)] for i in cluster],
+                axis = 0
+            ),
+            visualize=False
+        )
+        fused_base_t_ellipsoid_s.append(b_t_e)
+        fused_primal_quaddratic_s.append(p_q)
+    fused_base_t_ellipsoid_s = np.array(fused_base_t_ellipsoid_s)
+    fused_primal_quaddratic_s = np.array(fused_primal_quaddratic_s)
+    
+    visualize_primal_quadratics(
+        base_t_ellipsoids=fused_base_t_ellipsoid_s,
+        primal_quadratics=fused_primal_quaddratic_s,
+        bg_point_cloud=xyz_images.reshape(-1,3),
+        bg_point_cloud_colors=bgr_images.reshape(-1,3)
+    )
+
+    return fused_base_t_ellipsoid_s, fused_primal_quaddratic_s
+
 def image_to_primal_conics(bgr_image:np.ndarray, sam3_prompt:Sam3Prompt):
     object_masks = get_object_masks(bgr_image, sam3_prompt)
     base_t_ellipsoid_s = []
@@ -159,12 +298,11 @@ class EllipsoidPredictor(PosePredictor):
             ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise,
         ):
         super().__init__()
-        self.base_ellipsoid_s, self.quadratic_ellipsoid_s = images_to_objects(
-            bgr_images=cam1_bgr_images[:1],
-            xyz_images=cam1_xyz_images[:1],
+        self.base_ellipsoid_s, self.quadratic_ellipsoid_s = images_to_primal_quadratics(
+            bgr_images=cam1_bgr_images,
+            xyz_images=cam1_xyz_images,
             prompt=Sam3Prompt(),
-            debug_vis_3d=False,
-            min_cluster_size=1
+            min_cluster_size=2
         )
         self.pne_optimizer_config = pne_config
         self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
@@ -174,9 +312,14 @@ class EllipsoidPredictor(PosePredictor):
 
     def improve_pose(self, 
                     cam2_t_base_init:np.ndarray,
-                    cam2_bgr_image:np.ndarray
+                    cam2_bgr_image:np.ndarray,
+                    time_tracker:TimeTracker
                     ):
-        
+        """
+        Improves a given pose using the ellipsoids
+        #TODO wont notice if it fails
+        """
+        time_tracker.reset_elapsed_time()
         proj_primal_conics = [
             project_primal_quadratic_to_primal_conical(pq,cam2_t_base_init,self.cam2_intrinsic_mtx) 
             for pq in self.quadratic_ellipsoid_s
@@ -185,20 +328,9 @@ class EllipsoidPredictor(PosePredictor):
 
         base_t_obs_ellipses, observed_primal_conics = image_to_primal_conics(bgr_image=cam2_bgr_image, sam3_prompt=Sam3Prompt())
         observed_gaussian_ellipses = np.array([primal_conic_to_gaussian_ellipse(pc) for pc in observed_primal_conics])
-
+        time_tracker.add_time_stamp("Projecting for matching")
         proj_match_idxs, obs_match_idxs = match_gaussians(proj_gaussian_ellipses, observed_gaussian_ellipses)
-
-        proj_matplotlib_ellipses = gaussian_ellipse_s_to_matplotlib_ellipse_s(proj_gaussian_ellipses)
-        observed_matplotlib_ellipses = gaussian_ellipse_s_to_matplotlib_ellipse_s(observed_gaussian_ellipses, colors="red")
-
-        proj_matplotlib_ellipses_m = gaussian_ellipse_s_to_matplotlib_ellipse_s(proj_gaussian_ellipses[proj_match_idxs], line_widths=3)
-        observed_matplotlib_ellipses_m = gaussian_ellipse_s_to_matplotlib_ellipse_s(observed_gaussian_ellipses[obs_match_idxs], colors="red", line_widths=3)
-
-        plot_ellipses(
-            bgr_img=cam2_bgr_image,
-            ellipses=proj_matplotlib_ellipses+observed_matplotlib_ellipses+proj_matplotlib_ellipses_m+observed_matplotlib_ellipses_m
-        )
-        print(f"obs_match_idx: {obs_match_idxs}")
+        time_tracker.add_time_stamp("Matching")
 
         cam2_t_base_opt = optimize_pne(
             initial_cam_t_base=cam2_t_base_init,
@@ -206,9 +338,10 @@ class EllipsoidPredictor(PosePredictor):
             primal_conicals=np.array(observed_primal_conics)[obs_match_idxs],
             intrinsic_cam_mat=self.cam2_intrinsic_mtx,
             config=self.pne_optimizer_config,
-            visualize_result=cam2_bgr_image
+            visualize_result=cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
         )
-        print(f"optimized: {cam2_t_base_opt}") 
+        time_tracker.add_time_stamp("PNE optimisation")
+        return cam2_t_base_opt
     
 
     def est_base_t_cam2(self,
@@ -241,7 +374,7 @@ class EllipsoidPredictor(PosePredictor):
             return None
         cam2_t_base_pnp, inliers = cam2_t_base_pnp__inliers
 
-        self.improve_pose(cam2_t_base_pnp, cam2_bgr_image)
+        self.improve_pose(cam2_t_base_pnp, cam2_bgr_image, time_tracker)
     
         return np.linalg.inv(cam2_t_base_pnp)
 

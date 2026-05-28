@@ -79,3 +79,14 @@ def get_object_masks(
     log_memory_usage("ended get_object_masks")
 
     return masks
+
+
+def display_image_masks(bgr_img:np.ndarray, masks:np.ndarray):
+    # TODO add good visualisation
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(15, 5))
+    plt.imshow(bgr_img)
+    for mask in masks:
+        plt.imshow(mask, alpha=0.4, cmap='jet')
+    plt.show()

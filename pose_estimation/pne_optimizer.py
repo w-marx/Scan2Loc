@@ -48,18 +48,17 @@ class Reproj(nn.Module):
             sigma2_s:torch.Tensor
         ):
         """
-        both mu1_s and mu2_s have dimension Nx2
-        both sigma1_s and sigma2_s have dimension Nx2x2
-        Returns an array of length N of the distances
+        Computes the squared wasserstein distances
+        :param mu1_s: An Nx2 array of means
+        :param sigma1_s: An Nx2x2 array of covariance matrices
+        :param mu2_s: An Nx2 array of means
+        :param sigma2_s: An Nx2x2 array of covariance matrices
+        :returns an array of length N of the distances
         """
-
         mean_dist_sq = torch.sum((mu1_s-mu2_s)**2, axis = 1)
-
         sigma2_sqrt = Reproj.sqrtm_2x2(sigma2_s)
-
         cross = Reproj.sqrtm_2x2(sigma2_sqrt @ sigma1_s @ sigma2_sqrt)
-
-        dist_sq = mean_dist_sq + torch.diagonal(sigma1_s+sigma2_s-2*cross).sum(-1)
+        dist_sq = mean_dist_sq + torch.einsum('bii->b',sigma1_s+sigma2_s-2*cross)
         return dist_sq
     
     @staticmethod
@@ -108,10 +107,10 @@ class Reproj(nn.Module):
         """
 
         dual_quadratic = torch.linalg.inv(primal_quadratic)
-        P = cam_t_base[:3]
+        P = cam_t_base[:3, :]
         KP = intrinsic_mtx @ P
-
-        cam_dual_conic = (KP.unsqueeze(0) @ dual_quadratic) @ KP.T.unsqueeze(0)
+        cam_dual_conic = torch.einsum('ik,nkl,jl->nij', KP, dual_quadratic, KP)
+        #cam_dual_conic = (KP.unsqueeze(0) @ dual_quadratic) @ KP.T.unsqueeze(0)
         cam_primal_conic = torch.linalg.inv(cam_dual_conic)
 
         return cam_primal_conic
@@ -119,7 +118,7 @@ class Reproj(nn.Module):
     @staticmethod
     def primal_conics_to_gaussian_ellipses(primal_conic:torch.Tensor)-> tuple[torch.Tensor, torch.Tensor]:
         """
-        Takes Nx3x3 primal conics and returns normal distributions where p(x) = 0.95, is the ellipsoid
+        Takes Nx3x3 primal conics and returns normal distributions where the edge of the elipsoid is the Mahalanobis of one
         :param primal_conic: The Nx3x3 primal conics
         :return a tuple: Nx2 of the mu's and Nx2x2 of the sigma's
         """
