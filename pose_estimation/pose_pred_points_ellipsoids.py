@@ -44,7 +44,7 @@ def assert_primal_conical_hom_ellipse(primal_conical_hom:np.ndarray)->bool:
     Ax + Bxy + Cx + Dx + Ey + F = 0
 
     :param primal_conical_hom: The matrix to be checked
-    return True
+    :return: True
     """
     det_a_33 = np.linalg.det(primal_conical_hom[:2, :2])
     det_a_q = np.linalg.det(primal_conical_hom)
@@ -59,13 +59,13 @@ def assert_primal_quadratic_hom_ellipsoid(primal_quadratic_hom:np.ndarray)->bool
     """
     Raises an assertion error if the primal ellipsoid is infeasible
     Assumed is the form:
-    | A     B/2     C/2     D/2|
-    | B/2   E       F/2     G/2|
-    | C/2   F/2     H       I/2|
-    | D/2   G/2     I/2     J  |
+    | A     D/2     E/2     G/2|
+    | D/2   B       F/2     H/2|
+    | E/2   F/2     C       I/2|
+    | G/2   H/2     I/2     J  |
 
     Where points are on the ellipsoid if:
-    Axx + Bxy + Cxz + Dx + Eyy + Fxz + Gy + Hzz + Iz + J= 0
+    Axx + Byy + Czz + Dxy + Exz + Fyz + Gx + Hy + Iz + J= 0
 
     :param primal_quadratic_hom: The matrix to be checked
     return True
@@ -75,13 +75,30 @@ def assert_primal_quadratic_hom_ellipsoid(primal_quadratic_hom:np.ndarray)->bool
 
     return True
 
+def assert_gaussian_ellipse(mu:np.ndarray, sigma:np.ndarray)->bool:
+    """
+    An ellipsoid that is represented by a Gaussian with mean mu and standard deviation sigma.
+    The boundary of the ellipsoid is where p(x) = se
+    :param mu: mean of the distribution & ellipsoid
+    :param sigma: standard deviation of the distribution & ellipsoid
+    """
+    n = mu.shape[0]
+    assert mu.shape == (n,), f"mu must be vector, is:{mu.shape}"
+    assert sigma.shape == (n,n), f"sigma must be {n}x{n}, is:{sigma.shape}"
+
+    assert np.allclose(sigma, sigma.T), f"Cov matrix must be symmetric: \n {sigma}"
+    assert np.all(np.diag(sigma) >= 0), f"Variances must be >= 0: {sigma}"
+
+    return True
+
 def fit_ellipsoid_to_3d_point_cloud(
         point_cloud:np.ndarray,
         visualize:bool = True
     )->tuple[np.ndarray, np.ndarray]:
     """
-    :param point_cloud: An Nx3 point cloud in the base_frame
-    :return a tuple of the base_t_ellipsoid hom. mtx (4x4) and the primal quadratic (4x4)
+    :param point_cloud: A Nx3 point cloud in the base_frame
+    :param visualize: If the fitting should be 3d visualized
+    :return: a tuple of the base_t_ellipsoid hom. mtx (4x4) and the primal quadratics (4x4)
     """
     assert point_cloud.ndim == 2 and point_cloud.shape[-1] == 3
 
@@ -108,7 +125,6 @@ def fit_ellipsoid_to_3d_point_cloud(
     a = np.max(np.abs(pts_local[:, 0]))
     b = np.max(np.abs(pts_local[:, 1]))
     c = np.max(np.abs(pts_local[:, 2]))
-    # TODO replace with something more robust (maybe do Iforest beforehand)
 
     # quadric in world coordinate
     q_local = np.diag([1/a**2, 1/b**2, 1/c**2, -1.0])
@@ -142,9 +158,15 @@ def sample_points_in_primal_quadratic(
         resolution:int = 20
     ):
     """
-    Sample points on the surface of the ellipsoid
-    Uses grid sampling and contour extraction
+    Generates points on the surface of a primal quadratic, needs base_t_ellipsoid to be more efficient.
+    :param base_t_ellipsoid: A 4x4 homogeneous transformation matrix
+    :param primal_quadratic: The 4x4 primal quadratic matrix
+    :param resolution: The resolution of the point cloud along both rotational axis
+    :return: a point cloud consisting of resolution^2 points
     """
+    assert_homogeneous_mat(base_t_ellipsoid, size = 4)
+    assert_primal_quadratic_hom_ellipsoid(primal_quadratic)
+
     # [1/a**2, 1/b**2, 1/c**2, -1.0]
     ellipsoid_t_base = np.linalg.inv(base_t_ellipsoid)
     abc1 = np.linalg.inv(ellipsoid_t_base.T) @ primal_quadratic @ np.linalg.inv(ellipsoid_t_base)
@@ -177,9 +199,17 @@ def visualize_primal_quadratics(
         bg_point_cloud_colors:np.ndarray | None = None
     ):
     """
-    :param Nx4x4 3d primal quadratics matrices
+    :param base_t_ellipsoids: Nx4x4 homogeneous transformation matrix from the base to the ellipsoid frames
+    :param primal_quadratics: Nx4x4 primal quadratics of the ellipsoids
+    :param bg_point_cloud: Mx3-float point cloud to display
+    :param bg_point_cloud_colors: Mx3-uint8 RGB color cloud to display
     """
-    assert primal_quadratics.ndim == 3 and primal_quadratics.shape[-2:] == (4,4)
+    assert base_t_ellipsoids.shape[0] == primal_quadratics.shape[0]
+    assert all(assert_homogeneous_mat(m, size = 4) for m in base_t_ellipsoids)
+    assert all(assert_primal_quadratic_hom_ellipsoid(m) for m in primal_quadratics)
+
+    assert bg_point_cloud is None or bg_point_cloud.ndim == 2 and bg_point_cloud.shape[-1] == 3
+    assert bg_point_cloud_colors is None or bg_point_cloud.shape == bg_point_cloud_colors.shape
 
     base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
 
@@ -204,8 +234,15 @@ def visualize_primal_quadratics(
 
 def fuse_ellipsoids(base_t_ellipsoid_s:np.ndarray, primal_quadratic_s:np.ndarray)->tuple[np.ndarray, np.ndarray]:
     """
-    Fuses multiple ellipsoids into one
+    Fuses multiple ellipsoids into one, by generating a point cloud on its shells and fitting an ellipsoid to this point_cloud.
+    :param base_t_ellipsoid_s: Nx4x4 homogeneous transformation matrix from the base to the ellipsoid frames
+    :param primal_quadratic_s: Nx4x4 primal quadratic of the ellipsoids
+    :return: An 4x4 base_t_ellipsoid and 4x4 primal_quadratic
     """
+    assert base_t_ellipsoid_s.shape[0] == primal_quadratic_s.shape[0]
+    assert all(assert_homogeneous_mat(m, size = 4) for m in base_t_ellipsoid_s)
+    assert all(assert_primal_quadratic_hom_ellipsoid(m) for m in primal_quadratic_s)
+
     point_cloud = np.concatenate([
         sample_points_in_primal_quadratic(b_t_e, p_q, resolution=20) 
         for b_t_e, p_q in zip(base_t_ellipsoid_s, primal_quadratic_s)
@@ -309,7 +346,8 @@ def images_to_objects(
 
 def fit_ellipsoid_to_2d_point_cloud(point_cloud:np.ndarray)->tuple[np.ndarray, np.ndarray]:
     """
-    :param point_cloud: An Nx2 point cloud
+    Creates a primal conic and base_t_ellipsoid matrix from a 2d point cloud.
+    :param point_cloud: A Nx2 point cloud
     :return a tuple of the base_t_ellipsoid hom. mtx (3x3) and the primal conic (3x3)
     """
     assert point_cloud.ndim == 2 and point_cloud.shape[-1] == 2
@@ -346,8 +384,8 @@ def project_3d_ellipsoid_to_img_coordinates(
 
     :return: The 3x3 primal conic of the projected ellipse
     """
-    _ = assert_homogeneous_mat(cam_t_base)
-    _ = assert_intrinsic_mat(intrinsic_mtx)
+    assert_homogeneous_mat(cam_t_base, size=4)
+    assert_intrinsic_mat(intrinsic_mtx)
 
     dual_quadratic = np.linalg.inv(primal_quadratic)
     cam_dual_conic = (intrinsic_mtx @ cam_t_base[:3,:]) @ dual_quadratic @ (intrinsic_mtx @ cam_t_base[:3,:]).T

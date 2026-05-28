@@ -14,7 +14,7 @@ def r_t_to_hom(r:np.ndarray, t:np.ndarray) -> np.ndarray:
     m = np.eye(n+1)
     m[0:n, 0:n] = r
     m[0:n, n] = t
-    _ = assert_homogeneous_mat(m)
+    assert_homogeneous_mat(m)
     return m
 
 def assert_intrinsic_mat(m:np.ndarray, hxw_img: np.ndarray | None = None)->bool:
@@ -35,17 +35,19 @@ def assert_intrinsic_mat(m:np.ndarray, hxw_img: np.ndarray | None = None)->bool:
     assert hxw_img is None or 0 < m[0, 2] < hxw_img.shape[1] and 0 < m[1, 2] < hxw_img.shape[0], f"center in wrong location {m[0, 2]}, {m[1, 2]} in {hxw_img.shape}"
     return True
 
-def assert_homogeneous_mat(m:np.ndarray, abs_tolerance:float = 0.001) -> bool:
+def assert_homogeneous_mat(m:np.ndarray, size:None|int = None, abs_tolerance:float = 0.001) -> bool:
     """
     Asserts that a matrix is NxN and of the style:
     |  SO(N-1)   t  |
     |  0 ... 0   1  |
 
     :param m: A homogeneous matrix
-    :param abs_tolerance: The tolerance for det = 1 & SON @ SON.T = unity matrix
+    :param size: If not none this size will be asserted
+    :param abs_tolerance: The tolerance for det = 1 & SO(N) @ SO(N).T = unity matrix
     :return True
     """
     n = m.shape[0]
+    assert size is None or n == size, f"Matrix is {m.shape} not {size}x{size}"
     assert m.shape == (n, n), f"M not 4x4 {m.shape}"
     assert np.isclose(m[-1,-1], 1), f"Corner 1 missing: {m}"
     assert np.allclose(m[n-1, :-1],np.zeros(n-1)), f"bottom row of M incorrect: {m[n-1, :]}"
@@ -92,7 +94,7 @@ def create_3d_camera(
     """
     import open3d as o3d
 
-    _ = assert_homogeneous_mat(base_t_camera)
+    _ = assert_homogeneous_mat(base_t_camera, size=4)
     _ =  assert_intrinsic_mat(intrinsics, hxw_img)
     assert scale > 1e-6
     assert hxw_img.ndim >= 2
@@ -122,8 +124,8 @@ def calc_rotational_difference(hom1:np.ndarray, hom2:np.ndarray)->float:
     :param hom2: homogeneous 4x4 matrix
     :return rotational difference as float
     """
-    _ = assert_homogeneous_mat(hom1)
-    _ = assert_homogeneous_mat(hom2)
+    assert_homogeneous_mat(hom1, size=4)
+    assert_homogeneous_mat(hom2, size=4)
 
     return np.arccos(np.clip((np.trace(hom1[:3, :3] @ hom2[:3, :3].T) - 1) / 2, -1.0, 1.0))
 
@@ -137,7 +139,7 @@ def compute_pose_pseudo_median(poses:list[np.ndarray])->np.ndarray | None:
     """
     if len(poses) == 0:
         return None
-    assert all([assert_homogeneous_mat(m) for m in poses])
+    assert all([assert_homogeneous_mat(m, size=4) for m in poses])
     
     median_pose = np.eye(4)
     median_pose[:3,3] = min(poses, key = lambda x: sum([np.linalg.norm(x[:3,3]-y[:3,3]) for y in poses]))[:3,3]
