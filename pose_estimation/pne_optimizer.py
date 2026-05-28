@@ -6,7 +6,7 @@ from pypose.optim.solver import Cholesky, PINV
 import numpy as np
 from scipy.spatial.transform import Rotation
 import sys, os
-from ellipsoid_utilities import *
+from ellipsoid_utilities_numpy import *
 
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

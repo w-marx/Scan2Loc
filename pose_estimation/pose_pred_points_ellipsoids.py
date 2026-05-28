@@ -14,7 +14,7 @@ from pne_optimizer import optimize_pne, PnEOptimizerConfig
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from foreground_segmentation import get_object_masks, Sam3Prompt, display_image_masks
 
-from ellipsoid_utilities import * 
+from ellipsoid_utilities_numpy import *
 
 
 def images_to_objects(
@@ -68,8 +68,8 @@ def images_to_objects(
     primal_quaddratics = np.stack(primal_quaddratics, axis = 0)
 
     visualize_primal_quadratics(
-        base_t_ellipsoids=base_t_ellipsoid_s,
-        primal_quadratics=primal_quaddratics
+        base_t_ellipsoid_s=base_t_ellipsoid_s,
+        primal_quadratic_s=primal_quaddratics
     )
 
     # Join similar objects
@@ -100,8 +100,8 @@ def images_to_objects(
     fused_primal_quaddratic_s = np.array(fused_primal_quaddratic_s)
     
     visualize_primal_quadratics(
-        base_t_ellipsoids=fused_base_t_ellipsoid_s,
-        primal_quadratics=fused_primal_quaddratic_s,
+        base_t_ellipsoid_s=fused_base_t_ellipsoid_s,
+        primal_quadratic_s=fused_primal_quaddratic_s,
         bg_point_cloud=xyz_images.reshape(-1,3),
         bg_point_cloud_colors=bgr_images.reshape(-1,3)
     )
@@ -241,27 +241,33 @@ def images_to_primal_quadratics(
     fused_primal_quaddratic_s = np.array(fused_primal_quaddratic_s)
     
     visualize_primal_quadratics(
-        base_t_ellipsoids=fused_base_t_ellipsoid_s,
-        primal_quadratics=fused_primal_quaddratic_s,
+        base_t_ellipsoid_s=fused_base_t_ellipsoid_s,
+        primal_quadratic_s=fused_primal_quaddratic_s,
         bg_point_cloud=xyz_images.reshape(-1,3),
         bg_point_cloud_colors=bgr_images.reshape(-1,3)
     )
 
     return fused_base_t_ellipsoid_s, fused_primal_quaddratic_s
 
-def image_to_primal_conics(bgr_image:np.ndarray, sam3_prompt:Sam3Prompt):
+def image_to_primal_conics(bgr_image:np.ndarray, sam3_prompt:Sam3Prompt) -> np.ndarray:
+    """
+    Creates a Nx3x3 batch of primal conics from the image by segmenting it using sam3.
+    :param bgr_image: the bgr image
+    :param sam3_prompt: the sam3 prompt config
+    :return: the primal conics (Nx3x3)
+    """
+    assert assert_mxnx3_np_uint8_image(bgr_image)
+
     object_masks = get_object_masks(bgr_image, sam3_prompt)
-    base_t_ellipsoid_s = []
     primal_conic_s = []
 
     for object_mask in object_masks:
         rows, cols = np.where(object_mask)
         pc_2d = np.column_stack((cols, rows))
-        base_t_ellipsoid, primal_conic = fit_primal_conic_to_2d_point_cloud(pc_2d)
-        base_t_ellipsoid_s.append(base_t_ellipsoid)
-        primal_conic_s.append(primal_conic)
+        primal_conic_s.append(fit_primal_conic_to_2d_point_cloud(pc_2d))
 
-    return base_t_ellipsoid_s, primal_conic_s
+    return np.array(primal_conic_s)
+
 
 def match_gaussians(sigma_mu1_s, sigma_mu2_s):
     """
@@ -271,12 +277,13 @@ def match_gaussians(sigma_mu1_s, sigma_mu2_s):
     assert all([assert_gaussian_ellipse_mat(sigma_mu) for sigma_mu in sigma_mu1_s])
     assert all([assert_gaussian_ellipse_mat(sigma_mu) for sigma_mu in sigma_mu2_s])
 
-    adjecency_mat = np.full((max(n,m), max(n,m)), 1)
+    adjecency_mat = np.full((max(n,m), max(n,m)), 1e12)
 
     for i1, sigma_mu1 in enumerate(sigma_mu1_s):
         for i2, sigma_mu2 in enumerate(sigma_mu2_s):
             adjecency_mat[i1, i2] = wasserstein_distance_sq(sigma_mu1, sigma_mu2)
-    
+
+    # TODO use batch
 
     row_ind, col_ind = linear_sum_assignment(adjecency_mat)
 
@@ -320,16 +327,21 @@ class EllipsoidPredictor(PosePredictor):
         #TODO wont notice if it fails
         """
         time_tracker.reset_elapsed_time()
-        proj_primal_conics = [
-            project_primal_quadratic_to_primal_conical(pq,cam2_t_base_init,self.cam2_intrinsic_mtx) 
-            for pq in self.quadratic_ellipsoid_s
-        ]
-        proj_gaussian_ellipses = np.array([primal_conic_to_gaussian_ellipse(pc) for pc in proj_primal_conics])
+        proj_primal_conics = project_primal_quadratics_to_primal_conicals(
+            primal_quadratics= self.base_ellipsoid_s,
+            cam_t_base=cam2_t_base_init,
+            intrinsic_mtx=self.cam2_intrinsic_mtx,
+        )
+        proj_gauss_elli_mu, proj_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(proj_primal_conics)
+        proj_gaussian_ellipses = gauss_ellipse_batch_tuple_to_mat_batch(proj_gauss_elli_mu, proj_gauss_elli_sigmas)
 
-        base_t_obs_ellipses, observed_primal_conics = image_to_primal_conics(bgr_image=cam2_bgr_image, sam3_prompt=Sam3Prompt())
-        observed_gaussian_ellipses = np.array([primal_conic_to_gaussian_ellipse(pc) for pc in observed_primal_conics])
+        _ , observed_primal_conics = image_to_primal_conics(bgr_image=cam2_bgr_image, sam3_prompt=Sam3Prompt())
+
+        obs_gauss_elli_mu, obs_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(observed_primal_conics)
+        obs_gauss_ellipses = gauss_ellipse_batch_tuple_to_mat_batch(obs_gauss_elli_mu, obs_gauss_elli_sigmas)
+
         time_tracker.add_time_stamp("Projecting for matching")
-        proj_match_idxs, obs_match_idxs = match_gaussians(proj_gaussian_ellipses, observed_gaussian_ellipses)
+        proj_match_idxs, obs_match_idxs = match_gaussians(proj_gaussian_ellipses, obs_gauss_ellipses)
         time_tracker.add_time_stamp("Matching")
 
         cam2_t_base_opt = optimize_pne(

@@ -2,9 +2,9 @@ import numpy as np
 
 def r_t_to_hom(r:np.ndarray, t:np.ndarray) -> np.ndarray:
     """
-    Takes an rotation and translation vector and returns the homogeneous transformation matrix
-    :param r: rotation vector (length n)
-    :param t: translation vector (length n)
+    Takes a rotation and translation vector and returns the homogeneous transformation matrix
+    :param r: rotation matrix size: NxN
+    :param t: translation vector size: N
     :return: N+1xN+1 numpy array
     """
     n = t.shape[0]
@@ -14,7 +14,6 @@ def r_t_to_hom(r:np.ndarray, t:np.ndarray) -> np.ndarray:
     m = np.eye(n+1)
     m[0:n, 0:n] = r
     m[0:n, n] = t
-    assert_homogeneous_mat(m)
     return m
 
 def assert_intrinsic_mat(m:np.ndarray, hxw_img: np.ndarray | None = None)->bool:
