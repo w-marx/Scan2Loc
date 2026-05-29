@@ -420,7 +420,7 @@ if __name__ == "__main__":
     robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_r")
     headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_h")
     predictor = EllipsoidPredictor(
-        cam2_intrinsic_mtx=headset_data.headset_intrinsics, 
+        cam2_intrinsic_mtx=headset_data.intrinsic_cam_mtx,
         cam1_bgr_images=robot_data.robot_bgr_images,
         cam1_xyz_images=robot_data.robot_xyz_images,
         extract_and_match=ExtractAndLightGlue(),
@@ -430,7 +430,7 @@ if __name__ == "__main__":
     tt2 = TimeTracker()
     grader = OnePredictorRecordingGrader(
         predictor=predictor, 
-        headset_rec=headset_data,
+        headset_data=headset_data,
         prediction_time_tracker=tt1,
         subcomponent_time_tracker=tt2
     )

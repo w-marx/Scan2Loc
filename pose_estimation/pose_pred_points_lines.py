@@ -384,7 +384,7 @@ class LinePredictor(PosePredictor):
 if __name__ == "__main__":
     data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data")
     predictor = LinePredictor(
-        data.headset_intrinsics, 
+        data.intrinsic_cam_mtx,
         extract_and_match=ExtractAndLightGlue(),
     #    extract_and_match=ExtractAndMatchLoMa(),    
         lsd_cleanup_passes_configs=[line_merging_2d_config_for_short_lines, line_merging_2d_config_for_longer_lines],

@@ -3,41 +3,38 @@ from shared_utilities import *
 import json, os, shutil
 import open3d as o3d
 import cv2
-
-import cv2
 from gathered_robot_data import GatheredRobotData
 
 class HeadsetData:
     def __init__(self,
-                name:str,
-                headset_bgr_image_s: np.ndarray,
-                headset_intrinsics: np.ndarray,
-                robot_base_t_headset_s: list[np.ndarray | None]
-                ) -> None:
+                 name:str,
+                 bgr_image_s: np.ndarray,
+                 intrinsic_cam_mtx: np.ndarray,
+                 robot_base_t_headset_s: list[np.ndarray | None]
+                 ):
         """
         :param name: the name of the dataset (will be stored under it)
-        :param headset_bgr_image_s: The headset BGR images as a NxHxWx3-uint8 numpy array
-        :param headset_intrinsics: Intrinsics BGR camera matrix of the headset (3x3 numpy array)
+        :param bgr_image_s: The headset BGR images as a NxHxWx3-uint8 numpy array
+        :param intrinsic_cam_mtx: Intrinsics BGR camera matrix of the headset (3x3 numpy array)
+        :param robot_base_t_headset_s: a list of 4x4 robot_base T_headsets hom. transformations or None
         """
-        self._n_frames = headset_bgr_image_s.shape[0]
-
-        assert self._n_frames > 0, f"Number of images must be greater then 0: {headset_bgr_image_s}"
-
+        self._n_frames = bgr_image_s.shape[0]
+        assert self._n_frames > 0, f"Number of images must be greater then 0: {bgr_image_s}"
 
         self._name = name
 
-        assert assert_mxnx3_np_uint8_image_batch(headset_bgr_image_s)
-        self._headset_bgr_image_s = headset_bgr_image_s
+        assert assert_mxnx3_np_uint8_image_batch(bgr_image_s)
+        self._bgr_image_s = bgr_image_s
 
-        assert assert_intrinsic_mat(headset_intrinsics, headset_bgr_image_s[0])
-        self._headset_intrinsics = headset_intrinsics
+        assert assert_intrinsic_mat(intrinsic_cam_mtx, bgr_image_s[0])
+        self._intrinsic_cam_mtx = intrinsic_cam_mtx
 
         assert len(robot_base_t_headset_s) == self._n_frames, f"Label/image dimension mismatch: {self._n_frames} != {len(robot_base_t_headset_s)}"
         assert all(m is None or assert_homogeneous_mat(m, size=4) for m in robot_base_t_headset_s)
         self._robot_base_t_headset_s = robot_base_t_headset_s
     
     @classmethod
-    def from_folder(cls, load_folder:str):
+    def from_folder(cls, load_folder:str)->'HeadsetData':
         """
         Loads from a folder of the structure:
         `load_folder`
@@ -54,7 +51,6 @@ class HeadsetData:
         headset_folders = [f"{load_folder}/headset/{folder}" for folder in headset_folders]
         headset_bgr_image_s = np.array([cv2.imread(f"{folder}/rgb.png") for folder in headset_folders])
 
-
         robot_base_t_headset_s = []
         for folder in headset_folders:
             label_path = f"{folder}/label.json"
@@ -65,15 +61,14 @@ class HeadsetData:
 
         instance = cls(
             name = os.path.basename(load_folder),
-            headset_intrinsics=np.array(headset_cam_cal["intrinsic_camera_matrix"]),
-            headset_bgr_image_s = headset_bgr_image_s,
+            intrinsic_cam_mtx=np.array(headset_cam_cal["intrinsic_camera_matrix"]),
+            bgr_image_s= headset_bgr_image_s,
             robot_base_t_headset_s = robot_base_t_headset_s
         )
         return instance
     
     @classmethod
-    def from_vrs_file(cls, file_location:str):
-        from projectaria_tools.core import data_provider, calibration
+    def from_vrs_file(cls, file_location:str)->'HeadsetData':
         """
         This function takes a .vrs file and creates a HeadsetData instance
         It undistorts the images by taking the camera-rgb - fisheye camera and transforming it to a pinhole camera
@@ -83,6 +78,7 @@ class HeadsetData:
         :param file_location: The location of the .vrs file including the filename
         :return: an instance of Headset Data
         """
+        from projectaria_tools.core import data_provider, calibration
         if not os.path.isfile(file_location):
             raise FileNotFoundError(f"No .vrs file found at {file_location}")
 
@@ -106,8 +102,8 @@ class HeadsetData:
 
         return cls(
             name = os.path.splitext(os.path.basename(file_location))[0],
-            headset_bgr_image_s = np.array(bgr_hxw_imgs),
-            headset_intrinsics = mtx,
+            bgr_image_s= np.array(bgr_hxw_imgs),
+            intrinsic_cam_mtx= mtx,
             robot_base_t_headset_s = [None] * len(bgr_hxw_imgs)
         )
     
@@ -127,14 +123,14 @@ class HeadsetData:
         os.makedirs(name=location, exist_ok=True)
 
         with open(f"{location}/headset_cam_calibration.json", 'w') as f:
-                json.dump({'intrinsic_camera_matrix': self.headset_intrinsics.tolist()}, f, indent=4)
+                json.dump({'intrinsic_camera_matrix': self.intrinsic_cam_mtx.tolist()}, f, indent=4)
 
         padding = len(str(self._n_frames-1))
         for i in range(self._n_frames):
             headset_folder = f"{location}/headset/{str(i).zfill(padding)}"
             os.makedirs(headset_folder, exist_ok=True)
 
-            cv2.imwrite(f"{headset_folder}/rgb.png", self.headset_bgr_image_s[i])
+            cv2.imwrite(f"{headset_folder}/rgb.png", self.bgr_image_s[i])
 
             if self.robot_base_t_headset_s[i] is not None:
                 with open(f"{headset_folder}/label.json", 'w') as f:
@@ -143,6 +139,8 @@ class HeadsetData:
     def visualize_3d_data(self, visualize:bool = True):
         """
         Visualizes the headset trajectory using open3d
+        :param visualize: If true, visualizes the camera poses
+        :return: The list of open3d geometries that were visualized
         """
         base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
 
@@ -154,8 +152,8 @@ class HeadsetData:
                 to_vis.append(cam_frame)
                 to_vis.append(create_3d_camera(
                     base_t_camera=b_t_c,
-                    intrinsics=self.headset_intrinsics,
-                    hxw_img=self.headset_bgr_image_s[0],
+                    intrinsics=self.intrinsic_cam_mtx,
+                    hxw_img=self.bgr_image_s[0],
                     scale=0.1
                 ))
         if visualize:
@@ -168,28 +166,42 @@ class HeadsetData:
         return self._name
 
     @property
-    def headset_bgr_image_s(self)->np.ndarray:
-        return self._headset_bgr_image_s
+    def bgr_image_s(self)->np.ndarray:
+        return self._bgr_image_s
 
     @property
-    def headset_intrinsics(self)->np.ndarray:
-        return self._headset_intrinsics
+    def intrinsic_cam_mtx(self)->np.ndarray:
+        return self._intrinsic_cam_mtx
     
     @property
     def robot_base_t_headset_s(self)->list[np.ndarray | None]:
         return self._robot_base_t_headset_s
 
+    @property
+    def labeled_frames_indices(self)->list[int]:
+        return [i for i, m in enumerate(self.robot_base_t_headset_s) if m is not None]
+
+    @property
+    def n_frames(self):
+        return self._n_frames
+
 
 def create_robot_bound_headset_data(
-    headset_data:HeadsetData,
-    robot_data:GatheredRobotData,
+        headset_data:HeadsetData,
+        robot_data:GatheredRobotData,
     )->HeadsetData | None:
+    """
+    Uses the robot_data to add labels to an HeadsetData object
+    :param headset_data: A HeadsetData instance that will be the blueprint for the new object
+    :param robot_data: A GatheredRobotData instance, that provides the Robot->Marker transformations and marker detector
+    :return: An HeadsetData object (can be the same as the input object)
+    """
 
     robot_base_t_marker_s = [m for m in robot_data.base_t_marker_s if m is not None]
 
     headset_t_markers = robot_data.marker_detector.get_camera_t_marker(
-        images=list(headset_data.headset_bgr_image_s),
-        camera_matrix=headset_data.headset_intrinsics,
+        images=list(headset_data.bgr_image_s),
+        camera_matrix=headset_data.intrinsic_cam_mtx,
     )
     headset_t_markers_no_none_idx = [i for i, m in enumerate(headset_t_markers) if m is not None]
 
@@ -198,17 +210,16 @@ def create_robot_bound_headset_data(
     
     robot_base_t_marker = compute_pose_pseudo_median(robot_base_t_marker_s)
 
-
     base_t_headsets = [
         ((robot_base_t_marker @ np.linalg.inv(h_t_m)) if h_t_m is not None else None)
         for h_t_m in headset_t_markers
     ]
 
-    masked_headset_images = robot_data.marker_detector.remove_markers(list(headset_data.headset_bgr_image_s))
+    masked_headset_images = robot_data.marker_detector.remove_markers(list(headset_data.bgr_image_s))
 
     return HeadsetData(
         name=headset_data.name,
-        headset_bgr_image_s=np.array(masked_headset_images),
-        headset_intrinsics=headset_data.headset_intrinsics,
+        bgr_image_s=np.array(masked_headset_images),
+        intrinsic_cam_mtx=headset_data.intrinsic_cam_mtx,
         robot_base_t_headset_s=base_t_headsets
     )
