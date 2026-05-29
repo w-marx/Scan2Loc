@@ -211,6 +211,13 @@ class GatheredRobotData:
     @property
     def camera_t_marker_s(self) -> list[None | np.ndarray]:
         return self._camera_t_marker_s
+    
+    @property
+    def base_t_marker_s(self) -> list[None | np.ndarray]:
+        return [
+            (None if c_t_m is None else b_t_c @ c_t_m) 
+            for b_t_c,c_t_m in zip(self.base_t_camera_s, self._camera_t_marker_s)
+        ]
 
     @property
     def marker_detector(self) -> None | ArucoCharucoDetector:

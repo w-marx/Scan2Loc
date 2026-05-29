@@ -1,50 +1,33 @@
 import cv2
 import numpy as np
 import os, shutil, json
-from shared_utilities import assert_intrinsic_mat, assert_homogeneous_mat, create_3d_camera
+import open3d as o3d
+from shared_utilities import assert_intrinsic_mat, assert_homogeneous_mat, create_3d_camera, assert_mxnx3_np_uint8_image_batch
 
 
-class PredictionData:
+class RobotEnvironment:
     def __init__(
             self,
             name:str,
             robot_bgr_images:np.ndarray,
             robot_bgr_intrinsics:np.ndarray,
-            headset_bgr_image: np.ndarray,
-            headset_intrinsics: np.ndarray,
             robot_xyz_images:np.ndarray,
             robot_base_t_robot_camera_s:np.ndarray,
-            robot_base_t_headset:np.ndarray | None,
     ):
         """
         :param name: the name of the dataset (will be stored under it)
         :param robot_bgr_images: BGR images of the robot as a NxHxWx3-uint8 numpy array
         :param robot_bgr_intrinsics: Intrinsics BGR camera matrix of the robot (3x3 numpy array)
-        :param headset_bgr_image: One headset BGR image as a HxWx3-uint8 numpy array
-        :param headset_intrinsics: Intrinsics BGR camera matrix of the headset (3x3 numpy array)
         :param robot_xyz_images: XYZ images from the pov of the robot as a NxHxWx3-float numpy array
         :param robot_base_t_robot_camera_s: The homogeneous robot_base->robot_camera transformation matrix as a Nx4x4-float numpy array
-        :param robot_base_t_headset: The homogeneous robot_base->robot_headset transformation matrix as a 4x4 matrix or None
         """
         self._name = name
 
-        assert robot_bgr_images.ndim == 4, f"Wrong shape of BGR images {robot_bgr_images.shape}"
-        assert robot_bgr_images.shape[0] > 0, f"No BGR images {robot_bgr_images.shape}"
-        assert robot_bgr_images.dtype == np.uint8, f"Wrong dtype for bgr images {robot_bgr_images.dtype}"
+        assert assert_mxnx3_np_uint8_image_batch(robot_bgr_images)
         self._robot_bgr_images = robot_bgr_images
 
         assert assert_intrinsic_mat(robot_bgr_intrinsics, robot_bgr_images[0])
         self._robot_bgr_intrinsics = robot_bgr_intrinsics
-
-
-        assert headset_bgr_image.ndim == 3, f"Wrong shape of Headset image {headset_bgr_image.shape}"
-        assert headset_bgr_image.shape[0] > 0 and headset_bgr_image.shape[1] > 0 and  headset_bgr_image.shape[2] == 3, f"No BGR images {robot_bgr_images.shape}"
-        assert headset_bgr_image.dtype == np.uint8, f"Wrong dtype for bgr images {headset_bgr_image.dtype}"
-        self._headset_bgr_image = headset_bgr_image
-
-        assert assert_intrinsic_mat(headset_intrinsics, headset_bgr_image)
-        self._headset_intrinsics = headset_intrinsics
-
 
         assert robot_xyz_images.shape == robot_bgr_images.shape
         assert np.issubdtype(robot_xyz_images.dtype, np.floating)
@@ -54,30 +37,22 @@ class PredictionData:
         assert all([assert_homogeneous_mat(m) for m in robot_base_t_robot_camera_s])
         self._robot_base_t_robot_camera_s = robot_base_t_robot_camera_s
 
-        assert robot_base_t_headset is None or assert_homogeneous_mat(robot_base_t_headset)
-        self._robot_base_t_headset = robot_base_t_headset
-
 
     @classmethod
     def from_folder(cls, load_folder:str):
         """
         Loads from a folder of the structure:
         `output_folder`
-        ├── headset.png an image with possible aruco markers digitally removed
-        ├── headset_cam_calibration.json
         ├── robot_cam_calibration.json
         ├── robot
         │   └── 00 to number of datapoints
         │       ├── A xyz.npy file with the world points associated to each pixel
         │       ├── A robot_base_t_robot_camera.json with the 4x4 transformation matrix between robot base and camera
         │       └── A rgb.png image with possible aruco markers digitally removed
-        ├── A label.json file with the robot base -> headset pose truth (might be missing)
         └── point_cloud.ply
         """
 
         robot_cam_cal = json.load(open(f"{load_folder}/robot_cam_calibration.json"))
-        headset_cam_cal = json.load(open(f"{load_folder}/headset_cam_calibration.json"))
-        robot_base_t_headset = np.array(json.load(open(f"{load_folder}/label.json"))) if os.path.exists(f"{load_folder}/label.json") else None
 
         robot_folders = sorted([f"{folder}" for folder in os.listdir(f"{load_folder}/robot")])
         robot_folders = [f"{load_folder}/robot/{folder}" for folder in robot_folders]
@@ -90,11 +65,8 @@ class PredictionData:
             name = os.path.basename(load_folder),
             robot_bgr_images = robot_bgr_images,
             robot_bgr_intrinsics = np.array(robot_cam_cal["intrinsic_camera_matrix"]),
-            headset_bgr_image=cv2.imread(f"{load_folder}/headset.png"),
-            headset_intrinsics=np.array(headset_cam_cal["intrinsic_camera_matrix"]),
             robot_xyz_images=robot_xyz_images,
             robot_base_t_robot_camera_s=robot_base_t_robot_cam_s,
-            robot_base_t_headset= robot_base_t_headset
         )
         return instance
 
@@ -110,19 +82,10 @@ class PredictionData:
         if os.path.exists(location):
             print(f"Output folder already exists, deleting it ...")
             shutil.rmtree(location)
-
         os.makedirs(name=location, exist_ok=True)
-        cv2.imwrite(f"{location}/headset.png", self.headset_bgr_image)
-
-
-        with open(f"{location}/headset_cam_calibration.json", 'w') as f:
-                json.dump({'intrinsic_camera_matrix': self.headset_intrinsics.tolist()}, f, indent=4)
+        
         with open(f"{location}/robot_cam_calibration.json", 'w') as f:
             json.dump({'intrinsic_camera_matrix': self.robot_bgr_intrinsics.tolist()}, f, indent=4)
-
-        if self.robot_base_t_headset is not None:
-            with open(f"{location}/label.json", 'w') as f:
-                json.dump(self.robot_base_t_headset.tolist(), f, indent=4)
 
         padding = len(str(self.robot_bgr_images.shape[0]-1))
         for i in range(self.robot_bgr_images.shape[0]):
@@ -135,10 +98,13 @@ class PredictionData:
             with open(f"{robot_folder}/robot_base_t_robot_camera.json", 'w') as f:
                 json.dump(self.robot_base_t_robot_camera_s[i].tolist(), f, indent=4)
 
-    def visualize_3d_data(self):
-        import open3d as o3d
+    def visualize_3d_data(self, visualize:bool = True):
+        """
+        Visualizes the robot environment using open3d
+        """
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(self.robot_xyz_images.reshape(-1,3))
+        pcd.colors = o3d.utility.Vector3dVector(self.robot_bgr_images.reshape(-1,3).astype(np.float32)[:, ::-1]/255)
 
         base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
 
@@ -155,19 +121,9 @@ class PredictionData:
             ))
 
         to_vis = [pcd, base_frame]+robot_camera_s
-
-        if self.robot_base_t_headset is not None:
-            headset_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
-            to_vis.append(create_3d_camera(
-                base_t_camera=self.robot_base_t_headset,
-                intrinsics=self.headset_intrinsics,
-                hxw_img=self.headset_bgr_image,
-                scale=0.2
-            ))
-            headset_frame.transform(self.robot_base_t_headset)
-            to_vis.append(headset_frame)
-
-        o3d.visualization.draw_geometries(to_vis, f"Processed Data {self.name} visualization")
+        if visualize:
+            o3d.visualization.draw_geometries(to_vis, f"Robot environment: {self.name} visualization")
+        return to_vis
 
     @property
     def name(self)->str:
@@ -182,21 +138,9 @@ class PredictionData:
         return self._robot_bgr_intrinsics
 
     @property
-    def headset_bgr_image(self)->np.ndarray:
-        return self._headset_bgr_image
-
-    @property
-    def headset_intrinsics(self)->np.ndarray:
-        return self._headset_intrinsics
-
-    @property
     def robot_xyz_images(self)->np.ndarray:
         return self._robot_xyz_images
 
     @property
     def robot_base_t_robot_camera_s(self)->np.ndarray:
         return self._robot_base_t_robot_camera_s
-
-    @property
-    def robot_base_t_headset(self)->np.ndarray | None:
-        return self._robot_base_t_headset

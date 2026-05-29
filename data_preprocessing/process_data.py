@@ -3,52 +3,36 @@ import sys
 import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from preprocessing_2_prediction import *
-from gathering_2_preprocessing import GatheredRobotData, compute_pose_pseudo_median
+from robot_environment import *
+from gathered_robot_data import GatheredRobotData
+from headset_data import *
 
 from image_to_pointcloud import *
-from load_and_save import *
+#from data_preprocessing.headset_data_from_vrs import *
 import argparse
 
 
 
-def process_data(
+def process_robot_data(
         robot_data:GatheredRobotData,
-        headset_data:HeadsetData,
         number_of_sampled_datapoints: int = 10,
         only_sample_robot_datapoints_w_marker_estimates: bool = False,
         markers_use_advanced_removal: bool = False,
-        est3d_use_map_anything: bool = True,
-        est3d_xyz_img_mapanything_crop_square:bool = False,
-        est3d_xyz_img_camera_alginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama",
-        est3d_xyz_img_confidence_threshold: int = 10,
+        est3d_xyz_image_gen_config:XYZImageGenerationConfig | None = XYZImageGenerationConfig(),
         est3d_xyz_icp_config:ICPAlignmentConfig | None = ICPAlignmentConfig(),
-        est3d_use_depth_images: bool = True,
-        est3d_debug_point_cloud_visualize_result: bool = False,
-    )->PredictionData:
+    )->RobotEnvironment:
     """
     :param robot_data: GatheredRobotData instance
-    :param headset_data: HeadsetData instance
     :param number_of_sampled_datapoints: The number of datapoints in the resulting prediction data
     :param only_sample_robot_datapoints_w_marker_estimates: Will sample only images with markers -> might lead to less then `number_of_sampled_datapoints` datapoints.
     :param markers_use_advanced_removal: If yes will use an ai-image inpainting tool and not just replace the marker with a black blob
-    :param est3d_use_map_anything: If yes map-anything will be used for xyz-image generation (recommended method), if not crude Depth-based methods
-    :param est3d_foreground_seg_config: If sam3 should be used to have only foreground objects in the pointcloud
-    :param est3d_xyz_img_mapanything_crop_square: Wheather the color-images should be cropped square before being passed into map-anything
-    :param est3d_xyz_img_camera_alginment_method: The method to match the map-anything camera poses to the actual camera poses and transform the points accordingly
-    :param est3d_xyz_img_confidence_threshold: The confidence threshhold for points for map-anything 
+    :param est3d_xyz_image_gen_config: If not None will be used for xyz-image generation via mapanything (recommended method), if not crude Depth-based methods
     :param est3d_xyz_icp_config: Do icp alignment of the xyz-images using the config if not None
-    :param est3d_use_depth_images: If yes passes the depth images into mapanything (they should then have the same intrinsic mat as the color images)
-    :param est3d_debug_visualize_foreground_masks: Wheather or not to show the segmentation by sam3
-    :return: PredictionData instance
+    :return: RobotEnvironment instance
     """
 
     # Check that the parameters are valid
     assert number_of_sampled_datapoints > 0, "Non positive number of datapoints cant be sampled"
-    assert 0 <= est3d_xyz_img_confidence_threshold <= 100, "est3d_xyz_img_confidence_threshold out of range: 0-100"
-
-    headset_images = headset_data.bgr_image_s
-    headset_cam_mtx = headset_data.intrinsic_camera_matrix
 
     robot_bgr_images = robot_data.bgr_images
     robot_depth_images = robot_data.depth_images
@@ -57,23 +41,6 @@ def process_data(
 
     if robot_data.marker_detector is not None:
         robot_data.marker_detector.set_new_masker("LamaMasker" if markers_use_advanced_removal else "ImageMasker")
-
-    # Marker handling
-    headset_image = headset_images[int(len(headset_images)/2)]
-    headset_t_marker = None
-    # select better headset image
-    if robot_data.marker_detector is not None:
-        headset_t_markers = robot_data.marker_detector.get_camera_t_marker(
-            images=list(headset_images),
-            camera_matrix=headset_cam_mtx,
-        )
-        headset_t_markers_idx_none_filtered = [idx for idx, h_t_m in enumerate(headset_t_markers) if h_t_m is not None]
-        if len(headset_t_markers_idx_none_filtered) > 0:
-            headset_w_marker_img_idx = min(headset_t_markers_idx_none_filtered, key = lambda x: np.abs(x-len(headset_images)/2))
-            headset_t_marker = headset_t_markers[headset_w_marker_img_idx]
-            headset_image = headset_images[headset_w_marker_img_idx]
-
-        headset_image = robot_data.marker_detector.remove_markers([headset_image])[0]
 
 
     # Choose the robot images smartly
@@ -101,55 +68,47 @@ def process_data(
     print("Generating point cloud...")
     robot_base_xyz_imgs = None
 
-    xyz_image_aligner = (lambda xyz_imgs: np.array([
-        xyz_img.reshape(xyz_imgs.shape[1:])
-        for xyz_img in 
-        align_point_clouds_icp(
-            point_clouds = [xyz_img.reshape(-1,3) for xyz_img in xyz_imgs],
-            config = est3d_xyz_icp_config,
-            visualize=False
-        )
-    ])) if est3d_xyz_icp_config is not None else None
-
-    robot_cam_intrinsic_mtx = robot_data.cam_intrinsic_mtx
-    if est3d_use_map_anything:
-        robot_bgr_images, robot_base_xyz_imgs, robot_cam_intrinsic_mtx = create_point_cloud(
+    if est3d_xyz_image_gen_config is not None:
+        robot_bgr_images, robot_base_xyz_imgs, robot_cam_intrinsic_mtx = generate_xyz_images(
             bgr_images=np.array(robot_bgr_images),
             base_t_cam_s=np.array(robot_base_t_robot_camera_s),
-            depth_images=np.array(robot_depth_images) if est3d_use_depth_images else None,
-            camera_intrinsics=robot_cam_intrinsic_mtx,
-            confidence_threshold_percent=est3d_xyz_img_confidence_threshold,
-            xyz_image_aligner=xyz_image_aligner,
-            visualize_point_cloud=est3d_debug_point_cloud_visualize_result,
-            alginment_method=est3d_xyz_img_camera_alginment_method,
-            crop_square=est3d_xyz_img_mapanything_crop_square
+            depth_images=np.array(robot_depth_images),
+            camera_intrinsics=robot_data.cam_intrinsic_mtx,
+            config=est3d_xyz_image_gen_config
         )
     else:
         robot_base_xyz_imgs = create_point_cloud_depth_reproject(
             depth_images=np.array(robot_depth_images),
-            depth_cam_mtx=robot_cam_intrinsic_mtx,
+            depth_cam_mtx=robot_data.cam_intrinsic_mtx,
             base_t_camera_s=np.array(robot_base_t_robot_camera_s),
             distance_cutoff=1.0,
             visualize_point_cloud=True
         )
+    
+    if est3d_xyz_icp_config is not None:
+        robot_base_xyz_imgs = [
+            xyz_img.reshape(robot_base_xyz_imgs.shape[1:]) for xyz_img in 
+            align_point_clouds_icp(
+                point_clouds = [xyz_img.reshape(-1,3) for xyz_img in robot_base_xyz_imgs],
+                config = est3d_xyz_icp_config,
+            )
+        ]
 
-    print("Generating the label...")
-    robot_base_t_headsets = [None] * len(robot_bgr_images)
-    if headset_t_marker is not None:
-        for idx, (robot_base_t_camera, robot_camera_t_marker) in enumerate(zip(robot_base_t_robot_camera_s, robot_camera_t_marker_s)):
-            if robot_camera_t_marker is not None:
-                robot_base_t_headsets[idx] = robot_base_t_camera @ robot_camera_t_marker @ np.linalg.inv(headset_t_marker)
-    robot_base_t_headset = compute_pose_pseudo_median([m for m in robot_base_t_headsets if m is not None])
-
-    return PredictionData(
+    return RobotEnvironment(
         name = "",
         robot_bgr_images=np.array(robot_bgr_images),
         robot_bgr_intrinsics=robot_cam_intrinsic_mtx,
-        headset_bgr_image=headset_image,
-        headset_intrinsics=headset_cam_mtx,
         robot_xyz_images=np.array(robot_base_xyz_imgs),
         robot_base_t_robot_camera_s=np.array(robot_base_t_robot_camera_s),
-        robot_base_t_headset=robot_base_t_headset
+    )
+
+
+def visualize_robot_camera_environment_combo(robot_env:RobotEnvironment, headset_rec:HeadsetData):
+    to_vis_robot = robot_env.visualize_3d_data(visualize=False)
+    to_vis_headset = headset_rec.visualize_3d_data(visualize=False)
+    o3d.visualization.draw_geometries(
+        to_vis_robot+to_vis_headset, 
+        f"Robot: {robot_env.name} x Headset: {headset_rec.name} visualization"
     )
 
 
@@ -158,37 +117,39 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--robot-input-folder", type=str, default="./in_folder", help="Robot input Folder Location")
     parser.add_argument("--headset-vrs-file", type=str, default="", help=".vrs file location")
-    parser.add_argument("--output-folder", type=str, default="./out_data", help="Output Folder Location")
+    parser.add_argument("--robot-output-folder", type=str, default="./out_data_r", help="Output Folder Location for the Robot environment")
+    parser.add_argument("--headset-output-folder", type=str, default="./out_data_h", help="Output Folder Location for the headset recording")
+
+
     parser.add_argument("--number-of-sampled-datapoints", type=int, default=9999, help="Max number of input points to be sampled")
     parser.add_argument("--dont-limit-to-only-aruco", action="store_false", dest="sample_only_w_aruco")
-    parser.add_argument("--dont-use-map-anything", action="store_false", dest="use_map_anything")
     parser.add_argument("--dont-use-ai-marker-removal", action="store_false", dest="use_advanced_marker_removal")
-    parser.add_argument("--dont-crop-to-square", action="store_false", dest="crop_square")
-    parser.add_argument("--camera-alignment-method", type=str, default="kabsch-umeyama", help="What algorithm to use to align mapanything and real world cameras: none, simple, kabsch-umeyama")
-    parser.add_argument("--mapanything-point-conf-threshhold", type=int, default=10)
-    parser.add_argument("--dont-use-depth-images", action="store_false", dest="use_depth_images")
 
     args = parser.parse_args()
 
     start_time = time.perf_counter()
     
     robot_data = GatheredRobotData.from_folder(args.robot_input_folder)
-    headset_data = HeadsetData.from_vrs_file(args.headset_vrs_file)
-
-    processed_data = process_data(
+    processed_robot_data = process_robot_data(
         robot_data = robot_data,
-        headset_data=headset_data,
         number_of_sampled_datapoints=args.number_of_sampled_datapoints,
-        only_sample_robot_datapoints_w_marker_estimates=args.sample_only_w_aruco,
-        est3d_use_map_anything=args.use_map_anything,
-        est3d_xyz_img_mapanything_crop_square=args.crop_square,
-        est3d_xyz_img_camera_alginment_method= args.camera_alignment_method,
-        est3d_xyz_img_confidence_threshold=args.mapanything_point_conf_threshhold,
-        est3d_use_depth_images = args.use_depth_images,
-        markers_use_advanced_removal = args.use_advanced_marker_removal,
-        est3d_debug_point_cloud_visualize_result = False
+        only_sample_robot_datapoints_w_marker_estimates = args.sample_only_w_aruco,
+        markers_use_advanced_removal=args.use_advanced_marker_removal,
+        est3d_xyz_image_gen_config = XYZImageGenerationConfig(), #TODO add args
+        est3d_xyz_icp_config=None#ICPAlignmentConfigs["downsample_5mm"]
+
     )
-    processed_data.save(os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder))
-    pd = PredictionData.from_folder(args.output_folder)
-    pd.visualize_3d_data()
+    processed_robot_data.save(os.path.dirname(args.robot_output_folder), new_name=os.path.basename(args.robot_output_folder))
+
+
+    headset_data = HeadsetData.from_vrs_file(args.headset_vrs_file)
+    headset_data = create_robot_bound_headset_data(headset_data, robot_data)
+    headset_data.save(os.path.dirname(args.headset_output_folder), new_name=os.path.basename(args.headset_output_folder))
+
+
+
+    rob_load = RobotEnvironment.from_folder(args.robot_output_folder)
+    head_load = HeadsetData.from_folder(args.headset_output_folder)
+
+    visualize_robot_camera_environment_combo(robot_env=rob_load, headset_rec=head_load)
     print(f"Data processing took {(time.perf_counter() - start_time):.6f} seconds")

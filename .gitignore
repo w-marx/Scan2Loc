@@ -140,6 +140,8 @@ data_preprocessing/vggt/
 out_data/
 in_data/
 in_data_vrs/
+data_preprocessing/out_data_h/
+data_preprocessing/out_data_r/
 LightGlue/
 checkerboard_radon.webp
 image_masked.png

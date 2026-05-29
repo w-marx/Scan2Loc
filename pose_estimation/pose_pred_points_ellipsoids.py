@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from union_find import UnionFind
 from scipy.optimize import linear_sum_assignment
 from pne_optimizer import optimize_pne, PnEOptimizerConfig
+from sheduler import *
 
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -303,6 +304,8 @@ class EllipsoidPredictor(PosePredictor):
             extract_and_match:ExtractAndMatch = ExtractAndMatchLoMa(),
             pne_config:PnEOptimizerConfig = PnEOptimizerConfig(),
             ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise,
+            sheduler:Sheduler = EMASheduler,
+            number_tries_b4_giving_up:int = 1,
         ):
         super().__init__()
         b_t_e_s, prim_quad_s = images_to_primal_quadratics(
@@ -311,27 +314,50 @@ class EllipsoidPredictor(PosePredictor):
             prompt=Sam3Prompt(),
             min_cluster_size=2
         )
+        self.cam1_bgr_images = cam1_bgr_images
+        self.cam1_xyz_images = cam1_xyz_images
         self.base_t_ellipsoid_s = b_t_e_s
         self.primal_quadratic_s = prim_quad_s
         self.pne_optimizer_config = pne_config
         self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
         self.extract_and_match = extract_and_match
         self.initial_raansac_guess_config = ransac_config
+        self.sheduler = sheduler(cam1_bgr_images.shape[0])
+        self.number_tries_b4_giving_up = number_tries_b4_giving_up
 
 
-    def improve_pose(self, 
-                    cam2_t_base_init:np.ndarray,
-                    cam2_bgr_image:np.ndarray,
-                    time_tracker:TimeTracker
-                    )->np.ndarray | None:
+    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray,time_tracker:TimeTracker) -> np.ndarray | None:
         """
-        Improves a given pose using the ellipsoids
-        #TODO wont notice if it fails
+        Predicts the homogenous transformation base_t_cam2
         """
+        number_tries = 0
+        est_base_t_cam = None
+        while est_base_t_cam is None and number_tries < self.number_tries_b4_giving_up:
+            idx = self.sheduler.get_best()
+            print(f"idx: {idx}")
+            est_base_t_cam = self.est_base_t_cam2_helper(
+                cam1_bgr_image = self.cam1_bgr_images[idx],
+                base_xyz_image = self.cam1_xyz_images[idx],
+                cam2_bgr_image = cam2_bgr_image,
+                time_tracker = time_tracker
+            )
+            self.sheduler.adjust(idx, est_base_t_cam is not None)
+            number_tries += 1
+        if est_base_t_cam is not None:
+            return np.linalg.inv(self.update_pose(
+                cam2_bgr_image=cam2_bgr_image,
+                rough_cam_t_base=np.linalg.inv(est_base_t_cam),
+                time_tracker=time_tracker
+            ))
+        return None
+    
+    def update_pose(self,cam2_bgr_image: np.ndarray, rough_cam_t_base:np.ndarray, time_tracker:TimeTracker) -> np.ndarray | None:
+        # TODO add some fallback if matching doesnt work out (recenter with point matching)
+
         time_tracker.reset_elapsed_time()
         proj_primal_conics = project_primal_quadratics_to_primal_conicals(
             primal_quadratics= self.primal_quadratic_s,
-            cam_t_base=cam2_t_base_init,
+            cam_t_base=rough_cam_t_base,
             intrinsic_mtx=self.cam2_intrinsic_mtx,
         )
         proj_gauss_elli_mu, proj_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(proj_primal_conics)
@@ -347,7 +373,7 @@ class EllipsoidPredictor(PosePredictor):
         time_tracker.add_time_stamp("Matching")
 
         cam2_t_base_opt = optimize_pne(
-            initial_cam_t_base=cam2_t_base_init,
+            initial_cam_t_base=rough_cam_t_base,
             primal_quadratics=self.primal_quadratic_s[proj_match_idxs],
             primal_conicals=np.array(observed_primal_conics)[obs_match_idxs],
             intrinsic_cam_mat=self.cam2_intrinsic_mtx,
@@ -356,14 +382,15 @@ class EllipsoidPredictor(PosePredictor):
         )
         time_tracker.add_time_stamp("PNE optimisation")
         return cam2_t_base_opt
-    
 
-    def est_base_t_cam2(self,
-                        cam1_bgr_image:np.ndarray,
-                        base_xyz_image:np.ndarray,
-                        cam2_bgr_image: np.ndarray,
-                        time_tracker:TimeTracker
-                        ) -> np.ndarray | None:
+
+    
+    def est_base_t_cam2_helper(self,
+                            cam1_bgr_image:np.ndarray,
+                            base_xyz_image:np.ndarray,
+                            cam2_bgr_image: np.ndarray,
+                            time_tracker:TimeTracker
+        ):
         
         time_tracker.reset_elapsed_time()
         
@@ -374,8 +401,6 @@ class EllipsoidPredictor(PosePredictor):
             img1_rgb=cam1_rgb_image, img2_rgb=cam2_rgb_image, plot_results = False
         )
         time_tracker.add_time_stamp("Extract and Match")
-
-
         world_obj_points = np.array([base_xyz_image[int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1])
 
         cam2_t_base_pnp__inliers = estimate_point_pose_ransac(
@@ -387,31 +412,38 @@ class EllipsoidPredictor(PosePredictor):
         if cam2_t_base_pnp__inliers is None:
             return None
         cam2_t_base_pnp, inliers = cam2_t_base_pnp__inliers
-
-        cam2_t_base_ellipse = self.improve_pose(cam2_t_base_pnp, cam2_bgr_image, time_tracker)
     
-        return np.linalg.inv(cam2_t_base_ellipse)
+        return np.linalg.inv(cam2_t_base_pnp)
+
 
 if __name__ == "__main__":
-    data = PredictionData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data")
+    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_r")
+    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_h")
     predictor = EllipsoidPredictor(
-        cam2_intrinsic_mtx=data.headset_intrinsics,
-        cam1_bgr_images=data.robot_bgr_images,
-        cam1_xyz_images=data.robot_xyz_images,
+        cam2_intrinsic_mtx=headset_data.headset_intrinsics, 
+        cam1_bgr_images=robot_data.robot_bgr_images,
+        cam1_xyz_images=robot_data.robot_xyz_images,
         extract_and_match=ExtractAndLightGlue(),
-        ransac_config=pose_estimation_ransaac_config_precise
     )
-    grader = OnePredictorOneDatasetGrader(predictor=predictor, data=data)
+
+    tt1 = TimeTracker()
+    tt2 = TimeTracker()
+    grader = OnePredictorRecordingGrader(
+        predictor=predictor, 
+        headset_rec=headset_data,
+        prediction_time_tracker=tt1,
+        subcomponent_time_tracker=tt2
+    )
     
+    print(f"translat errors: \n {grader.translational_errors()} \n")
     #grader.visualize_predictions()
-    
+    print(f"avg rot error: {np.round(np.rad2deg(grader.avg_rotational_error()), 2)} degrees")
+    print(f"avg translational error: {np.round(grader.avg_translational_error()*1000, 1)} mm")
     print(f"median rot error: {np.round(np.rad2deg(grader.median_rotational_error()), 2)} degrees")
     print(f"median translational error: {np.round(grader.median_translational_error()*1000, 1)} mm")
-    print(f"avg. sub median rot error: {np.round(np.rad2deg(grader.average_sub_median_rotational_error()), 2)} degrees")
-    print(f"avg. sub median translational error: {np.round(grader.average_sub_median_translat_error()*1000, 1)} mm")
     print(f"sucess_ratio: {np.round(grader.sucess_ratio(),2)}")
 
-    #tt = TimeTracker()
-    #for i in range(10):
-    #    grader = OnePredictorOneDatasetGrader(predictor=predictor, data=data, time_tracker=tt)
-    #tt.print_report()
+    print(f"tt1:")
+    tt1.print_report()
+    print(f"\n tt2:")
+    tt2.print_report()

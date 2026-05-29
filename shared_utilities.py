@@ -57,11 +57,22 @@ def assert_homogeneous_mat(m:np.ndarray, size:None|int = None, abs_tolerance:flo
 def assert_mxnx3_np_uint8_image(img:np.ndarray)->bool:
     """
     Asserts that the img has the dimensions mxnx3 with m,n > 0 and the datatype np.uint8
+    :return: True
     """
     assert isinstance(img, np.ndarray), f"img must be a numpy array, got {type(img)}"
     assert img.ndim == 3 and img.shape[2] == 3, f"wrong img shape: {img.shape}"
     assert img.shape[0] > 0 and img.shape[1] > 0, f"img is empty: {img.shape}"
     assert img.dtype == np.uint8, f"wrong img dtype: {img.dtype}"
+    return True
+
+def assert_mxnx3_np_uint8_image_batch(imgs:np.ndarray)->bool:
+    """
+    Asserts that the img has the dimensions Nxmxnx3 with m,n > 0 and the datatype np.uint8
+    :param imgs: A Nxmxnx3-uint8 image batch
+    :returns: True
+    """
+    assert isinstance(imgs, np.ndarray), f"img must be a numpy array, got {type(imgs)}"
+    assert imgs.ndim == 4, f"Image batch needs to be 4D, is: {imgs.shape}"
     return True
 
 def get_image_type_hxw(img:np.ndarray) -> str:

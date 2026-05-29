@@ -3,15 +3,20 @@ import numpy as np
 from predictor_handling import *
 from extractors_and_matchers import *
 from image_augmentation import *
+from sheduler import *
 
 class NoExtrasPredictor(PosePredictor):
     def __init__(
             self,
             cam2_mtx:np.ndarray,
+            cam1_bgr_images:np.ndarray,
+            cam1_xyz_images:np.ndarray,
             extract_and_match:ExtractAndMatch = ExtractAndMatchLoMa(),
             use_rotation_augmentations:bool = False,
             crop_augmentations:list[float] | None = None,
-            ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise
+            ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise,
+            sheduler:Sheduler = EMASheduler,
+            number_tries_b4_giving_up:int = 1,
         ):
         super().__init__()
         self.cam2_mtx = cam2_mtx
@@ -27,8 +32,34 @@ class NoExtrasPredictor(PosePredictor):
             self.crop_augmentations + [CropImage(x) for x in crop_augmentations if 0 <= x < 1.0]  
 
         self.use_rotation_augmentations = use_rotation_augmentations
+        self.number_tries_b4_giving_up = number_tries_b4_giving_up
 
-    def est_base_t_cam2(self,
+        self.cam1_bgr_images = cam1_bgr_images
+        self.cam1_xyz_images = cam1_xyz_images
+
+        self.sheduler = sheduler(cam1_bgr_images.shape[0])
+    
+    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray,time_tracker:TimeTracker) -> np.ndarray | None:
+        number_tries = 0
+        est_base_t_cam = None
+        while est_base_t_cam is None and number_tries < self.number_tries_b4_giving_up:
+            idx = self.sheduler.get_best()
+            print(f"idx: {idx}")
+            est_base_t_cam = self.est_base_t_cam2_helper(
+                cam1_bgr_image = self.cam1_bgr_images[idx],
+                base_xyz_image = self.cam1_xyz_images[idx],
+                cam2_bgr_image = cam2_bgr_image,
+                time_tracker = time_tracker
+            )
+            self.sheduler.adjust(idx, est_base_t_cam is not None)
+            number_tries += 1
+        return est_base_t_cam
+    
+    def update_pose(self,cam2_bgr_image: np.ndarray, old_pose:np.ndarray, time_tracker:TimeTracker) -> np.ndarray | None:
+        return self.est_base_t_cam2(cam2_bgr_image=cam2_bgr_image, time_tracker=time_tracker)
+
+
+    def est_base_t_cam2_helper(self,
                         cam1_bgr_image:np.ndarray,
                         base_xyz_image:np.ndarray,
                         cam2_bgr_image: np.ndarray,
@@ -85,24 +116,35 @@ class NoExtrasPredictor(PosePredictor):
 
 
 if __name__ == "__main__":
-    data = PredictionData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data")
+    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_r")
+    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_h")
     predictor = NoExtrasPredictor(
-        data.headset_intrinsics, 
+        cam2_mtx=headset_data.headset_intrinsics, 
+        cam1_bgr_images=robot_data.robot_bgr_images,
+        cam1_xyz_images=robot_data.robot_xyz_images,
         extract_and_match=ExtractAndLightGlue(),
         use_rotation_augmentations=False,
-        ransac_itterations=1000
+        number_tries_b4_giving_up=10
     )
-    grader = OnePredictorOneDatasetGrader(predictor=predictor, data=data)
+
+    tt1 = TimeTracker()
+    tt2 = TimeTracker()
+    grader = OnePredictorRecordingGrader(
+        predictor=predictor, 
+        headset_rec=headset_data,
+        prediction_time_tracker=tt1,
+        subcomponent_time_tracker=tt2
+    )
     
+    print(f"translat errors: \n {grader.translational_errors()} \n")
     #grader.visualize_predictions()
-    
+    print(f"avg rot error: {np.round(np.rad2deg(grader.avg_rotational_error()), 2)} degrees")
+    print(f"avg translational error: {np.round(grader.avg_translational_error()*1000, 1)} mm")
     print(f"median rot error: {np.round(np.rad2deg(grader.median_rotational_error()), 2)} degrees")
     print(f"median translational error: {np.round(grader.median_translational_error()*1000, 1)} mm")
-    print(f"avg. sub median rot error: {np.round(np.rad2deg(grader.average_sub_median_rotational_error()), 2)} degrees")
-    print(f"avg. sub median translational error: {np.round(grader.average_sub_median_translat_error()*1000, 1)} mm")
     print(f"sucess_ratio: {np.round(grader.sucess_ratio(),2)}")
 
-    tt = TimeTracker()
-    for i in range(10):
-        grader = OnePredictorOneDatasetGrader(predictor=predictor, data=data, time_tracker=tt)
-    tt.print_report()
+    print(f"tt1:")
+    tt1.print_report()
+    print(f"\n tt2:")
+    tt2.print_report()

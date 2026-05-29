@@ -1,11 +1,8 @@
 import sys
 import os
 
-import cv2
-from projectaria_tools.core import data_provider, calibration
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from gathering_2_preprocessing import assert_intrinsic_mat
+from gathered_robot_data import assert_intrinsic_mat
 import numpy as np
 
 class HeadsetData:

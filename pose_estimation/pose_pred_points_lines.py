@@ -382,7 +382,7 @@ class LinePredictor(PosePredictor):
 
 
 if __name__ == "__main__":
-    data = PredictionData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data")
+    data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data")
     predictor = LinePredictor(
         data.headset_intrinsics, 
         extract_and_match=ExtractAndLightGlue(),
@@ -393,7 +393,7 @@ if __name__ == "__main__":
         line_fitting_3d_use_ransaac=False,
         debug_visualize_pnpl=True
     )
-    grader = OnePredictorOneDatasetGrader(predictor=predictor, data=data)
+    grader = OnePredictorOneEnvironmentOneRecordingGrader(predictor=predictor, data=data)
     
     #grader.visualize_predictions()
     
@@ -405,6 +405,6 @@ if __name__ == "__main__":
 
     tt = TimeTracker()
     for i in range(10):
-        grader = OnePredictorOneDatasetGrader(predictor=predictor, data=data, time_tracker=tt)
+        grader = OnePredictorOneEnvironmentOneRecordingGrader(predictor=predictor, data=data, time_tracker=tt)
     tt.print_report()
     

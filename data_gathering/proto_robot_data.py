@@ -1,7 +1,7 @@
 import numpy as np
 import os, sys, json, cv2, shutil
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from preprocessing_2_prediction import assert_intrinsic_mat, assert_homogeneous_mat
+from robot_environment import assert_intrinsic_mat, assert_homogeneous_mat
 
 class ProtoRobotData:
     def __init__(

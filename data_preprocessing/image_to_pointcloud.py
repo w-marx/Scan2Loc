@@ -6,7 +6,6 @@ import open3d as o3d
 from PIL import Image
 import cv2
 import sys, os
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared_utilities import get_image_type_hxw, compute_pose_pseudo_median
@@ -63,7 +62,7 @@ ICPAlignmentConfigs = {
 def align_point_clouds_icp(
         point_clouds:list[np.ndarray], 
         config:ICPAlignmentConfig = ICPAlignmentConfig(),
-        visualize:bool = True
+        visualize:bool = False
     )->list[np.ndarray]:
     """
     Takes M > 1 Pointclouds and returns them aligned around the geometric median of the pointclouds.
@@ -121,29 +120,42 @@ def align_point_clouds_icp(
 
     return aligned_point_clouds
 
+@dataclass(frozen=True, kw_only=True)
+class XYZImageGenerationConfig:
+    """
+    :param confidence_threshold_percent: Percentage of low confidence points to be removed by mapanything (between 0 and 100)
+    :param camera_realginment_method: The method to realign the cameras with the base_t_cam_s
+    :param crop_square: Crops the bgr images to be sqare to utilize the full ~500x500 image size allowed by mapanything (dont use if distortion is not 0)
+    :param use_depth_images_if_provided: Will ignore the depth images if False
+    """
+    confidence_threshold_percent:int = 10
+    camera_realginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama"
+    crop_square:bool = True
+    use_depth_images_if_provided:bool = False
 
 
-def create_point_cloud(
+    def __post__init__(self):
+        assert 0 <= self.confidence_threshold_percent <= 100, f"confidence_threshhold_percent should be between 0 and 100 is {self.confidence_threshold_percent}"
+        assert self.camera_realginment_method in ["none", "simple", "kabsch-umeyama"], f"Cam realignment: {self.camera_realginment_method} not supported"
+
+
+XYZImageGenerationConfigs = {
+    "standard": XYZImageGenerationConfig(),
+    "standard_w_depth": XYZImageGenerationConfig(use_depth_images_if_provided = True),
+}
+
+def generate_xyz_images(
         bgr_images:np.ndarray,
         base_t_cam_s: np.ndarray,
         depth_images:np.ndarray | None = None,
         camera_intrinsics:np.ndarray = None,
-        confidence_threshold_percent:int = 10,
-        xyz_image_aligner:Callable[[np.ndarray], np.ndarray] | None = None,
-        visualize_point_cloud:bool = False,
-        alginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama",
-        crop_square:bool = True
+        config:XYZImageGenerationConfig = XYZImageGenerationConfig()
 )-> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     :param bgr_images: A NxHxWx3-uint8/uint16/uint32/uint64/float32 numpy array of BGR images
     :param base_t_cam_s: A Nx4x4-float numpy array of base_t_cam homogeneous transformation matrices
     :param depth_images: A NxHxW-float32 numpy array of depth images (in meters) or None, SHOULD NOT BE USED IF DEPTH AND BGR ARE NOT ALIGNED
     :param camera_intrinsics: A 3x3-float numpy-matrix of the camera intrinsics
-    :param confidence_threshold_percent: Percentage of low confidence points to be removed (between 0 and 100)
-    :param image_mask_generator: A Function that takes a NxHxWx3-uint8 image array and returns a NxHxW-bool numpy array of masks
-    :param xyz_image_aligner: A Function that takes a NxHxW-float xyz image array and aligns the images and returns the aligned images
-    :param visualize_point_cloud: Whether to visualize the generated point cloud
-    :param crop_square: Crops the bgr images to be sqare to utilize the full ~500x500 image size allowed by mapanything (dont use if distortion is not 0)
     :return 
     1. NxWxHx3-uint8 BGR images as numpy array
     2. NxWxHx3-float larray of xyz world point images
@@ -153,9 +165,8 @@ def create_point_cloud(
     assert bgr_images.shape[0] == base_t_cam_s.shape[0] , f"Number of bgr images and poses dont match: {bgr_images.shape}, {base_t_cam_s.shape}"
     assert depth_images is None or depth_images.shape[:3] == bgr_images.shape[:3], f"BGR: {bgr_images.shape}, Depth: {depth_images.shape} image dims dont match"    
     assert camera_intrinsics.shape == (3,3), f"Camera intrinsics shape is not 3x3: {camera_intrinsics.shape}"
-    assert 0 <= confidence_threshold_percent <= 100, f"confidence_threshhold_percent should be between 0 and 100 is {confidence_threshold_percent}"
 
-    if crop_square:
+    if config.crop_square:
         h_orig = bgr_images.shape[1]
         w_orig = bgr_images.shape[2]
 
@@ -178,6 +189,7 @@ def create_point_cloud(
     from mapanything.utils.image import rgb
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
     model = MapAnything.from_pretrained("facebook/map-anything").to(device)
     if bgr_images.dtype in [np.uint8, np.uint16, np.uint32, np.uint64]:
         bgr_images = bgr_images.astype(np.float32)/255.0 # wrong in the documentation :( needs 0-1
@@ -191,7 +203,7 @@ def create_point_cloud(
             "intrinsics": camera_intrinsics.astype(np.float32)
         })
 
-    if depth_images is not None:
+    if depth_images is not None and config.use_depth_images_if_provided:
         for view, depth_image in zip(views, depth_images):
             view.update({
                 'depth_z': depth_image.astype(np.float32),
@@ -215,7 +227,7 @@ def create_point_cloud(
         apply_mask=True,
         mask_edges=True,
         apply_confidence_mask=False,
-        confidence_percentile=confidence_threshold_percent,
+        confidence_percentile=config.confidence_threshold_percent,
         use_multiview_confidence=False,
         ignore_calibration_inputs=False,
         ignore_depth_inputs=False,
@@ -227,7 +239,7 @@ def create_point_cloud(
 
     world_xyz_images = np.array([view['pts3d'][0].cpu().numpy() for view in predictions])
 
-    if alginment_method == "simple":
+    if config.camera_realginment_method == "simple":
         world_xyz_images = []
         cam_xyz_images = [view['pts3d_cam'][0].cpu().numpy() for view in predictions]
         for cam_img, base_t_cam in zip(cam_xyz_images, base_t_cam_s):
@@ -236,23 +248,13 @@ def create_point_cloud(
             world_points = (base_t_cam @ cam_points_hom.T).T
             world_xyz_images.append(world_points[:, :3].reshape(cam_img.shape[0], cam_img.shape[1], cam_img.shape[2]))
         world_xyz_images = np.array(world_xyz_images)
-    elif alginment_method == "kabsch-umeyama":
+    elif config.camera_realginment_method == "kabsch-umeyama":
         camera_true_positions = base_t_cam_s[:,:3,3]
         camera_new_positions = np.array([view['cam_trans'][0].cpu().numpy() for view in predictions])
         transform_points_to_old = kabsch_umeyama(camera_true_positions, camera_new_positions)
         world_xyz_images = transform_points_to_old(world_xyz_images.reshape(-1,3)).reshape(world_xyz_images.shape)
     else:
-        print("didnt to camera alignment")
-
-
-    if xyz_image_aligner is not None:
-        world_xyz_images = xyz_image_aligner(world_xyz_images)
-
-    # Generate pointcloud
-    if visualize_point_cloud:
-        vis_point_cloud = o3d.geometry.PointCloud()
-        vis_point_cloud.points = o3d.utility.Vector3dVector(world_xyz_images.reshape(-1, 3))
-        o3d.visualization.draw_geometries([vis_point_cloud], window_name = "3D Point cloud visualization")
+        print("didnt do camera alignment")
 
     print(f"xyz images shape: {world_xyz_images.shape}")
     assert np.array(bgr_images).shape == np.array(world_xyz_images).shape, f"bgr: {np.array(bgr_images).shape} xyz {np.array(world_xyz_images).shape}"
@@ -264,7 +266,6 @@ def create_point_cloud_depth_reproject(
         depth_cam_mtx:np.ndarray,
         base_t_camera_s:np.ndarray,
         distance_cutoff:float = 1.0,
-        visualize_point_cloud:bool = True,
 ):
     """
     Uses the depth images to create xyz-images and a point cloud
@@ -295,12 +296,5 @@ def create_point_cloud_depth_reproject(
         cam_xyz1_points = np.stack([x,y,z, np.ones((h,w))], axis=-1).reshape(-1,4)
         base_xyz1_points = (base_t_cam @ cam_xyz1_points.T).T
         base_xyz_images.append(base_xyz1_points[:, :3].reshape((h,w,3)))
-
-    point_cloud = np.array(base_xyz_images).reshape(-1,3)
-
-    if visualize_point_cloud:
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(point_cloud)
-        o3d.visualization.draw_geometries([pcd], "PointCloud visualization")
 
     return base_xyz_images
