@@ -62,7 +62,7 @@ def assert_primal_quadratic_hom_ellipsoid(primal_quadratic_hom:np.ndarray, atol:
     :return: True
     """
     assert primal_quadratic_hom.shape == (4,4), f"Must be 4x4: {primal_quadratic_hom.shape}"
-    assert np.allclose(primal_quadratic_hom, primal_quadratic_hom.T, atol=atol), f"Matrix must be symmetric: {primal_quadratic_hom}"
+    assert np.allclose(primal_quadratic_hom, primal_quadratic_hom.T, atol=atol), f"Matrix must be symmetric: \n {primal_quadratic_hom}"
     return True
 
 def assert_primal_quadratic_hom_ellipsoid_batch(primal_quadratic_hom_batch:np.ndarray, atol:float = 0.01)->bool:
@@ -163,7 +163,7 @@ def project_primal_quadratics_to_primal_conicals(
         primal_quadratics:np.ndarray,
         cam_t_base:np.ndarray,
         intrinsic_mtx:np.ndarray
-):
+)->np.ndarray:
     """
     Takes a batch of Nx4x4 primal quadratics in the world frame
     and returns the Nx3x3 primal conics in the camera frame
@@ -171,7 +171,7 @@ def project_primal_quadratics_to_primal_conicals(
     :param cam_t_base: A 4x4 camera->base homogeneous transformation matrix
     :param intrinsic_mtx: The 3x3 intrinsic matrix of the camera
 
-    :return: The 3x3 primal conic of the projected ellipse
+    :return: The Nx3x3 primal conic batch of projected ellipse
     """
     assert assert_primal_quadratic_hom_ellipsoid_batch(primal_quadratics)
     assert assert_homogeneous_mat(cam_t_base, size=4)
@@ -193,10 +193,12 @@ def primal_conics_to_gaussian_ellipses(primal_conic_s:np.ndarray)-> tuple[np.nda
     :return a tuple of batches of Nx2 mu's and Nx2x2 sigma's
     """
     assert assert_primal_conical_hom_ellipse_batch(primal_conic_s)
+    print(f"primal conics: \n {primal_conic_s}")
     a_s = primal_conic_s[:,0:2, 0:2]
     b_s = primal_conic_s[:,0:2, 2]
     c_s = primal_conic_s[:,2, 2]
-    mu_s = -np.linalg.solve(a_s,b_s)
+    print(f"a_s: {a_s.shape}, b_s: {b_s.shape}, c_s: {c_s.shape}")
+    mu_s = -np.linalg.solve(a_s,b_s[:, :, np.newaxis]).squeeze(-1)
 
     # normalization
     s = np.einsum('ni,nji,nj->n', mu_s, a_s, mu_s, optimize=True) - c_s
@@ -388,11 +390,12 @@ def fit_ellipsoid_to_3d_point_cloud(
 
     eigvals, eigvecs = np.linalg.eigh(cov_matrix)
     idx = np.argsort(eigvals)[::-1]
+    eigvecs = eigvecs[:, idx]
 
-    if np.linalg.det(eigvecs[:, idx]) < 0:
+    if np.linalg.det(eigvecs) < 0:
         eigvecs[:, -1] *= -1
 
-    base_t_ellipsoid = r_t_to_hom(eigvecs[:, idx], center)
+    base_t_ellipsoid = r_t_to_hom(eigvecs, center)
 
     # to local orientation
     pts_local = (base_t_ellipsoid[:3, :3].T @ pts_centered.T).T  # (N,3)
@@ -425,6 +428,8 @@ def fit_ellipsoid_to_3d_point_cloud(
 
         to_vis += [pcd, pcd1, frame]
         o3d.visualization.draw_geometries(to_vis, f"Ellipsoid fit visualization")    
+    
+    assert assert_primal_quadratic_hom_ellipsoid(primal_quadratic)
 
     return base_t_ellipsoid, primal_quadratic
 

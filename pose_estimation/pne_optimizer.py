@@ -110,10 +110,9 @@ class Reproj(nn.Module):
         P = cam_t_base[:3, :]
         KP = intrinsic_mtx @ P
         cam_dual_conic = torch.einsum('ik,nkl,jl->nij', KP, dual_quadratic, KP)
-        #cam_dual_conic = (KP.unsqueeze(0) @ dual_quadratic) @ KP.T.unsqueeze(0)
         cam_primal_conic = torch.linalg.inv(cam_dual_conic)
 
-        return cam_primal_conic
+        return (cam_primal_conic+cam_primal_conic.transpose(-2,-1))/2
 
     @staticmethod
     def primal_conics_to_gaussian_ellipses(primal_conic:torch.Tensor)-> tuple[torch.Tensor, torch.Tensor]:

@@ -305,12 +305,14 @@ class EllipsoidPredictor(PosePredictor):
             ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise,
         ):
         super().__init__()
-        self.base_ellipsoid_s, self.quadratic_ellipsoid_s = images_to_primal_quadratics(
+        b_t_e_s, prim_quad_s = images_to_primal_quadratics(
             bgr_images=cam1_bgr_images,
             xyz_images=cam1_xyz_images,
             prompt=Sam3Prompt(),
             min_cluster_size=2
         )
+        self.base_t_ellipsoid_s = b_t_e_s
+        self.primal_quadratic_s = prim_quad_s
         self.pne_optimizer_config = pne_config
         self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
         self.extract_and_match = extract_and_match
@@ -321,21 +323,21 @@ class EllipsoidPredictor(PosePredictor):
                     cam2_t_base_init:np.ndarray,
                     cam2_bgr_image:np.ndarray,
                     time_tracker:TimeTracker
-                    ):
+                    )->np.ndarray | None:
         """
         Improves a given pose using the ellipsoids
         #TODO wont notice if it fails
         """
         time_tracker.reset_elapsed_time()
         proj_primal_conics = project_primal_quadratics_to_primal_conicals(
-            primal_quadratics= self.base_ellipsoid_s,
+            primal_quadratics= self.primal_quadratic_s,
             cam_t_base=cam2_t_base_init,
             intrinsic_mtx=self.cam2_intrinsic_mtx,
         )
         proj_gauss_elli_mu, proj_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(proj_primal_conics)
         proj_gaussian_ellipses = gauss_ellipse_batch_tuple_to_mat_batch(proj_gauss_elli_mu, proj_gauss_elli_sigmas)
 
-        _ , observed_primal_conics = image_to_primal_conics(bgr_image=cam2_bgr_image, sam3_prompt=Sam3Prompt())
+        observed_primal_conics = image_to_primal_conics(bgr_image=cam2_bgr_image, sam3_prompt=Sam3Prompt())
 
         obs_gauss_elli_mu, obs_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(observed_primal_conics)
         obs_gauss_ellipses = gauss_ellipse_batch_tuple_to_mat_batch(obs_gauss_elli_mu, obs_gauss_elli_sigmas)
@@ -346,7 +348,7 @@ class EllipsoidPredictor(PosePredictor):
 
         cam2_t_base_opt = optimize_pne(
             initial_cam_t_base=cam2_t_base_init,
-            primal_quadratics=self.quadratic_ellipsoid_s[proj_match_idxs],
+            primal_quadratics=self.primal_quadratic_s[proj_match_idxs],
             primal_conicals=np.array(observed_primal_conics)[obs_match_idxs],
             intrinsic_cam_mat=self.cam2_intrinsic_mtx,
             config=self.pne_optimizer_config,
@@ -386,9 +388,9 @@ class EllipsoidPredictor(PosePredictor):
             return None
         cam2_t_base_pnp, inliers = cam2_t_base_pnp__inliers
 
-        self.improve_pose(cam2_t_base_pnp, cam2_bgr_image, time_tracker)
+        cam2_t_base_ellipse = self.improve_pose(cam2_t_base_pnp, cam2_bgr_image, time_tracker)
     
-        return np.linalg.inv(cam2_t_base_pnp)
+        return np.linalg.inv(cam2_t_base_ellipse)
 
 if __name__ == "__main__":
     data = PredictionData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data")
