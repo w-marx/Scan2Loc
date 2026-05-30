@@ -246,7 +246,7 @@ class OnePredictorRecordingGrader:
                     base_t_camera=predicted_b_t_h,
                     intrinsics=self._headset_data.intrinsic_cam_mtx,
                     hxw_img=self._headset_data.bgr_image_s[i],
-                    scale=0.1
+                    scale=0.05
                 )
                 camera_line_set.paint_uniform_color(colors[i])
                 to_vis.append(camera_line_set)
@@ -265,7 +265,7 @@ class OnePredictorRecordingGrader:
         to_vis.append(pred_line_set)
 
         obs_line_set = o3d.geometry.LineSet()
-        points = np.array(self._headset_data.robot_base_t_headset_s)[self._headset_data.labeled_frames_indices, :3, 3]
+        points = np.array([m for m in self._headset_data.robot_base_t_headset_s if m is not None])[:, :3, 3]
         obs_line_set.points = o3d.utility.Vector3dVector(points)
         obs_line_set.lines = o3d.utility.Vector2iVector([[i, i+1] for i in range(len(points)-1)])
         obs_line_set.paint_uniform_color([0,1,0])

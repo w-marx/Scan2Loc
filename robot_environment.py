@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import os, shutil, json
-import open3d as o3d
 from shared_utilities import assert_intrinsic_mat, assert_homogeneous_mat, create_3d_camera, assert_mxnx3_np_uint8_image_batch
 
 
@@ -102,6 +101,7 @@ class RobotEnvironment:
         """
         Visualizes the robot environment using open3d
         """
+        import open3d as o3d
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(self.robot_xyz_images.reshape(-1,3))
         pcd.colors = o3d.utility.Vector3dVector(self.robot_bgr_images.reshape(-1,3).astype(np.float32)[:, ::-1]/255)

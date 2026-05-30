@@ -203,8 +203,8 @@ def create_robot_bound_headset_data(
         images=list(headset_data.bgr_image_s),
         camera_matrix=headset_data.intrinsic_cam_mtx,
     )
-    headset_t_markers_no_none_idx = [i for i, m in enumerate(headset_t_markers) if m is not None]
 
+    headset_t_markers_no_none_idx = [i for i, m in enumerate(headset_t_markers) if m is not None]
     if len(robot_base_t_marker_s) == 0 or len(headset_t_markers_no_none_idx) == 0:
         return headset_data
     

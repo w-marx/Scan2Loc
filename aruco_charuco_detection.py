@@ -26,7 +26,7 @@ class MarkerDetectionConfig:
     """
     marker_type:Literal["Aruco", "Charuco"] | None = "Aruco"
     marker_side_length:float = 0.0725
-    aruco_marker_dictionary:str = "5X5_250"
+    aruco_marker_dictionary:str = "6X6_250"
     board_size:list[int] | None = None
     square_size:float|None = None
     min_fraction_of_markers:float=1.0
@@ -43,8 +43,8 @@ class MarkerDetectionConfig:
             assert 0 < self.min_fraction_of_markers <= 1.0, f"Fraction of markers must be in (0,1], is: {self.min_fraction_of_markers}"
 
 DEFAULT_MARKER_CONFIGS = {
-    "Aruco 5x5_250 72.5mm": MarkerDetectionConfig(),
-    "Aruco 5x5_250 108.5mm": MarkerDetectionConfig(marker_side_length=0.1085),
+    "Aruco 6x6_250 72.5mm": MarkerDetectionConfig(),
+    "Aruco 6x6_250 108.5mm": MarkerDetectionConfig(marker_side_length=0.1085),
     "Charuco 14x9 5x5_250 14.6mm 18.8mm": MarkerDetectionConfig(
         marker_type="Charuco", marker_side_length=0.0146, aruco_marker_dictionary="5X5_250", board_size=(14, 9), min_fraction_of_markers=1.0, square_size=0.0188
     ),
@@ -156,7 +156,7 @@ class MarkerDetector(ABC):
     
     @staticmethod
     def from_dict(data:dict)->'MarkerDetector':
-        return MarkerDetector.from_config(MarkerDetectionConfig(**dict))
+        return MarkerDetector.from_config(MarkerDetectionConfig(**data))
 
     @classmethod
     def from_config(cls,config:MarkerDetectionConfig)->'MarkerDetector':
@@ -191,7 +191,6 @@ class ArucoDetector(MarkerDetector):
         self.detector = cv2.aruco.ArucoDetector(self.aruco_marker_dictionary, detector_params)
 
     def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float]|None = None)->list[np.ndarray | None]:
-
         marker_points = np.array([[-1,1,0], [1,1,0], [1,-1,0], [-1,-1,0]])*0.5*self.config.marker_side_length
 
         camera_t_aruco_s = []
@@ -199,9 +198,13 @@ class ArucoDetector(MarkerDetector):
             marker_corners, marker_ids, reject_candidates = self.detector.detectMarkers(image)
 
             if len(marker_corners) > 1:
-                raise Exception("More then one aruco marker detected, single pose is not calculatable")
+                print(f"found more then 1 marker in image: {index}")
+                camera_t_aruco_s.append(None)
+                continue
+            
             if len(marker_corners) == 0:
                 camera_t_aruco_s.append(None)
+                print("nothing detected")
                 continue
 
             _, rvec, tvec = cv2.solvePnP(
