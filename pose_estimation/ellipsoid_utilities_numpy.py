@@ -193,11 +193,9 @@ def primal_conics_to_gaussian_ellipses(primal_conic_s:np.ndarray)-> tuple[np.nda
     :return a tuple of batches of Nx2 mu's and Nx2x2 sigma's
     """
     assert assert_primal_conical_hom_ellipse_batch(primal_conic_s)
-    print(f"primal conics: \n {primal_conic_s}")
     a_s = primal_conic_s[:,0:2, 0:2]
     b_s = primal_conic_s[:,0:2, 2]
     c_s = primal_conic_s[:,2, 2]
-    print(f"a_s: {a_s.shape}, b_s: {b_s.shape}, c_s: {c_s.shape}")
     mu_s = -np.linalg.solve(a_s,b_s[:, :, np.newaxis]).squeeze(-1)
 
     # normalization

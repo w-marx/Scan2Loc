@@ -2,9 +2,9 @@ import numpy as np
 from dataclasses import dataclass
 import sys, os, time, cv2
 
-from robot_environment import RobotEnvironment
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from robot_environment import RobotEnvironment
 from headset_data import HeadsetData
 from shared_utilities import *
 from tqdm import tqdm
@@ -254,7 +254,7 @@ class OnePredictorRecordingGrader:
             if b_t_h is not None and predicted_b_t_h is not None:
                 line_set = o3d.geometry.LineSet()
                 line_set.points = o3d.utility.Vector3dVector([b_t_h[:3,3], predicted_b_t_h[:3,3]])
-                line_set.lines = o3d.utility.Vector2iVector([0,1])
+                line_set.lines = o3d.utility.Vector2iVector([[0,1]])
                 line_set.paint_uniform_color(colors[i])
                 to_vis.append(line_set)
 
@@ -265,7 +265,7 @@ class OnePredictorRecordingGrader:
         to_vis.append(pred_line_set)
 
         obs_line_set = o3d.geometry.LineSet()
-        points = np.array(self._headset_data.robot_base_t_headset_s)[self._headset_data.labeled_frames_indices]
+        points = np.array(self._headset_data.robot_base_t_headset_s)[self._headset_data.labeled_frames_indices, :3, 3]
         obs_line_set.points = o3d.utility.Vector3dVector(points)
         obs_line_set.lines = o3d.utility.Vector2iVector([[i, i+1] for i in range(len(points)-1)])
         obs_line_set.paint_uniform_color([0,1,0])

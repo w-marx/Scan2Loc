@@ -11,7 +11,7 @@ import json, os, sys, time
 from proto_robot_data import *
 
 # Some positions for the Franka Panda robot.
-positions = [
+positions_old = [
     [-0.36198, -0.049747, 0.033045, -1.6585, 0.20059, 1.6262, 0.35139],
     [-0.199427,-0.303889,0.0692703,-2.43281,0.0363531,1.98839,0.840368],
     [-0.338833,-0.111088,-0.288847,-2.20117,0.307392,1.73006,0.645364],
@@ -90,7 +90,6 @@ def gather_robot_imgs_eefs(
         image_pipeline:pyrealsense2.pipeline,
         depth_scale:float,
         robot_positions:list[list[float]],
-        number_of_positions:None|int = None,
         stabilisation_timeout:float = 0.0
     ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     """
@@ -104,13 +103,17 @@ def gather_robot_imgs_eefs(
     :param robot_positions: A list of positions in joint coordinates (7 floats)
     :return: tuple: list of depth images, list of bgr, list of base-to-gripper homogeneous matrices
     """
+    assert stabilisation_timeout >= 0, f"Timeout cant be negative: {stabilisation_timeout}"
+    assert depth_scale > 0, f"Depth scale should be positive: {depth_scale}"
+    assert robot_positions.ndim == 2 and robot_positions.shape[0] > 0 and robot_positions.shape[1] == 7, f"Invalid robot joint positions: {robot_positions.shape}"
+
     depth_images = []
     bgr_images = []
     base_t_gripper_s = []
 
     align = rs.align(rs.stream.color)
 
-    for frame_idx, position in enumerate(robot_positions[:number_of_positions if number_of_positions is not None else len(robot_positions)]):
+    for frame_idx, position in enumerate(robot_positions):
         print(f"moving to position {frame_idx} : {position}")
 
         reset_joints_to(robot_interface, position)
@@ -134,7 +137,8 @@ def gather_robot_imgs_eefs(
 
 def gather_robot_data(
         number_of_positions:None|int = None,
-        stabilisation_timeout:float = 0.0
+        stabilisation_timeout:float = 0.0,
+        position_folder:str = "./positions_panda_63.csv"
     ) -> ProtoRobotData:
     """
     Creates an instance of ProtoRobotData by moving the robot and taking images:
@@ -144,6 +148,15 @@ def gather_robot_data(
 
     :return: an instance of ProtoRobotData
     """
+    assert number_of_positions is None or number_of_positions > 0, f"Number of positions must be positive/no limit, is: {number_of_positions}"
+    assert stabilisation_timeout >= 0, f"Timeout cant be negative: {stabilisation_timeout}"
+
+
+    robot_positions = np.loadtxt(position_folder, delimiter=",")
+    assert robot_positions.ndim == 2 and robot_positions.shape[0] > 0 and robot_positions.shape[1] == 7, f"Invalid robot joint positions: {robot_positions.shape}"
+    if number_of_positions is not None:
+        robot_positions = robot_positions[:number_of_positions]
+
     robot_interface = FrankaInterface(config_root + "/charmander.yml", use_visualizer=False)
 
     pipeline = rs.pipeline()
@@ -162,9 +175,10 @@ def gather_robot_data(
     depth_images, bgr_images, base_t_gripper_s = gather_robot_imgs_eefs(robot_interface=robot_interface,
                                                                         image_pipeline=pipeline,
                                                                         depth_scale=depth_scale,
-                                                                        robot_positions=positions,
+                                                                        robot_positions=robot_positions,
                                                                         number_of_positions=number_of_positions,
-                                                                        stabilisation_timeout=stabilisation_timeout)
+                                                                        stabilisation_timeout=stabilisation_timeout
+                                                                        )
     pipeline.stop()
     gathered_data = ProtoRobotData(
         depth_images=np.array(depth_images),

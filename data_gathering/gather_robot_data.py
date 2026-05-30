@@ -6,7 +6,7 @@ from matplotlib.gridspec import GridSpec
 from proto_robot_data import *
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from aruco_charuco_detection import ArucoCharucoDetector, ArucoDetector, CharucoDetector
+from aruco_charuco_detection import MarkerDetector, ArucoDetector, CharucoDetector, NoMarkerDetector, MarkerDetectionConfig, DEFAULT_MARKER_CONFIGS
 from gathered_robot_data import compute_pose_pseudo_median, GatheredRobotData
 
 calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2)
@@ -16,7 +16,7 @@ calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, 
 def optimize_robot_data(
         proto_data:ProtoRobotData,
         name: str = "rob_data1",
-        marker_detector: ArucoCharucoDetector | None = None,
+        marker_detector: MarkerDetector = None,
         gripper_t_cam: np.ndarray|None = None,
         base_t_gripper_outlier_quantiles:tuple[float, float] = (0.2, 0.2)
     )->GatheredRobotData:
@@ -32,16 +32,14 @@ def optimize_robot_data(
     :return: a GatheredRobotData instance
     """
 
-    if gripper_t_cam is None and marker_detector is None:
+    if gripper_t_cam is None and isinstance(marker_detector, NoMarkerDetector):
         raise ValueError("Either gripper_t_cam or marker_detector must be provided")
 
-    camera_t_marker_s = [None] * len(proto_data.bgr_images)
-    if marker_detector is not None:
-        camera_t_marker_s = marker_detector.get_camera_t_marker(
-            images=list(proto_data.bgr_images),
-            camera_matrix=proto_data.cam_intrinsic_mtx,
-            distortion_coefficients=proto_data.cam_distortion_coefficients
-        )
+    camera_t_marker_s = marker_detector.get_camera_t_marker(
+        images=list(proto_data.bgr_images),
+        camera_matrix=proto_data.cam_intrinsic_mtx,
+        distortion_coefficients=proto_data.cam_distortion_coefficients
+    )
 
     if gripper_t_cam is None:
         print("Using aruco markers for gripper_T_cam determination")
@@ -55,8 +53,8 @@ def optimize_robot_data(
                 r_marker_t_camera.append(camera_t_marker[:3, :3])
                 t_marker_t_camera.append(camera_t_marker[:3, 3])
 
-        if len(r_base_t_gripper) < 5:
-            print(f"Dangerously few aruco marker images for hand eye calibration: {len(r_base_t_gripper)}")
+        if len(r_base_t_gripper) < 3:
+            raise ValueError(f"Not enough marker detections for hand eye calibration: {len(r_base_t_gripper)}")
 
         r_gripper_t_cam, t_gripper_t_cam = cv2.calibrateHandEye(r_base_t_gripper, t_base_t_gripper, r_marker_t_camera, t_marker_t_camera, method=cv2.CALIB_HAND_EYE_DANIILIDIS)
         gripper_t_cam = np.concatenate((np.concatenate((r_gripper_t_cam, t_gripper_t_cam), axis=1), [[0, 0, 0, 1]]), axis=0)
@@ -192,15 +190,6 @@ Translation in mm cov & corr matrix:
 
 
 if __name__ == "__main__":
-    dictionary_options = {
-        "4X4_250": cv2.aruco.DICT_4X4_250,
-        "5X5_100": cv2.aruco.DICT_5X5_100,
-        "5X5_250": cv2.aruco.DICT_5X5_250,
-        "6X6_250": cv2.aruco.DICT_6X6_250,
-        "7X7_250": cv2.aruco.DICT_7X7_250,
-        "7X7_1000": cv2.aruco.DICT_7X7_1000,
-    }
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-folder", type=str, default="my_data", help="Output Folder Location")
     parser.add_argument("--gripper-t-cam-path", type=str, default=None, help="Path to gripper_t_cam.npy file, if left to None will be estimated")
@@ -210,11 +199,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--stabilisation-timeout", type=float, default=0.0, help="Timeout in seconds between robot moved to position and picture is taken")
 
-    parser.add_argument("--marker-detection", type = str, default=None, help = "If Aruco / Charuco marker detection should be used, options: `None`(default), `Aruco`, `Charuco`")
-    parser.add_argument("--aruco-marker-side-length", type=float, default=0.072, help="Aruco marker side lengths in meters")
-    parser.add_argument("--aruco-marker-dictionary", type=str, default="6X6_250", help=f"Aruco dictionary to use, possible options are: {', '.join(dictionary_options.keys())}")
-    parser.add_argument("--charuco-square-side-length", type=float, default=0.1, help="Charuco board square side length in meters")
-    parser.add_argument("--charuco-board-size", type=int, default=[14,9], nargs=2, help="Size of the charuco board in squares")
+    parser.add_argument(
+        "--marker-detection", type = str, default="No marker", 
+        help = f"The marker type/configuration", choices=list(DEFAULT_MARKER_CONFIGS.keys()),
+    )
 
     parser.add_argument("--pose-outlier-quants", type=float, default=[0.2,0.2], nargs=2, help="The quantiles of base_t_marker estimates to remove 1st arg: translation, 2nd arg: rotation")
 
@@ -225,12 +213,14 @@ if __name__ == "__main__":
     parser.set_defaults(gather_data = True, visualize_poses = True, analyze_results = True)
     args = parser.parse_args()
 
-    print(f"Saving/loading data from: {os.path.abspath(args.output_folder)}")
 
+
+    print(f"Saving/loading data from: {os.path.abspath(args.output_folder)}")
     gripper_t_cam = None
     if args.gripper_t_cam_path is not None and os.path.exists(args.gripper_t_cam_path):
         gripper_t_cam = np.load(args.gripper_t_cam_path)
         print(f"Using precomputed cam_t_gripper: \n {np.round(gripper_t_cam, 3)} \n from {args.gripper_t_cam_path}")
+
 
 
     proto_data = None
@@ -240,26 +230,10 @@ if __name__ == "__main__":
     else:
         proto_data = ProtoRobotData.from_folder(args.output_folder)
 
-    marker_detector = None
-
-    if args.marker_detection is not None and args.marker_detection == "Aruco":
-        marker_detector = ArucoDetector(
-            aruco_marker_side_length=args.aruco_marker_side_length,
-            aruco_marker_dictionary=args.aruco_marker_dictionary
-        )
-    if args.marker_detection is not None and args.marker_detection == "Charuco":
-        marker_detector = CharucoDetector(
-            board_size=(args.charuco_board_size[0], args.charuco_board_size[1]),
-            square_size=args.charuco_square_side_length,
-            marker_size=args.aruco_marker_side_length,
-            aruco_dictionary=args.aruco_marker_dictionary
-        )
-
-
     gd = optimize_robot_data(
         proto_data=proto_data,
         gripper_t_cam=gripper_t_cam,
-        marker_detector = marker_detector,
+        marker_detector = MarkerDetector.from_config(DEFAULT_MARKER_CONFIGS[args.marker_detection]),
         base_t_gripper_outlier_quantiles=(args.pose_outlier_quants[0], args.pose_outlier_quants[1]),
     )
     gd.see_color_depth_alignment()

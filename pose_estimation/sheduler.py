@@ -41,5 +41,4 @@ class EMASheduler(Sheduler):
         )
     
     def get_best(self)->int:
-        print(f"probabilites: {self.probabilities}")
         return np.argmax(self.probabilities)

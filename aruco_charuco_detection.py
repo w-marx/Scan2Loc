@@ -1,5 +1,8 @@
 import numpy as np
 import cv2
+from dataclasses import dataclass, asdict
+from typing import Literal
+from abc import ABC, abstractmethod
 
 
 ARUCO_DICTIONARY_OPTIONS = {
@@ -10,6 +13,46 @@ ARUCO_DICTIONARY_OPTIONS = {
     "7X7_250": cv2.aruco.DICT_7X7_250,
     "7X7_1000": cv2.aruco.DICT_7X7_1000,
 }
+
+@dataclass(frozen=True, kw_only=True)
+class MarkerDetectionConfig:
+    """
+    Specifies the marker type to build an marker detector
+    :param marker_type: 'Aruco'/'Charuco' or None are currently supported
+    :param marker_side_length: The side length of the marker in meters
+    :param aruco_marker_dictionary: The dictionary of the Aruco marker, as a string of the form "MxM_N", e.g. "5X5_250"
+    :param board_size: The number of squares along each axis for charuco boards
+    :param min_fraction_of_markers: The min fraction of markers on a charuco board to return a prediction
+    """
+    marker_type:Literal["Aruco", "Charuco"] | None = "Aruco"
+    marker_side_length:float = 0.0725
+    aruco_marker_dictionary:str = "5X5_250"
+    board_size:list[int] | None = None
+    square_size:float|None = None
+    min_fraction_of_markers:float=1.0
+
+    def __post_init__(self):
+        assert self.marker_type is None or self.marker_type in ["Aruco", "Charuco"], f"unknown marker type: {self.marker_type}"
+        if self.marker_type is None:
+            return
+        assert self.marker_side_length > 0, f"Marker side length must be positive, is: {self.marker_side_length}"
+        assert self.aruco_marker_dictionary in ARUCO_DICTIONARY_OPTIONS, f"{self.aruco_marker_dictionary} is not known, supported: {ARUCO_DICTIONARY_OPTIONS.keys()}"
+        if self.marker_type == "Charuco":
+            assert self.board_size is not None and len(self.board_size) == 2 and self.board_size[0] > 0 and self.board_size[1] > 0, f"Unsupported Charuco board size: {self.board_size}"
+            assert self.square_size is not None and self.square_size > 0, f"Invalid square size for charuco: {self.square_size}"
+            assert 0 < self.min_fraction_of_markers <= 1.0, f"Fraction of markers must be in (0,1], is: {self.min_fraction_of_markers}"
+
+DEFAULT_MARKER_CONFIGS = {
+    "Aruco 5x5_250 72.5mm": MarkerDetectionConfig(),
+    "Aruco 5x5_250 108.5mm": MarkerDetectionConfig(marker_side_length=0.1085),
+    "Charuco 14x9 5x5_250 14.6mm 18.8mm": MarkerDetectionConfig(
+        marker_type="Charuco", marker_side_length=0.0146, aruco_marker_dictionary="5X5_250", board_size=(14, 9), min_fraction_of_markers=1.0, square_size=0.0188
+    ),
+    "No marker": MarkerDetectionConfig(
+        marker_type=None
+    )
+}
+
 
 def assemble_homogeneous_matrix(rvec:np.ndarray, tvec:np.ndarray) -> np.ndarray:
     """
@@ -37,7 +80,8 @@ class ImageMasker:
         edited_images = []
         for bgr_image, hull in zip(bgr_images, hulls):
             img_copy = bgr_image.copy()
-            cv2.fillPoly(img_copy, [hull.astype(np.int32)], color=(0, 0, 0))
+            if hull is not None:
+                cv2.fillPoly(img_copy, [hull.astype(np.int32)], color=(0, 0, 0))
             edited_images.append(img_copy)
         return np.array(edited_images)
 
@@ -64,18 +108,19 @@ class LamaMasker(ImageMasker):
 
 
 
-class ArucoCharucoDetector:
-    def __init__(self):
-        self.marker_remover = LamaMasker()
+class MarkerDetector(ABC):
+    def __init__(self, config:MarkerDetectionConfig):
+        self.marker_remover = ImageMasker()
+        self._config = config
     
-    def set_new_masker(self, masker:str):
+    def set_new_masker(self, masker:Literal["ImageMasker", "LamaMasker"]):
+        assert masker in ["ImageMasker", "LamaMasker"], f"masker: {masker} not known, known: ImageMasker, LamaMasker"
         if masker == "ImageMasker":
             self.marker_remover = ImageMasker()
         elif masker == "LamaMasker":
             self.marker_remover = LamaMasker()
-        else:
-            raise Exception(f"Masker {masker} not found")
 
+    @abstractmethod
     def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float]|None = None)->list[np.ndarray | None]:
         """
         Returns the pose camera_t_marker or for each image in the list as a list of 4x4 homogeneous matrices
@@ -84,77 +129,70 @@ class ArucoCharucoDetector:
         :param distortion_coefficients: the distortion coefficients of the camera
         :return: list of 4x4 homogeneous matrices
         """
-        raise Exception("ArucoCharucoDetector is no concrete class - pose estimation function not implemented")
+        raise NotImplementedError("ArucoCharucoDetector is an abstract base class")
 
+    @abstractmethod
     def remove_markers(self, images:list[np.ndarray])->list[np.ndarray]:
         """
         Returns the images with the markers digitally removed (pixels set to 0)
         :param images: list of HxWx3 RGB images
         :return: list of WxHx3 RGB images without the aruco markers
         """
-        raise Exception("ArucoCharucoDetector is no concrete class - marker removal function not implemented")
+        raise NotImplementedError("ArucoCharucoDetector is an abstract base class")
 
-    def get_meta_data(self):
+    @property
+    def config(self)->MarkerDetectionConfig:
         """
-        Returns some metadata about the detection process
+        Returns the MarkerDetectionConfig to recreate the class
         """
-        return {}
+        return self._config
+    
+    @property
+    def config_dict(self)->dict:
+        """
+        Returns the MarkerDetectionConfig as a dictionary
+        """
+        return asdict(self._config)
+    
+    @staticmethod
+    def from_dict(data:dict)->'MarkerDetector':
+        return MarkerDetector.from_config(MarkerDetectionConfig(**dict))
 
     @classmethod
-    def from_json(cls, json_file:str):
-        """
-        Builds an aruco charuco detector from the json file
-        :param json_file: the location of the json file
-        :return: an aruco/charuco Detector or None
-        """
-        import json, os
-        if not os.path.exists(json_file):
-            print(f"No detector creation json found, returning None {json_file}")
-            return None
+    def from_config(cls,config:MarkerDetectionConfig)->'MarkerDetector':
+        if config.marker_type is None:
+            return NoMarkerDetector(config)
+        if config.marker_type == "Aruco":
+            return ArucoDetector(config)
+        if config.marker_type == "Charuco":
+            return CharucoDetector(config)
+        raise Exception("Unknown marker detector config")
 
-        metadata_dict = json.load(open(json_file))
+class NoMarkerDetector(MarkerDetector):
+    def __init__(self, config:MarkerDetectionConfig):
+        super().__init__(config)
 
-        if metadata_dict["Aruco/Charuco Type"] is None:
-            return None
-        if metadata_dict["Aruco/Charuco Type"] == "Aruco":
-            return ArucoDetector(
-                aruco_marker_side_length=metadata_dict["Aruco marker side length"],
-                aruco_marker_dictionary=metadata_dict["Aruco dictionary"]
-            )
-        elif metadata_dict["Aruco/Charuco Type"] == "Charuco":
-            return CharucoDetector(
-                board_size=(metadata_dict["Charuco board size"][0], metadata_dict["Charuco board size"][1]),
-                square_size=metadata_dict["Charuco square size"],
-                marker_size=metadata_dict["Aruco marker side length"],
-                aruco_dictionary=metadata_dict["Aruco dictionary"],
-                min_fraction_of_markers=metadata_dict["Min fraction of markers"]
-            )
-        else:
-            raise Exception("Unknown aruco charuco type")
+    def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float]|None = None)->list[np.ndarray | None]:
+        return [None]*len(images)
+    
+    def remove_markers(self, images:list[np.ndarray])->list[np.ndarray]:
+        return images
 
 
-class ArucoDetector(ArucoCharucoDetector):
-    def __init__(
-            self,
-            aruco_marker_side_length:float,
-            aruco_marker_dictionary:str = "5X5_250",
-    ):
-        super().__init__()
-        self.meta_data = {
-            "Aruco/Charuco Type":"Aruco",
-            "Aruco marker side length": aruco_marker_side_length,
-            "Aruco dictionary": aruco_marker_dictionary,
-        }
+class ArucoDetector(MarkerDetector):
+    def __init__(self,config:MarkerDetectionConfig):
+        super().__init__(config)
 
-        self.aruco_marker_side_length = aruco_marker_side_length
-        self.aruco_marker_dictionary = cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY_OPTIONS[aruco_marker_dictionary])
+        self.aruco_marker_dictionary = cv2.aruco.getPredefinedDictionary(
+            ARUCO_DICTIONARY_OPTIONS[self.config.aruco_marker_dictionary]
+        )
         detector_params = cv2.aruco.DetectorParameters()
         detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.detector = cv2.aruco.ArucoDetector(self.aruco_marker_dictionary, detector_params)
 
     def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float]|None = None)->list[np.ndarray | None]:
 
-        marker_points = np.array([[-1,1,0], [1,1,0], [1,-1,0], [-1,-1,0]])*0.5*self.aruco_marker_side_length
+        marker_points = np.array([[-1,1,0], [1,1,0], [1,-1,0], [-1,-1,0]])*0.5*self.config.marker_side_length
 
         camera_t_aruco_s = []
         for index, image in enumerate(images):
@@ -194,39 +232,18 @@ class ArucoDetector(ArucoCharucoDetector):
             masked_images.append(image_copy)
         return masked_images
 
-    def get_meta_data(self):
-        return self.meta_data
 
-
-class CharucoDetector(ArucoCharucoDetector):
-    def __init__(
-            self,
-            board_size:tuple[int,int] = (14, 9),
-            square_size:float = 0.0188,
-            marker_size:float = 0.0146,
-            aruco_dictionary:str = "5X5_250",
-            min_fraction_of_markers:float = 1.0
-    ):
-        super().__init__()
-        self.square_size = square_size
-        self.marker_size = marker_size
-        self.board = cv2.aruco.CharucoBoard(board_size, square_size, marker_size, cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY_OPTIONS[aruco_dictionary]))
-        self.min_number_of_markers = min_fraction_of_markers * (board_size[0] * board_size[1]) * 0.5
+class CharucoDetector(MarkerDetector):
+    def __init__(self,config:MarkerDetectionConfig):
+        super().__init__(config=config)
+        self.board = cv2.aruco.CharucoBoard(
+            config.board_size, config.square_size, config.marker_side_length, cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY_OPTIONS[config.aruco_marker_dictionary])
+        )
+        self.min_number_of_markers = config.min_fraction_of_markers * (config.board_size[0] * config.board_size[1]) * 0.5
 
         detector_params = cv2.aruco.DetectorParameters()
         detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.detector = cv2.aruco.CharucoDetector(board=self.board, charucoParams=cv2.aruco.CharucoParameters(), detectorParams=detector_params)
-
-
-        self.metadata = {
-            "Aruco/Charuco Type":"Charuco",
-            "Aruco marker side length": marker_size,
-            "Charuco square size": square_size,
-            "Aruco dictionary": aruco_dictionary,
-            "Min fraction of markers": min_fraction_of_markers,
-            "Charuco board size": [board_size[0], board_size[1]]
-        }
-
 
     def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float]|None = None)->list[np.ndarray | None]:
         """
@@ -295,7 +312,7 @@ class CharucoDetector(ArucoCharucoDetector):
             for marker in marker_corners:
                 marker = marker[0]
                 marker_avg = np.mean(marker, axis=0)
-                marker_square = marker_avg+((marker-marker_avg)*self.square_size/self.marker_size)*2
+                marker_square = marker_avg+((marker-marker_avg)*self.config.square_size/self.config.marker_side_length)*2
                 marker_squares.append(marker_square)
             if len(marker_squares) == 0:
                 hulls.append(None)
@@ -308,16 +325,3 @@ class CharucoDetector(ArucoCharucoDetector):
             hulls.append(hull_points)
 
         return self.marker_remover.remove_area(np.array(images), hulls)
-    
-    def get_meta_data(self):
-        return self.metadata
-
-if __name__ == "__main__":
-    import os
-    image_folder = "../datasets/charuco1/robot"
-    if not os.path.exists(image_folder):
-        Exception("Folder {image_folder} does not exist")
-    image_paths = [f"{image_folder}/{folder}/rgb.png" for folder in os.listdir(image_folder)]
-    images = [cv2.imread(name) for name in image_paths]
-    charuco_detector = CharucoDetector()
-    charuco_detector.remove_markers(images)

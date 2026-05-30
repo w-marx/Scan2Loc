@@ -17,99 +17,6 @@ from foreground_segmentation import get_object_masks, Sam3Prompt, display_image_
 
 from ellipsoid_utilities_numpy import *
 
-
-def images_to_objects(
-        bgr_images:np.ndarray,
-        xyz_images:np.ndarray,
-        prompt:Sam3Prompt,
-        max_centroid_dist: float = 0.05,
-        visualize_masks:bool = False,
-        min_number_points_per_detected_object:int = 1000,
-        min_cluster_size:int = 2
-)-> tuple[np.ndarray, np.ndarray]:
-    """
-    Generates M ellipsoids from an environment
-    :param bgr_images: An NxHxWx3-uint8 array of BGR images
-    :param xyz_images: An NxHxWx3-float array of 3d points in the base frame
-    :param prompt: The Sam3Prompt to detect objects in an image
-    :param max_centroid_dist: The maximum distance in meters between two object centers in different images to be considered the same
-    :return: the base_t_ellipsoid hom. matrices (Mx4x4) and the primal quadratics (Mx4x4)
-    """
-    assert all([assert_mxnx3_np_uint8_image(bgr_img) for bgr_img in bgr_images])
-    assert  xyz_images.ndim == 4 and xyz_images.shape[-1] == 3
-    assert  bgr_images.shape[:3] == xyz_images.shape[:3]
-
-    # Generate objects
-
-    # (n-all-objs)xHxW-bool masks
-    object_avg_colors = []
-    primal_quaddratics = []
-    base_t_ellipsoid_s = []
-
-    for bgr_img, xyz_img in zip(bgr_images, xyz_images):
-        print(f"started mask generation")
-        object_masks = get_object_masks(bgr_img, prompt)
-        for object_mask in object_masks:
-            pc = xyz_img[object_mask > 0]
-            if pc.shape[0] < min_number_points_per_detected_object:
-                continue
-            object_avg_colors.append(np.mean(bgr_img[object_mask], axis = 0))
-            base_t_ellipsoid, primal_quadratic = fit_ellipsoid_to_3d_point_cloud(pc, visualize=False)
-            base_t_ellipsoid_s.append(base_t_ellipsoid)
-            primal_quaddratics.append(primal_quadratic)
-        if visualize_masks:
-            plt.figure(figsize=(15, 5))
-            plt.imshow(bgr_img)
-            for obj_mask in object_masks:
-                plt.imshow(obj_mask, alpha=0.4, cmap='jet')
-            plt.show()
-    
-    object_avg_colors = np.stack(object_avg_colors, axis = 0)
-    base_t_ellipsoid_s = np.stack(base_t_ellipsoid_s, axis = 0)
-    primal_quaddratics = np.stack(primal_quaddratics, axis = 0)
-
-    visualize_primal_quadratics(
-        base_t_ellipsoid_s=base_t_ellipsoid_s,
-        primal_quadratic_s=primal_quaddratics
-    )
-
-    # Join similar objects
-    n = object_avg_colors.shape[0]
-    print(f"number of objects")
-
-    # NxN adjecency matrix
-    centroid_distance_matrix = np.linalg.norm(
-        base_t_ellipsoid_s[:, :3, 3][:, None] - base_t_ellipsoid_s[:, :3, 3][None, :], axis=-1
-    )
-    centroid_distance_matrix_mask = centroid_distance_matrix < max_centroid_dist
-
-    union_find = UnionFind(n)
-    for row_idx in range(n):
-        for col_idx in range(row_idx+1, n):
-            if centroid_distance_matrix_mask[row_idx, col_idx]:
-                union_find.union(row_idx, col_idx)
-
-    fused_base_t_ellipsoid_s = []
-    fused_primal_quaddratic_s = []
-    for i,cluster in enumerate(union_find.return_clusters()):
-        if len(cluster) < min_cluster_size:
-            continue
-        b_t_e, p_q = fuse_ellipsoids(base_t_ellipsoid_s[cluster], primal_quaddratics[cluster])
-        fused_base_t_ellipsoid_s.append(b_t_e)
-        fused_primal_quaddratic_s.append(p_q)
-    fused_base_t_ellipsoid_s = np.array(fused_base_t_ellipsoid_s)
-    fused_primal_quaddratic_s = np.array(fused_primal_quaddratic_s)
-    
-    visualize_primal_quadratics(
-        base_t_ellipsoid_s=fused_base_t_ellipsoid_s,
-        primal_quadratic_s=fused_primal_quaddratic_s,
-        bg_point_cloud=xyz_images.reshape(-1,3),
-        bg_point_cloud_colors=bgr_images.reshape(-1,3)
-    )
-
-    return fused_base_t_ellipsoid_s, fused_primal_quaddratic_s
-
-
 class ImageMaskStorage:
     """
     Stores boolean masks memory efficient (1 bit per bool)
@@ -160,7 +67,6 @@ def images_to_primal_quadratics(
         visualize_masks:bool = False,
         min_number_points_per_detected_object:int = 1000,
         min_cluster_size:int = 1,
-        allow_joining_in_same_img:bool = False
 )-> tuple[np.ndarray, np.ndarray]:
     """
     Generates M ellipsoids from an environment
@@ -334,7 +240,6 @@ class EllipsoidPredictor(PosePredictor):
         est_base_t_cam = None
         while est_base_t_cam is None and number_tries < self.number_tries_b4_giving_up:
             idx = self.sheduler.get_best()
-            print(f"idx: {idx}")
             est_base_t_cam = self.est_base_t_cam2_helper(
                 cam1_bgr_image = self.cam1_bgr_images[idx],
                 base_xyz_image = self.cam1_xyz_images[idx],
@@ -378,7 +283,7 @@ class EllipsoidPredictor(PosePredictor):
             primal_conicals=np.array(observed_primal_conics)[obs_match_idxs],
             intrinsic_cam_mat=self.cam2_intrinsic_mtx,
             config=self.pne_optimizer_config,
-            visualize_result=cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
+            visualize_result=None#cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
         )
         time_tracker.add_time_stamp("PNE optimisation")
         return cam2_t_base_opt
@@ -441,7 +346,9 @@ if __name__ == "__main__":
     print(f"avg translational error: {np.round(grader.avg_translational_error()*1000, 1)} mm")
     print(f"median rot error: {np.round(np.rad2deg(grader.median_rotational_error()), 2)} degrees")
     print(f"median translational error: {np.round(grader.median_translational_error()*1000, 1)} mm")
-    print(f"sucess_ratio: {np.round(grader.sucess_ratio(),2)}")
+    print(f"sucess_ratio: {np.round(grader.success_ratio(),2)}")
+
+    grader.visualize_predictions(robot_env=robot_data)
 
     print(f"tt1:")
     tt1.print_report()

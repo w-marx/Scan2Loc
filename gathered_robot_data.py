@@ -1,7 +1,7 @@
 import os
 import numpy as np
 
-from aruco_charuco_detection import ArucoCharucoDetector
+from aruco_charuco_detection import MarkerDetector
 from shared_utilities import *
 
 class GatheredRobotData:
@@ -13,7 +13,7 @@ class GatheredRobotData:
         depth_images:np.ndarray,
         base_t_gripper_s:np.ndarray,
         camera_t_marker_s:list[None | np.ndarray],
-        marker_detector: None | ArucoCharucoDetector,
+        marker_detector: MarkerDetector,
         gripper_t_cam: np.ndarray,
     ):
         """
@@ -47,7 +47,7 @@ class GatheredRobotData:
         assert [m is None or assert_homogeneous_mat(m) for m in camera_t_marker_s]
         self._camera_t_marker_s = camera_t_marker_s
 
-        assert marker_detector is None or isinstance(marker_detector,ArucoCharucoDetector)
+        assert isinstance(marker_detector,MarkerDetector)
         self._marker_detector = marker_detector
 
         assert assert_homogeneous_mat(gripper_t_cam)
@@ -68,7 +68,7 @@ class GatheredRobotData:
         │       ├──  depth.npy
         │       └──  poses.json
         ├── gripper_t_cam.npy
-        ├── metadata.json
+        ├── marker_detector_config.json
         └── robot_cam_calibration.json
 
         The robot_cam_calibration.json file should contain the fields:
@@ -79,7 +79,7 @@ class GatheredRobotData:
         And may contain the field:
         -`camera_t_marker`
 
-        The metadata.json file should contain the fields to build an aruco marker detector.
+        The marker_detector_config.json file should contain the fields to build an aruco marker detector.
         :param folder_path: the location of the input data folder
         """
         import os, cv2, json
@@ -100,7 +100,9 @@ class GatheredRobotData:
 
         robot_cam_calibration = json.loads(open(f"{folder_path}/robot_cam_calibration.json").read())
 
-        marker_detector = ArucoCharucoDetector.from_json(f"{folder_path}/metadata.json")
+        with open(f"{folder_path}/marker_detector_config.json") as f:
+            marker_config_dict = json.load(f)
+        marker_detector = MarkerDetector.from_dict(marker_config_dict)
 
         gripper_t_cam = np.load(f"{folder_path}/gripper_t_cam.npy")
 
@@ -140,8 +142,8 @@ class GatheredRobotData:
             with open(f"{robot_folder}/poses.json", 'w') as f:
                 json.dump(poses_dict, f, indent=4)
 
-        with open(f"{location}/metadata.json", 'w') as f:
-            json.dump(self.marker_detector.get_meta_data() if self.marker_detector is not None else None, f, indent=4)
+        with open(f"{location}/marker_detector_config.json", 'w') as f:
+            json.dump(self.marker_detector.config_dict, f, indent=4)
 
         robot_cam_calibration = {"camera_intrinsic_matrix":self.cam_intrinsic_mtx.tolist()}
         if dist_coeff is not None:
@@ -220,5 +222,5 @@ class GatheredRobotData:
         ]
 
     @property
-    def marker_detector(self) -> None | ArucoCharucoDetector:
+    def marker_detector(self) -> None | MarkerDetector:
         return self._marker_detector

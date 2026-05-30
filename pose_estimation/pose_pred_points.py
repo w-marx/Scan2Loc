@@ -142,7 +142,9 @@ if __name__ == "__main__":
     print(f"avg translational error: {np.round(grader.avg_translational_error()*1000, 1)} mm")
     print(f"median rot error: {np.round(np.rad2deg(grader.median_rotational_error()), 2)} degrees")
     print(f"median translational error: {np.round(grader.median_translational_error()*1000, 1)} mm")
-    print(f"sucess_ratio: {np.round(grader.sucess_ratio(),2)}")
+    print(f"sucess_ratio: {np.round(grader.success_ratio(),2)}")
+
+    grader.visualize_predictions(robot_env=robot_data)
 
     print(f"tt1:")
     tt1.print_report()
