@@ -1,14 +1,37 @@
-from typing import Literal, Callable
+from typing import Literal
 from PIL import Image
 import numpy as np
 import cv2, sys, os, torch
+from abc import ABC, abstractmethod
+from ransac_pose_estimation import * 
+from image_augmentation import * 
+from sheduler import *
+from dataclasses import dataclass, field
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared_utilities import *
 
 import matplotlib.pyplot as plt
 
-class ExtractAndMatch:
+class ExtractAndMatch(ABC):
+
+    @abstractmethod
+    def get_features(self, img_rgb:np.ndarray):
+        """
+        Will return the features for this image
+        """
+        pass
+
+    @abstractmethod
+    def match_features(self, features1, features2) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Will match the features and return image coor
+        :param features1: Features extracted from one image using `get_features`
+        :param features2: Features extracted from another image using `get_features`
+        :return: a tuple of image Points as 2 Nx2 numpy arrays (in the x-y format)
+        """
+        pass
+
     def get_matched_points(self,img1_rgb:np.ndarray, img2_rgb:np.ndarray, plot_results:bool = False)->tuple[np.ndarray, np.ndarray]:
         """
         :param img1_rgb: An RGB image as HxWx3-uint8 numpy array
@@ -16,7 +39,12 @@ class ExtractAndMatch:
         :param plot_results: wheather to plot the matched features
         :return: a tuple of image Points as 2 Nx2 numpy arrays (in the x-y format)
         """
-        raise NotImplementedError("Not implemented in base class")
+        points1, points2 = self.match_features(self.get_features(img1_rgb), self.get_features(img2_rgb))
+        if plot_results:
+            self.plot_matched_points(
+                img1_rgb=img1_rgb, img2_rgb=img2_rgb, points1=points1, points2=points2
+            )
+        return points1, points2
     
     @staticmethod
     def plot_matched_points(img1_rgb:np.ndarray, img2_rgb:np.ndarray, points1:np.ndarray, points2:np.ndarray):
@@ -99,28 +127,21 @@ class ExtractAndLightGlue(ExtractAndMatch):
         self.matcher = LightGlue(features=self.feature_name).eval().cuda()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    def get_matched_points(self,img1_rgb:np.ndarray, img2_rgb:np.ndarray, plot_results:bool = False)->tuple[np.ndarray, np.ndarray]:
-        _ = assert_mxnx3_np_uint8_image(img1_rgb)
-        _ = assert_mxnx3_np_uint8_image(img2_rgb)
+    def get_features(self, img_rgb:np.ndarray):
+        assert assert_mxnx3_np_uint8_image(img_rgb)
 
-        cam1_image = self._numpy_image_to_torch(img1_rgb)
-        cam2_image = self._numpy_image_to_torch(img2_rgb)
-
-        feats_cam1 = self.extractor.extract(cam1_image.to(self.device))
-        feats_cam2 = self.extractor.extract(cam2_image.to(self.device))
-
-        matches12 = self.matcher({'image0': feats_cam1, 'image1': feats_cam2, })
-        feats_cam1, feats_cam2, matches12 = [self._rbd(x) for x in [feats_cam1, feats_cam2, matches12]]
+        torch_image = self._numpy_image_to_torch(img_rgb)
+        feats_cam1 = self.extractor.extract(torch_image.to(self.device))
+        return feats_cam1
+    
+    def match_features(self, features1, features2) -> tuple[np.ndarray, np.ndarray]:
+        matches12 = self.matcher({'image0': features1, 'image1': features2, })
+        feats_cam1, feats_cam2, matches12 = [self._rbd(x) for x in [features1, features2, matches12]]
 
         feats_cam1_keypoints = feats_cam1['keypoints']
         feats_cam2_keypoints = feats_cam2['keypoints']
         image_points_cam1_cpu_np = feats_cam1_keypoints[matches12['matches'][..., 0]].cpu().numpy()
         image_points_cam2_cpu_np = feats_cam2_keypoints[matches12['matches'][..., 1]].cpu().numpy()
-
-        if plot_results:
-            self.plot_matched_points(
-                img1_rgb=img1_rgb, img2_rgb=img2_rgb, points1=image_points_cam1_cpu_np, points2=image_points_cam2_cpu_np
-            )
 
         return image_points_cam1_cpu_np, image_points_cam2_cpu_np
     
@@ -143,26 +164,26 @@ class ExtractAndMatchLoMa(ExtractAndMatch):
 
         self.model = LoMa(loma_variant_s[loma_variant])
 
-    def get_matched_points(self,img1_rgb:np.ndarray, img2_rgb:np.ndarray, plot_results:bool = False)->tuple[np.ndarray, np.ndarray]:
-        _ = assert_mxnx3_np_uint8_image(img1_rgb)
-        _ = assert_mxnx3_np_uint8_image(img2_rgb)
+    def get_features(self, img_rgb:np.ndarray):
+        """
+        :param img_rgb: An HxWx3-unint8 RGB image
+        :return: an torch tensor of the image with height & width %14 = 0
+        """
+        assert assert_mxnx3_np_uint8_image(img_rgb)
 
-        h1, w1 = (img1_rgb.shape[0] // 14)*14, (img1_rgb.shape[1] // 14)*14
-        img1_rgb_m14 = img1_rgb[:h1, : w1, :]
-
-        h2, w2 = (img2_rgb.shape[0] // 14)*14, (img2_rgb.shape[1] // 14)*14
-        img2_rgb_m14 = img2_rgb[:h2, : w2, :]
+        h1, w1 = (img_rgb.shape[0] // 14)*14, (img_rgb.shape[1] // 14)*14
+        img_rgb_m14 = img_rgb[:h1, : w1, :]
+        img_tensor = torch.from_numpy(img_rgb_m14).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+        return img_tensor
     
-        img1_tensor = torch.from_numpy(img1_rgb_m14).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-        img2_tensor = torch.from_numpy(img2_rgb_m14).permute(2, 0, 1).unsqueeze(0).float() / 255.0
 
-        kpts1, kpts2 = self.model.match(img1_tensor, img2_tensor)
-
-        if plot_results:
-            self.plot_matched_points(
-                img1_rgb=img1_rgb, img2_rgb=img2_rgb, points1=kpts1, points2=kpts2
-            )
-        
+    def match_features(self, features1, features2) -> tuple[np.ndarray, np.ndarray]:
+        """
+        :param features1: A torch tensor of a image with height & width %14 = 0
+        :param features2: Another torch tensor of a image with height & width %14 = 0
+        :return: a tuple of image Points as 2 Nx2 numpy arrays (in the x-y format)
+        """
+        kpts1, kpts2 = self.model.match(features1, features2)
         return kpts1, kpts2
 
 class ExtractAndMatchEffLoFTR(ExtractAndMatch):
@@ -179,26 +200,153 @@ class ExtractAndMatchEffLoFTR(ExtractAndMatch):
         self.model = AutoModelForKeypointMatching.from_pretrained("zju-community/efficientloftr")
         self.matching_threshhold = matching_threshhold
 
-    def get_matched_points(self,img1_rgb:np.ndarray, img2_rgb:np.ndarray, plot_results:bool = False)->tuple[np.ndarray, np.ndarray]:
-        _ = assert_mxnx3_np_uint8_image(img1_rgb)
-        _ = assert_mxnx3_np_uint8_image(img2_rgb)
+    def get_features(self, img_rgb:np.ndarray):
+        """
+        Turns the rgb image into an pil image
+        """
+        assert assert_mxnx3_np_uint8_image(img_rgb)
+        return Image.fromarray(img_rgb)
     
-        pil_img1 = Image.fromarray(img1_rgb)
-        pil_img2 = Image.fromarray(img2_rgb)
 
-        inputs = self.processor([pil_img1, pil_img2], return_tensors="pt")
+    def match_features(self, features1, features2) -> tuple[np.ndarray, np.ndarray]:
+        """
+        :param features1: A PIL Image
+        :param features2: Another PIL Image
+        :return: a tuple of image Points as 2 Nx2 numpy arrays (in the x-y format)
+        """
+        inputs = self.processor([features1, features2], return_tensors="pt")
         with torch.no_grad():
             outputs = self.model(**inputs)
 
-        image_sizes = [[(pil_img1.height, pil_img1.width),(pil_img2.height, pil_img2.width)]]
+        image_sizes = [[(features1.height, features1.width),(features2.height, features2.width)]]
         output = self.processor.post_process_keypoint_matching(outputs, image_sizes, threshold=self.matching_threshhold)[0]
 
         kpts1 = output["keypoints0"].cpu().numpy().astype(np.float32)
         kpts2 = output["keypoints1"].cpu().numpy().astype(np.float32)
-
-        if plot_results:
-            self.plot_matched_points(
-                img1_rgb=img1_rgb, img2_rgb=img2_rgb, points1=kpts1, points2=kpts2
-            )
-        
         return kpts1, kpts2
+
+@dataclass
+class ExtractAndMatchWrapperConfig:
+    extract_and_match:ExtractAndMatch = field(
+        default_factory=ExtractAndMatchLoMa
+    )
+    use_rotation_augmentations:bool = False
+    crop_augmentations:list[float] | None = None
+    ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise
+    sheduler:type[Sheduler] = EMASheduler
+
+
+
+class ExtractAndMatchWrapper:
+    def __init__(
+            self,
+            cam2_mtx:np.ndarray,
+            cam1_bgr_images:np.ndarray,
+            cam1_xyz_images:np.ndarray,
+            config:ExtractAndMatchWrapperConfig
+        ):
+
+        self.cam2_mtx = cam2_mtx
+        self.extract_and_match = config.extract_and_match
+        self.ransac_config = config.ransac_config
+
+        self.rotation_augmentations = [Augmentation()]
+        if config.use_rotation_augmentations:
+            self.rotation_augmentations.append(Rotate180Deg())
+        
+        self.crop_augmentations = [Augmentation()]
+        if config.crop_augmentations is not None:
+            self.crop_augmentations += [CropImage(x) for x in config.crop_augmentations if 0 <= x < 1.0]  
+
+        self.cam1_features = [self.extract_and_match.get_features(img) for img in cam1_bgr_images]
+        self.cam1_xyz_images = cam1_xyz_images
+
+        self.sheduler = config.sheduler(cam1_bgr_images.shape[0])
+
+    def get_sheduler(self):
+        return self.sheduler
+    
+    def est_base_t_cam2_with_retry(self,cam2_bgr_image: np.ndarray, number_retry:int = 1) -> np.ndarray | None:
+        """
+        Will try to match points until a pose is found or number_retry was reached
+        """
+        base_t_cam_w_points = self.est_base_t_cam2_and_points_with_retry(
+            cam2_bgr_image=cam2_bgr_image, 
+            number_retry=number_retry,
+        )
+        return None if base_t_cam_w_points is None else base_t_cam_w_points[0]
+    
+    def est_base_t_cam2_and_points_with_retry(self,cam2_bgr_image: np.ndarray, number_retry:int = 1) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """
+        Will try to match points until a pose is found or number_retry was reached
+        :return None or base T_cam, points_image_1, points_image_2, world_obj_points, inliers
+        """
+        number_tries = 0
+        est_base_t_cam_and_points = None
+        cam2_rgb_image = cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
+
+        while est_base_t_cam_and_points is None and number_tries < number_retry:
+            idx = self.sheduler.get_best()
+            est_base_t_cam_and_points = self.est_base_t_cam2_and_points(
+                idx=idx,
+                cam2_rgb_image = cam2_rgb_image,
+            )
+            self.sheduler.adjust(idx, est_base_t_cam_and_points is not None)
+            number_tries += 1
+        return est_base_t_cam_and_points
+
+    def est_base_t_cam2_and_points( self,
+                                    idx:int,
+                                    cam2_rgb_image: np.ndarray,
+                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int]] | None:
+        """
+        :return: None or base T_cam, points_image_1, points_image_2, world_obj_points, inliers
+        """
+        augmentation_options_names = []
+        world_obj_points_options = []
+        image_points_cam2_options = []
+
+        for c_aug in self.crop_augmentations:
+            for r_aug in self.rotation_augmentations:
+                augmented_image, backward_aug2 = c_aug.forward(cam2_rgb_image)
+                augmented_image, backward_aug1 = r_aug.forward(augmented_image)
+
+                features_cam2 = self.extract_and_match.get_features(augmented_image)
+                image_points_cam1, image_points_cam2 = self.extract_and_match.match_features(
+                    features1=self.cam1_features[idx],
+                    features2=features_cam2
+                )
+
+                world_obj_points = np.array([self.cam1_xyz_images[idx][int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1])
+                if world_obj_points.shape[0] > 5:
+                    augmentation_options_names.append(f"{c_aug}x{r_aug}")
+                    world_obj_points_options.append(world_obj_points)
+                    image_points_cam2_options.append(backward_aug2(backward_aug1(image_points_cam2)))
+        
+        if len(world_obj_points_options) < 1:
+            return None
+    
+        best_option_idx = np.argmax(np.array([x.shape[0] for x in world_obj_points_options]))
+        world_obj_points = world_obj_points_options[best_option_idx]
+        image_points_cam2 = image_points_cam2_options[best_option_idx]
+
+        cam2_t_base__inliers = estimate_point_pose_ransac(
+            world_points=world_obj_points,
+            img_points=image_points_cam2,
+            intrinsic_matrix=self.cam2_mtx,
+            config=self.ransac_config
+        )
+        if cam2_t_base__inliers is None:
+            return None
+        return np.linalg.inv(cam2_t_base__inliers[0]), image_points_cam1, image_points_cam2, world_obj_points, cam2_t_base__inliers[1]
+
+
+    def est_base_t_cam2(self,
+                        idx:int,
+                        cam2_rgb_image: np.ndarray,
+                        ) -> np.ndarray | None:
+        base_t_cam_w_points = self.est_base_t_cam2_and_points(
+            idx=idx,
+            cam2_rgb_image=cam2_rgb_image
+        )
+        return None if base_t_cam_w_points is None else base_t_cam_w_points[0]

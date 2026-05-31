@@ -18,10 +18,11 @@ class PosePredictor(ABC):
         pass
 
     @abstractmethod
-    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray,time_tracker:TimeTracker) -> np.ndarray | None:
+    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 2, time_tracker:TimeTracker = TimeTracker()) -> np.ndarray | None:
         """
         Predicts the homogenous transformation base_t_cam2.
         :param cam2_bgr_image: HxWx3-uint8 bgr image
+        :param number_retry: The number of retries the predictor is allowed to do, until returning None
         :param time_tracker: a time-tracker object, that will be used by the Pose Predictor to note the runtimes
         :return: A 4x4 hom. transformation matrix: base T_cam2 or None if it fails.
         """
@@ -36,79 +37,6 @@ class PosePredictor(ABC):
         :param time_tracker: a time-tracker object, that will be used by the Pose Predictor to note the runtimes
         """
         return None
-    
-
-@dataclass(frozen=True, kw_only=True)
-class RansacPoseEstimationConfig:
-    """
-    Sets the parameters for an RANSAC 3d pose estimation.
-    :param min_number_inlier_afterwards: the minimum number of inlier's after RANSAC
-    :param iterations: the number of iterations
-    :param reprojection_error: the reprojection error for RANSAC
-    :param confidence: the confidence for RANSAC
-    :param method: The solving method e.g. cv2.SOLVEPNP_EPNP
-    """
-    min_number_inlier_afterwards:int = 6
-    iterations:int = 500
-    reprojection_error:float = 5.0
-    confidence:float = 0.9
-    method:int = cv2.SOLVEPNP_EPNP
-
-    def __post_init__(self):
-        assert 0 < self.min_number_inlier_afterwards
-        assert 0 < self.iterations
-        assert 0 <= self.reprojection_error
-        assert 0 <= self.confidence <= 1.0
-
-pose_estimation_ransaac_config_10ms = RansacPoseEstimationConfig(
-    min_number_inlier_afterwards = 6,
-    iterations = 500,
-    reprojection_error = 5.0,
-    confidence = 0.9
-)
-
-pose_estimation_ransaac_config_precise = RansacPoseEstimationConfig(
-    min_number_inlier_afterwards = 6,
-    iterations = 10000,
-    reprojection_error = 5.0,
-    confidence = 0.99
-)
-
-def estimate_point_pose_ransac(
-        img_points:np.ndarray, 
-        world_points:np.ndarray,
-        intrinsic_matrix:np.ndarray, 
-        config:RansacPoseEstimationConfig
-    )->tuple[np.ndarray, np.ndarray]|None:
-    """
-    Solves for the cam_t_world position using ransac
-    :param img_points: Nx2 array of 2d points [[x1, y1], ...] wher pi in img_points corresponds to pi in world_points
-    :param world_points: Nx3 array of 3d points [[x1, y1, z1], ...]
-    :param intrinsic_matrix: 3x3 intrinsic matrix
-    :param config: The RANSAC configuration to use
-    :return None if optimisation fails, else tuple[cam_t_base, inlier_indices] (cam_t_base is 4x4 hom)
-    """
-    number_points = img_points.shape[0]
-    assert world_points.shape[0] == number_points, f"cant solve: {number_points} & {world_points.shape[0]} points"
-    assert img_points.ndim == 2 and img_points.shape[-1] == 2, f"wrong 2d pc shape: {img_points.shape}"
-    assert world_points.ndim == 2 and world_points.shape[-1] == 3, f"wrong 2d pc shape: {world_points.shape}"
-
-
-    if world_points.shape[0] < min(5, config.min_number_inlier_afterwards):
-        return None
-
-    success, r_img_t_obj, t_img_t_obj, inliers = cv2.solvePnPRansac(
-        world_points, img_points, intrinsic_matrix, None,
-        iterationsCount = config.iterations,
-        reprojectionError=config.reprojection_error,
-        confidence = config.confidence,
-        flags = config.method
-    )
-        
-    if not success or len(inliers) < config.min_number_inlier_afterwards:
-        return None
-    return r_t_to_hom(cv2.Rodrigues(r_img_t_obj)[0], t_img_t_obj.flatten()), inliers.flatten()
-
 
 class OnePredictorRecordingGrader:
     def __init__(self,
@@ -133,7 +61,7 @@ class OnePredictorRecordingGrader:
         predicted_b_t_h_s = []
 
         for  image in tqdm(headset_data.bgr_image_s):
-            predicted_b_t_h_s.append(predictor.est_base_t_cam2(image, subcomponent_time_tracker))
+            predicted_b_t_h_s.append(predictor.est_base_t_cam2(image, time_tracker=subcomponent_time_tracker))
             prediction_time_tracker.add_time_stamp("Single frame from scratch prediction")
 
         self.predicted_b_t_h_s = predicted_b_t_h_s
@@ -210,7 +138,7 @@ class OnePredictorRecordingGrader:
         """
         return len(self.predicted_b_t_h_s_not_none)/len(self.predicted_b_t_h_s)
 
-    def visualize_predictions(self, robot_env:RobotEnvironment|None = None)->None:
+    def visualize_predictions(self, robot_env:RobotEnvironment|None = None, show_label:bool = False)->None:
         """
         Visualizes the predictions made by the predictor using open3d
         :param robot_env: RobotEnvironment or None, if not None will be added to the plot
@@ -225,33 +153,33 @@ class OnePredictorRecordingGrader:
             to_vis = robot_env.visualize_3d_data(visualize=False)
 
         for i, (predicted_b_t_h, b_t_h) in enumerate(zip(self.predicted_b_t_h_s, self._headset_data.robot_base_t_headset_s)):
-            if b_t_h is not None:
-                cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05)
+            if b_t_h is not None and show_label:
+                cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.005)
                 cam_frame.transform(b_t_h)
                 to_vis.append(cam_frame)
                 camera_line_set = create_3d_camera(
                     base_t_camera=b_t_h,
                     intrinsics=self._headset_data.intrinsic_cam_mtx,
                     hxw_img=self._headset_data.bgr_image_s[i],
-                    scale=0.1
+                    scale=0.01
                 )
                 camera_line_set.paint_uniform_color(colors[i])
                 to_vis.append(camera_line_set)
 
             if predicted_b_t_h is not None:
-                cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05)
+                cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.005)
                 cam_frame.transform(predicted_b_t_h)
                 to_vis.append(cam_frame)
                 camera_line_set = create_3d_camera(
                     base_t_camera=predicted_b_t_h,
                     intrinsics=self._headset_data.intrinsic_cam_mtx,
                     hxw_img=self._headset_data.bgr_image_s[i],
-                    scale=0.05
+                    scale=0.01
                 )
                 camera_line_set.paint_uniform_color(colors[i])
                 to_vis.append(camera_line_set)
 
-            if b_t_h is not None and predicted_b_t_h is not None:
+            if b_t_h is not None and predicted_b_t_h is not None and show_label:
                 line_set = o3d.geometry.LineSet()
                 line_set.points = o3d.utility.Vector3dVector([b_t_h[:3,3], predicted_b_t_h[:3,3]])
                 line_set.lines = o3d.utility.Vector2iVector([[0,1]])

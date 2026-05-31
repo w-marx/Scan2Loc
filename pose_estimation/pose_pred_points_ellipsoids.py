@@ -200,54 +200,53 @@ def match_gaussians(sigma_mu1_s, sigma_mu2_s):
 
 
 
-
 class EllipsoidPredictor(PosePredictor):
     def __init__(
             self,
             cam2_intrinsic_mtx:np.ndarray,
             cam1_bgr_images:np.ndarray,
             cam1_xyz_images:np.ndarray,
-            extract_and_match:ExtractAndMatch = ExtractAndMatchLoMa(),
-            pne_config:PnEOptimizerConfig = PnEOptimizerConfig(),
-            ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise,
-            sheduler:Sheduler = EMASheduler,
-            number_tries_b4_giving_up:int = 1,
+            extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig,
+            pne_optimizer_config:PnEOptimizerConfig = PnEOptimizerConfig(),
+            time_tracker_init:TimeTracker = TimeTracker()
         ):
         super().__init__()
+        self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
+        self.pne_optimizer_config = pne_optimizer_config
+
+
+        time_tracker_init.reset_elapsed_time()
         b_t_e_s, prim_quad_s = images_to_primal_quadratics(
             bgr_images=cam1_bgr_images,
             xyz_images=cam1_xyz_images,
             prompt=Sam3Prompt(),
             min_cluster_size=2
         )
-        self.cam1_bgr_images = cam1_bgr_images
-        self.cam1_xyz_images = cam1_xyz_images
         self.base_t_ellipsoid_s = b_t_e_s
         self.primal_quadratic_s = prim_quad_s
-        self.pne_optimizer_config = pne_config
-        self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
-        self.extract_and_match = extract_and_match
-        self.initial_raansac_guess_config = ransac_config
-        self.sheduler = sheduler(cam1_bgr_images.shape[0])
-        self.number_tries_b4_giving_up = number_tries_b4_giving_up
+        time_tracker_init.add_time_stamp("Primal quadratics creation")
 
 
-    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray,time_tracker:TimeTracker) -> np.ndarray | None:
+        self.extract_and_match_wrapper = ExtractAndMatchWrapper(
+            cam2_mtx=cam2_intrinsic_mtx,
+            cam1_bgr_images=cam1_bgr_images,
+            cam1_xyz_images=cam1_xyz_images,
+            config=extract_and_match_wrapper_config
+        )
+        time_tracker_init.add_time_stamp("Extract and match wrapper initialisation")
+
+
+    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 2, time_tracker:TimeTracker = TimeTracker()) -> np.ndarray | None:
         """
         Predicts the homogenous transformation base_t_cam2
         """
-        number_tries = 0
-        est_base_t_cam = None
-        while est_base_t_cam is None and number_tries < self.number_tries_b4_giving_up:
-            idx = self.sheduler.get_best()
-            est_base_t_cam = self.est_base_t_cam2_helper(
-                cam1_bgr_image = self.cam1_bgr_images[idx],
-                base_xyz_image = self.cam1_xyz_images[idx],
-                cam2_bgr_image = cam2_bgr_image,
-                time_tracker = time_tracker
-            )
-            self.sheduler.adjust(idx, est_base_t_cam is not None)
-            number_tries += 1
+        time_tracker.reset_elapsed_time()
+        est_base_t_cam = self.extract_and_match_wrapper.est_base_t_cam2_with_retry(
+            cam2_bgr_image=cam2_bgr_image, 
+            number_retry=number_retry
+        )
+        time_tracker.add_time_stamp("Point based initial guess")
+        
         if est_base_t_cam is not None:
             return np.linalg.inv(self.update_pose(
                 cam2_bgr_image=cam2_bgr_image,
@@ -256,6 +255,7 @@ class EllipsoidPredictor(PosePredictor):
             ))
         return None
     
+
     def update_pose(self,cam2_bgr_image: np.ndarray, rough_cam_t_base:np.ndarray, time_tracker:TimeTracker) -> np.ndarray | None:
         # TODO add some fallback if matching doesnt work out (recenter with point matching)
 
@@ -268,14 +268,16 @@ class EllipsoidPredictor(PosePredictor):
         proj_gauss_elli_mu, proj_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(proj_primal_conics)
         proj_gaussian_ellipses = gauss_ellipse_batch_tuple_to_mat_batch(proj_gauss_elli_mu, proj_gauss_elli_sigmas)
 
-        observed_primal_conics = image_to_primal_conics(bgr_image=cam2_bgr_image, sam3_prompt=Sam3Prompt())
+        time_tracker.add_time_stamp("Projecting the 3d ellipsoids to 2d Gauss")
 
+        observed_primal_conics = image_to_primal_conics(bgr_image=cam2_bgr_image, sam3_prompt=Sam3Prompt())
         obs_gauss_elli_mu, obs_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(observed_primal_conics)
         obs_gauss_ellipses = gauss_ellipse_batch_tuple_to_mat_batch(obs_gauss_elli_mu, obs_gauss_elli_sigmas)
 
-        time_tracker.add_time_stamp("Projecting for matching")
+        time_tracker.add_time_stamp("Generating the 2d gaussians from the new image")
+
         proj_match_idxs, obs_match_idxs = match_gaussians(proj_gaussian_ellipses, obs_gauss_ellipses)
-        time_tracker.add_time_stamp("Matching")
+        time_tracker.add_time_stamp("Matching the 2d gaussians")
 
         cam2_t_base_opt = optimize_pne(
             initial_cam_t_base=rough_cam_t_base,
@@ -289,38 +291,6 @@ class EllipsoidPredictor(PosePredictor):
         return cam2_t_base_opt
 
 
-    
-    def est_base_t_cam2_helper(self,
-                            cam1_bgr_image:np.ndarray,
-                            base_xyz_image:np.ndarray,
-                            cam2_bgr_image: np.ndarray,
-                            time_tracker:TimeTracker
-        ):
-        
-        time_tracker.reset_elapsed_time()
-        
-        cam1_rgb_image = cv2.cvtColor(cam1_bgr_image, cv2.COLOR_BGR2RGB)
-        cam2_rgb_image = cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
-
-        image_points_cam1, image_points_cam2 = self.extract_and_match.get_matched_points(
-            img1_rgb=cam1_rgb_image, img2_rgb=cam2_rgb_image, plot_results = False
-        )
-        time_tracker.add_time_stamp("Extract and Match")
-        world_obj_points = np.array([base_xyz_image[int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1])
-
-        cam2_t_base_pnp__inliers = estimate_point_pose_ransac(
-            img_points=image_points_cam2, 
-            world_points=world_obj_points, 
-            intrinsic_matrix=self.cam2_intrinsic_mtx, 
-            config=self.initial_raansac_guess_config
-        )
-        if cam2_t_base_pnp__inliers is None:
-            return None
-        cam2_t_base_pnp, inliers = cam2_t_base_pnp__inliers
-    
-        return np.linalg.inv(cam2_t_base_pnp)
-
-
 if __name__ == "__main__":
     robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_r")
     headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_h")
@@ -328,7 +298,11 @@ if __name__ == "__main__":
         cam2_intrinsic_mtx=headset_data.intrinsic_cam_mtx,
         cam1_bgr_images=robot_data.robot_bgr_images,
         cam1_xyz_images=robot_data.robot_xyz_images,
-        extract_and_match=ExtractAndLightGlue(),
+        extract_and_match_wrapper_config=ExtractAndMatchWrapperConfig(
+            extract_and_match=ExtractAndLightGlue(),
+            use_rotation_augmentations=True,
+            ransac_config=pose_estimation_ransaac_config_precise,
+        )
     )
 
     tt1 = TimeTracker()
@@ -341,7 +315,6 @@ if __name__ == "__main__":
     )
     
     print(f"translat errors: \n {grader.translational_errors()} \n")
-    #grader.visualize_predictions()
     print(f"avg rot error: {np.round(np.rad2deg(grader.avg_rotational_error()), 2)} degrees")
     print(f"avg translational error: {np.round(grader.avg_translational_error()*1000, 1)} mm")
     print(f"median rot error: {np.round(np.rad2deg(grader.median_rotational_error()), 2)} degrees")
