@@ -186,11 +186,12 @@ class OnePredictorRecordingGrader:
                 line_set.paint_uniform_color(colors[i])
                 to_vis.append(line_set)
 
-        pred_line_set = o3d.geometry.LineSet()
-        pred_line_set.points = o3d.utility.Vector3dVector(np.array(self.predicted_b_t_h_s_not_none)[:,:3,3])
-        pred_line_set.lines = o3d.utility.Vector2iVector([[i, i+1] for i in range(len(self.predicted_b_t_h_s_not_none)-1)])
-        pred_line_set.paint_uniform_color([1,0,0])
-        to_vis.append(pred_line_set)
+        if len(self.predicted_b_t_h_s_not_none) > 0:
+            pred_line_set = o3d.geometry.LineSet()
+            pred_line_set.points = o3d.utility.Vector3dVector(np.array(self.predicted_b_t_h_s_not_none)[:,:3,3])
+            pred_line_set.lines = o3d.utility.Vector2iVector([[i, i+1] for i in range(len(self.predicted_b_t_h_s_not_none)-1)])
+            pred_line_set.paint_uniform_color([1,0,0])
+            to_vis.append(pred_line_set)
 
         obs_line_set = o3d.geometry.LineSet()
         points = np.array([m for m in self._headset_data.robot_base_t_headset_s if m is not None])[:, :3, 3]

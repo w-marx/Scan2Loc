@@ -11,7 +11,8 @@ from ellipsoid_utilities_numpy import *
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared_utilities import *
-
+import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
 
 class Reproj(nn.Module):
 
@@ -138,10 +139,7 @@ class Reproj(nn.Module):
 
         return mu, sigma
     
-    def visualize_2d(self, img_rgb:np.ndarray):
-        import matplotlib.pyplot as plt
-
-
+    def visualize_errors(self, img_rgb:np.ndarray, ax, title:str = "Pne errors"):
         # To projection
         proj_primal_conincals = Reproj.project_primal_quadratics_to_primal_conicals(
             primal_quadratic=self.primal_quadratics,
@@ -156,8 +154,7 @@ class Reproj(nn.Module):
         obs_sigma_mu_s = torch.cat([self.obs_gaussians_sigma_s, self.obs_gaussians_mu_s.unsqueeze(-1)], dim = -1)
         obs_sigma_mu_s_np = obs_sigma_mu_s.detach().cpu().numpy()
 
-        fig, ax = plt.subplots(figsize = (12, 8))
-        ax.set_title("PnE errors")
+        ax.set_title(title)
         ax.imshow(img_rgb)
 
         n = obs_sigma_mu_s_np.shape[0]
@@ -171,7 +168,8 @@ class Reproj(nn.Module):
 
         obs_ellipses = gaussian_ellipse_s_to_matplotlib_ellipse_s(
             gaussian_ellipse_s=obs_sigma_mu_s_np,
-            colors=colors 
+            colors=colors,
+            line_style="-"
         )
 
         for proj_e, obs_e in zip(proj_ellipses, obs_ellipses):
@@ -182,12 +180,12 @@ class Reproj(nn.Module):
         ax.scatter(
             obs_sigma_mu_s_np[:,0,2],
             obs_sigma_mu_s_np[:,1,2],
-            color=colors, s=5, alpha=0.8, marker = 'o', label = 'Observed')
+            color=colors, s=5, alpha=0.8, marker = 'o')
         
         ax.scatter(
             proj_sigma_mu_s_np[:,0,2],
             proj_sigma_mu_s_np[:,1,2],
-            color=colors, s=5, alpha=0.8, marker = 's', label = 'Projected')
+            color=colors, s=5, alpha=0.8, marker = 's')
         
 
         ax.quiver(
@@ -201,9 +199,11 @@ class Reproj(nn.Module):
             width=0.005
         )
 
-        ax.legend()
-
-        plt.show()
+        empty_lines = [
+            mlines.Line2D([], [], color='black', linestyle='-',  linewidth=2, label='Observed'),
+            mlines.Line2D([], [], color='black', linestyle='--', linewidth=2, label='Projected'),
+        ]
+        ax.legend(handles=empty_lines, loc='upper right')
 
 
 
@@ -257,8 +257,8 @@ def optimize_pne(
     """
 
 
-    _ = assert_intrinsic_mat(intrinsic_cam_mat)
-    _ = assert_homogeneous_mat(initial_cam_t_base, size=4)
+    assert assert_intrinsic_mat(intrinsic_cam_mat)
+    assert assert_homogeneous_mat(initial_cam_t_base, size=4)
 
     model = Reproj(
         cam_intrinsic=intrinsic_cam_mat,
@@ -267,8 +267,10 @@ def optimize_pne(
         primal_quadratics=primal_quadratics
     )
     
+    fig, axes = None, None
     if visualize_result is not None:
-        model.visualize_2d(visualize_result)
+        fig, axes = plt.subplots(1, 3, figsize=(24, 8))
+        model.visualize_errors(visualize_result, ax=axes[0], title="Before Optimisation")
 
     inp = {}
 
@@ -277,7 +279,6 @@ def optimize_pne(
     losses = []
     for step in range(config.lm_max_steps):
         loss = opt.step(inp)
-        print(f"step: {step}, loss: {loss}")
         losses.append(loss)
         if len(losses) > 2 and abs(losses[-1]-losses[-2]) < 1e-6:
             break
@@ -285,6 +286,11 @@ def optimize_pne(
     final_cam_t_base = model.cam_t_base_se3.matrix().detach().cpu().numpy()
 
     if visualize_result is not None:
-        model.visualize_2d(visualize_result)
+        model.visualize_errors(visualize_result, ax=axes[1], title="After Optimisation")
+        axes[2].plot(losses)
+        axes[2].set_title("Loss over iterations")
+        axes[2].set_xlabel("Iteration")
+        axes[2].set_ylabel("Loss")
+        plt.show()
 
     return final_cam_t_base

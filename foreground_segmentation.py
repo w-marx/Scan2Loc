@@ -4,12 +4,6 @@ import torch
 from PIL import Image
 import cv2
 
-def log_memory_usage(stage=""):
-    if torch.cuda.is_available():
-        print(f"{stage} - GPU: {torch.cuda.memory_allocated()/1024**3:.2f} GB")
-    import psutil
-    print(f"{stage} - RAM: {psutil.Process().memory_info().rss/1024**3:.2f} GB")
-
 def use_sam3_on_image_to_get_masks(
         pil_rgb_image,
         mask_threshold:float,
@@ -63,8 +57,6 @@ def get_object_masks(
     :param prompt: how to segment the image
     :return: NxHxW boolean numpy array of the object masks
     """
-    log_memory_usage("started new get_object_masks")
-
     if image.dtype in [np.float16, np.float32, np.float64]:
         image = (image * 255).astype(np.uint8)
     pil_rgb_image = Image.fromarray(cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2RGB))
@@ -75,9 +67,6 @@ def get_object_masks(
         mask_threshold=prompt.mask_threshold,
         threshold=prompt.threshold
     )
-
-    log_memory_usage("ended get_object_masks")
-
     return masks
 
 

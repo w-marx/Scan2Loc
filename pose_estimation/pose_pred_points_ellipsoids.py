@@ -62,7 +62,7 @@ def images_to_primal_quadratics(
         bgr_images:np.ndarray,
         xyz_images:np.ndarray,
         prompt:Sam3Prompt,
-        max_centroid_dist: float = 0.03,
+        max_centroid_dist: float = 0.05,
         max_color_dist:float = 500,
         visualize_masks:bool = False,
         min_number_points_per_detected_object:int = 1000,
@@ -90,9 +90,12 @@ def images_to_primal_quadratics(
     object_avg_centers = []
     object_image_idxs = []
 
+    tt = TimeTracker()
+
     for i, (bgr_img, xyz_img) in enumerate(zip(bgr_images, xyz_images)):
-        print(f"started mask generation")
+        tt.reset_elapsed_time()
         object_masks = get_object_masks(bgr_img, prompt)
+        tt.add_time_stamp(f"sam3 call {i}")
         for object_mask in object_masks:
             pc = xyz_img[object_mask > 0]
             if pc.shape[0] < min_number_points_per_detected_object:
@@ -103,6 +106,8 @@ def images_to_primal_quadratics(
             object_image_idxs.append(i)
         if visualize_masks:
             display_image_masks(bgr_img=bgr_img, masks=object_masks)
+    
+    tt.print_report()
 
     object_avg_centers = np.stack(object_avg_centers, axis = 0)
     object_avg_colors = np.stack(object_avg_colors, axis = 0)
@@ -156,13 +161,16 @@ def images_to_primal_quadratics(
 
     return fused_base_t_ellipsoid_s, fused_primal_quaddratic_s
 
-def image_to_primal_conics(bgr_image:np.ndarray, sam3_prompt:Sam3Prompt) -> np.ndarray:
+
+def image_to_primal_conics(bgr_image:np.ndarray, sam3_prompt:Sam3Prompt, return_avg_color:bool = False) -> tuple[np.ndarray, np.ndarray | None]:
     """
     Creates a Nx3x3 batch of primal conics from the image by segmenting it using sam3.
     :param bgr_image: the bgr image
     :param sam3_prompt: the sam3 prompt config
+    :param return_avg_color: If true will compute the avg. color of each conic
     :return: the primal conics (Nx3x3)
     """
+    tt = TimeTracker()
     assert assert_mxnx3_np_uint8_image(bgr_image)
 
     object_masks = get_object_masks(bgr_image, sam3_prompt)
@@ -172,25 +180,29 @@ def image_to_primal_conics(bgr_image:np.ndarray, sam3_prompt:Sam3Prompt) -> np.n
         rows, cols = np.where(object_mask)
         pc_2d = np.column_stack((cols, rows))
         primal_conic_s.append(fit_primal_conic_to_2d_point_cloud(pc_2d))
-
-    return np.array(primal_conic_s)
-
-
-def match_gaussians(sigma_mu1_s, sigma_mu2_s):
-    """
+    tt.print_report()
+    if not return_avg_color:
+        return np.array(primal_conic_s), None
     
-    """
+
+    avg_color_s = [
+        np.mean(bgr_image[obj_mask > 0], axis = 0)
+        for obj_mask in object_masks
+    ]
+    return np.array(primal_conic_s), avg_color_s
+
+
+def match_gaussians_hungarian_on_wasserstein(sigma_mu1_s, sigma_mu2_s):
     n, m = sigma_mu1_s.shape[0], sigma_mu2_s.shape[0]
     assert all([assert_gaussian_ellipse_mat(sigma_mu) for sigma_mu in sigma_mu1_s])
     assert all([assert_gaussian_ellipse_mat(sigma_mu) for sigma_mu in sigma_mu2_s])
 
     adjecency_mat = np.full((max(n,m), max(n,m)), 1e12)
 
+    # TODO use batch
     for i1, sigma_mu1 in enumerate(sigma_mu1_s):
         for i2, sigma_mu2 in enumerate(sigma_mu2_s):
             adjecency_mat[i1, i2] = wasserstein_distance_sq(sigma_mu1, sigma_mu2)
-
-    # TODO use batch
 
     row_ind, col_ind = linear_sum_assignment(adjecency_mat)
 
@@ -246,7 +258,6 @@ class EllipsoidPredictor(PosePredictor):
             number_retry=number_retry
         )
         time_tracker.add_time_stamp("Point based initial guess")
-        
         if est_base_t_cam is not None:
             return np.linalg.inv(self.update_pose(
                 cam2_bgr_image=cam2_bgr_image,
@@ -270,13 +281,13 @@ class EllipsoidPredictor(PosePredictor):
 
         time_tracker.add_time_stamp("Projecting the 3d ellipsoids to 2d Gauss")
 
-        observed_primal_conics = image_to_primal_conics(bgr_image=cam2_bgr_image, sam3_prompt=Sam3Prompt())
+        observed_primal_conics, _ = image_to_primal_conics(bgr_image=cam2_bgr_image, sam3_prompt=Sam3Prompt())
+        time_tracker.add_time_stamp("Image to primal conics")
         obs_gauss_elli_mu, obs_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(observed_primal_conics)
         obs_gauss_ellipses = gauss_ellipse_batch_tuple_to_mat_batch(obs_gauss_elli_mu, obs_gauss_elli_sigmas)
+        time_tracker.add_time_stamp("Primal conics to gaussians")
 
-        time_tracker.add_time_stamp("Generating the 2d gaussians from the new image")
-
-        proj_match_idxs, obs_match_idxs = match_gaussians(proj_gaussian_ellipses, obs_gauss_ellipses)
+        proj_match_idxs, obs_match_idxs = match_gaussians_hungarian_on_wasserstein(proj_gaussian_ellipses, obs_gauss_ellipses)
         time_tracker.add_time_stamp("Matching the 2d gaussians")
 
         cam2_t_base_opt = optimize_pne(
@@ -285,7 +296,7 @@ class EllipsoidPredictor(PosePredictor):
             primal_conicals=np.array(observed_primal_conics)[obs_match_idxs],
             intrinsic_cam_mat=self.cam2_intrinsic_mtx,
             config=self.pne_optimizer_config,
-            visualize_result=None#cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
+            visualize_result=cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
         )
         time_tracker.add_time_stamp("PNE optimisation")
         return cam2_t_base_opt
@@ -299,10 +310,11 @@ if __name__ == "__main__":
         cam1_bgr_images=robot_data.robot_bgr_images,
         cam1_xyz_images=robot_data.robot_xyz_images,
         extract_and_match_wrapper_config=ExtractAndMatchWrapperConfig(
+            rotation_augmentations=[Rotate180Deg, Augmentation],
             extract_and_match=ExtractAndLightGlue(),
-            use_rotation_augmentations=True,
-            ransac_config=pose_estimation_ransaac_config_precise,
-        )
+            ransac_config=pose_estimation_ransaac_config_less_precise,
+        ),
+        pne_optimizer_config=PnEOptimizerConfig(lm_max_steps=10000)
     )
 
     tt1 = TimeTracker()
@@ -327,3 +339,6 @@ if __name__ == "__main__":
     tt1.print_report()
     print(f"\n tt2:")
     tt2.print_report()
+
+    predictor.extract_and_match_wrapper.print_used_augmentations()
+    print(f"avg number of tries: {predictor.extract_and_match_wrapper.avg_number_of_tries()}")

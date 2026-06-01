@@ -8,6 +8,7 @@ from matplotlib.collections import LineCollection
 from pose_estimation.pnpl_optimizer import *
 from line_utilities import * 
 from dataclasses import dataclass
+from numbers import Number
 
 @dataclass(frozen=True, kw_only=True)
 class LineMerging2dConfig:
@@ -22,10 +23,11 @@ class LineMerging2dConfig:
     use_quick_merge:bool = False
 
     def __post_init__(self):
-        assert 0 <= self.max_angle_diff_deg <= 180
-        assert 0 <= self.max_midpoint_dist_px
-        assert 0 <= self.max_endpoint_dist_px
-        assert 0 <= self.min_line_length
+        assert isinstance(self.max_angle_diff_deg, Number) and 0 <= self.max_angle_diff_deg <= 180 
+        assert isinstance(self.max_angle_diff_deg, Number) and 0 <= self.max_midpoint_dist_px
+        assert isinstance(self.max_angle_diff_deg, Number) and 0 <= self.max_endpoint_dist_px
+        assert isinstance(self.max_angle_diff_deg, Number) and 0 <= self.min_line_length
+        assert isinstance(self.use_quick_merge, bool)
 
 line_merging_2d_config_for_short_lines_quick_merge = LineMerging2dConfig(
     max_angle_diff_deg = 1,
@@ -72,6 +74,28 @@ class MultiPassLineMergingConfig:
 
     def __post_init__(self):
         assert len(self.passes) > 0
+        assert all([isinstance(obj, LineMerging2dConfig) for obj in self.passes])
+
+
+@dataclass(frozen=True, kw_only=True)
+class LineFitting3dConfig:
+    """
+    How to fit the 3d points of the xyz-images to a line
+    :param use_ransac: If True ransac will be used, else robust PCA (faster but less robust)
+    :param ransac_itterations: Number of itterations the ransac algorithm needs
+    :param ransac_inlier_distance: Distance in meters to be considered an inlier for the ransac algorithm
+    """
+    use_ransac:bool = True
+    ransac_itterations:int = 100
+    ransac_inlier_distance:float = 0.005
+
+    def __post_init__(self):
+        assert isinstance(self.use_ransac, bool)
+        if self.use_ransac:
+            assert isinstance(self.ransac_itterations, Number) and 0 < self.ransac_itterations
+            assert isinstance(self.ransac_inlier_distance, Number) and 0 <= self.ransac_inlier_distance
+
+
 
 
 class LinePredictor(PosePredictor):
@@ -80,25 +104,27 @@ class LinePredictor(PosePredictor):
             cam2_intrinsic_mtx:np.ndarray,
             cam1_bgr_images:np.ndarray,
             cam1_xyz_images:np.ndarray,
+
             extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig,
             lsd_cleanup_passes_configs:MultiPassLineMergingConfig = MultiPassLineMergingConfig(),
-
-            line_matching_max_dist_line_to_point_px:float = 5,
-            line_matching_min_number_supporting_points:int = 2,
-
-            line_fitting_3d_use_ransaac:bool = True,
-            line_fitting_3d_iterations:int = 100,
-            line_fitting_3d_inlier_distance:float = 0.005,
-
+            line_matching_config:LineMatchingConfig = LineMatchingConfig(),
+            line_fitting_3d_config:LineFitting3dConfig = LineFitting3dConfig(),
             pnpl_optimisation_conf:PnPLOptimizerConfig = PnPLOptimizerConfig(),
+            cam2_lsd_size:None | tuple[int, int] = None,
 
             debug_visualize_2d:bool = False,
             debug_visualize_pnpl:bool = False,
             debug_visualize_3d:bool = False
         ):
         super().__init__()
+        assert assert_intrinsic_mat(cam2_intrinsic_mtx)
         self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
 
+        assert assert_mxnx3_np_uint8_image_batch(cam1_bgr_images)
+        assert cam1_xyz_images.shape == cam1_bgr_images.shape
+        self.cam1_xyz_images = cam1_xyz_images
+
+        assert isinstance(extract_and_match_wrapper_config, ExtractAndMatchWrapperConfig)
         self.extract_and_match_wrapper = ExtractAndMatchWrapper(
             cam2_mtx=cam2_intrinsic_mtx,
             cam1_bgr_images=cam1_bgr_images,
@@ -106,19 +132,22 @@ class LinePredictor(PosePredictor):
             config=extract_and_match_wrapper_config
         )
 
+        assert isinstance(lsd_cleanup_passes_configs, MultiPassLineMergingConfig)
         self.lsd_cleanup_passes = lsd_cleanup_passes_configs.passes
 
-        self.line_matching_max_dist_line_to_point_px = line_matching_max_dist_line_to_point_px
-        self.line_matching_min_number_supporting_points = line_matching_min_number_supporting_points
+        assert isinstance(line_matching_config, LineMatchingConfig)
+        self.line_matching_config = line_matching_config
 
         self.line_fitting_3d_method = (lambda points3d:(
             line_segment_regression_3d_ransaac(
                 xyz_points=points3d,
-                inlier_distance=line_fitting_3d_inlier_distance,
-                itterations=line_fitting_3d_iterations
+                inlier_distance=line_fitting_3d_config.ransac_inlier_distance,
+                itterations=line_fitting_3d_config.ransac_itterations
             )
-        )) if line_fitting_3d_use_ransaac else lambda points3d: robust_pca_2d_3d_points_lineseg_regression(points=points3d)
+        )) if line_fitting_3d_config.use_ransac else lambda points3d: robust_pca_2d_3d_points_lineseg_regression(points=points3d)
 
+
+        assert isinstance(pnpl_optimisation_conf, PnPLOptimizerConfig)
         self.pnpl_optimisation_conf = pnpl_optimisation_conf
 
 
@@ -131,64 +160,11 @@ class LinePredictor(PosePredictor):
 
         self.cam1_bgr_images = cam1_bgr_images
 
-        lines_4_images_cam1_raw = [
-            self.line_seg_detector.detect(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))[0].squeeze(1)
-            for img in cam1_bgr_images
-        ]
-
         self.lines_4_images_cam1 = [
-            self.cleanup_lines(lines) for lines in lines_4_images_cam1_raw
+            self.lsd_and_cleanup_on_image(img) for img in cam1_bgr_images
         ]
-        self.cam1_xyz_images = cam1_xyz_images
 
-
-    def match_2d_line_segments(
-            self, 
-            lines_img1:np.ndarray, 
-            lines_img2:np.ndarray,
-            points_img1:np.ndarray, 
-            points_img2:np.ndarray
-        )->np.ndarray:
-        """
-        Returns the best matching line segment pairs (only matches one to one)
-        :param lines_img1: Lx4 numpy array of the structure: (x1, y1, x2, y2), of lines in image 1
-        :param lines_img2: Mx4 numpy array of the structure: (x1, y1, x2, y2), of lines in image 2
-        :param points_img1: Nx2 numpy array of points in image 1, p_i in points_img1 has to be matched to p_i in points_img2
-        :param points_img2: Ox2 numpy array of points in image 2
-        :return Px2x4 numpy array of P linepairs
-        """
-        assert lines_img1.ndim == 2 and lines_img1.shape[-1] == 4
-        assert lines_img2.ndim == 2 and lines_img2.shape[-1] == 4
-        assert points_img1.ndim == 2 and points_img1.shape[-1] == 2
-        assert points_img2.ndim == 2 and points_img2.shape[-1] == 2
-
-        if lines_img1.shape[0] == 0 or lines_img2.shape[0] == 0 or points_img1.shape[0] == 0 or points_img2.shape[0] == 0:
-            return np.empty((0,2,4))
-
-        lines_1_point_distances_mask = np.array([line_segment_to_points_distances_2d(line_seg_2d=l1, points_2d=points_img1) < self.line_matching_max_dist_line_to_point_px for l1 in lines_img1])
-        lines_2_point_distances_mask = np.array([line_segment_to_points_distances_2d(line_seg_2d=l2, points_2d=points_img2) < self.line_matching_max_dist_line_to_point_px for l2 in lines_img2])
-
-        agreement_matrix = np.sum(lines_1_point_distances_mask[:, None, :] & lines_2_point_distances_mask[None, :, :], axis=2)
-
-        best_l2_matching_values = np.full(lines_img2.shape[0], -1)
-        best_l2_matchings = np.full(lines_img2.shape[0], -1)
-
-        for i, l1 in enumerate(lines_img1):
-            best_l2_index = np.argmax(agreement_matrix[i])
-
-            if agreement_matrix[i,best_l2_index] < self.line_matching_min_number_supporting_points:
-                continue
-
-            if best_l2_matching_values[best_l2_index] <= agreement_matrix[i, best_l2_index]:
-                best_l2_matching_values[best_l2_index] = agreement_matrix[i, best_l2_index]
-                best_l2_matchings[best_l2_index] = i
-        
-        line_pairs = []
-        for l2_idx, l1_idx in enumerate(best_l2_matchings): 
-            if l1_idx >= 0:
-                line_pairs.append([lines_img1[l1_idx], lines_img2[l2_idx]])
-        return np.array(line_pairs) if len(line_pairs) > 0 else np.empty((0,2,4))
-
+        self.cam2_lsd_size = cam2_lsd_size
 
     def visualize_features_2d(
             self, 
@@ -305,11 +281,12 @@ class LinePredictor(PosePredictor):
         base_t_cam_pnp, image_points_cam1, image_points_cam2, world_obj_points, inliers = base_t_cam_and_points
         lines_img1 = self.lines_4_images_cam1[idx]
 
-        line_pairs = self.match_2d_line_segments(
+        line_pairs = match_2d_line_segments(
             lines_img1=lines_img1, 
             lines_img2=lines_img2,
             points_img1=image_points_cam1,
-            points_img2=image_points_cam2
+            points_img2=image_points_cam2,
+            line_matching_config=self.line_matching_config
         )
         time_tracker.add_time_stamp("Match 2d line segments")
 
@@ -359,6 +336,7 @@ class LinePredictor(PosePredictor):
         )
 
         time_tracker.add_time_stamp("Bundle adjustment")
+        time_tracker.print_report()
 
         return np.linalg.inv(cam2_t_base_bundle_adjustment)
 
@@ -375,6 +353,34 @@ class LinePredictor(PosePredictor):
         return lines
     
 
+    def lsd_and_cleanup_on_image(self, bgr_image:np.ndarray, lsd_at_size:None | tuple[int, int] = None)->np.ndarray:
+        """
+        Runs LSD on an image that can be scaled down beforehand, then cleans those lines up and scales them back
+        :param bgr_image: The HxWx3-uint8 BGR image to be done lsd upon
+        :param lsd_at_size: None or a tuple: (height, width) in px
+        :return Nx4 line array of the format: [[x1, y1, x2, y2], ...]
+        """
+        assert assert_mxnx3_np_uint8_image(bgr_image)
+
+        cam2_grey_img = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2GRAY)
+        if lsd_at_size is None:
+            return self.cleanup_lines(self.line_seg_detector.detect(cam2_grey_img)[0].squeeze(1))
+        
+        # In case of scaling:
+        h_orig, w_orig = bgr_image.shape[:2]
+        h_scaled, w_scaled = lsd_at_size
+
+        cam2_image_scaled = cv2.resize(cam2_grey_img, (w_scaled, h_scaled), interpolation = cv2.INTER_AREA)
+        lines_scaled_raw = self.line_seg_detector.detect(cam2_image_scaled)[0].squeeze(1)
+        lines_scaled = self.cleanup_lines(lines_scaled_raw)
+
+        if lines_scaled.size > 0:
+            lines_scaled[:, [0,2]] *= w_orig/w_scaled
+            lines_scaled[:, [1,3]] *= h_orig/h_scaled
+        return lines_scaled
+
+    
+
     def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 2, time_tracker:TimeTracker = TimeTracker()) -> np.ndarray | None:
         number_tries = 0
         est_base_t_cam = None
@@ -382,11 +388,8 @@ class LinePredictor(PosePredictor):
 
 
         time_tracker.reset_elapsed_time()
-        lines_img2_raw = self.line_seg_detector.detect(cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2GRAY))[0].squeeze(1)
-        time_tracker.add_time_stamp("LSD image 2")
-
-        lines_img2 = self.cleanup_lines(lines_img2_raw)
-        time_tracker.add_time_stamp("Lines image 2 cleanup")
+        lines_img2 = self.lsd_and_cleanup_on_image(cam2_bgr_image, lsd_at_size=self.cam2_lsd_size)
+        time_tracker.add_time_stamp("Image 2 LSD + cleanup")
 
         while est_base_t_cam is None and number_tries < number_retry:
             idx = self.extract_and_match_wrapper.sheduler.get_best()
@@ -416,12 +419,15 @@ if __name__ == "__main__":
         cam1_bgr_images=robot_data.robot_bgr_images,
         cam1_xyz_images=robot_data.robot_xyz_images,
         extract_and_match_wrapper_config=ExtractAndMatchWrapperConfig(
-            extract_and_match=ExtractAndLightGlue(),
-            use_rotation_augmentations=True,
-            ransac_config=pose_estimation_ransaac_config_precise,
+            extract_and_match=ExtractAndLightGlue(
+                extractor="SuperPoint"
+            ),
+            ransac_config=pose_estimation_ransaac_config_less_precise,
         ),
+        line_fitting_3d_config=LineFitting3dConfig(use_ransac=False),
+        pnpl_optimisation_conf=PnPLOptimizerConfig(lm_max_steps=10000,line_relevance=1.0),
+        cam2_lsd_size=(514,514),
         debug_visualize_2d=False, 
-        line_fitting_3d_use_ransaac=False,
         debug_visualize_pnpl=False
     )
 
@@ -434,7 +440,6 @@ if __name__ == "__main__":
         subcomponent_time_tracker=tt2
     )
     
-    print(f"translat errors: \n {grader.translational_errors()} \n")
     print(f"avg rot error: {np.round(np.rad2deg(grader.avg_rotational_error()), 2)} degrees")
     print(f"avg translational error: {np.round(grader.avg_translational_error()*1000, 1)} mm")
     print(f"median rot error: {np.round(np.rad2deg(grader.median_rotational_error()), 2)} degrees")
@@ -447,4 +452,6 @@ if __name__ == "__main__":
     tt1.print_report()
     print(f"\n tt2:")
     tt2.print_report()
+
+    predictor.extract_and_match_wrapper.print_used_augmentations()
     

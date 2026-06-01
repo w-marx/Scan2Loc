@@ -3,6 +3,8 @@ import torch
 
 from union_find import UnionFind
 from skimage.draw import line
+from dataclasses import dataclass
+from numbers import Number
 
 torch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -399,3 +401,63 @@ def merge_close_line_segments(
     return np.array([merge_line_seg_cluster_into_one_weighted(line_segs_2d[np.array(line_cluster)])
         for line_cluster in list(clusters.values())
     ])
+
+
+
+@dataclass(frozen=True, kw_only=True)
+class LineMatchingConfig:
+    """
+    Lines are matched based on common nearby matched points, this allows to tune that
+    :param max_point_line_dist_px: Maximum distance between a point and a line to be considered near
+    :param min_number_supporting_points: The number of same points that have to be near line1 and line2, to match them
+    """
+    max_point_line_dist_px:float = 5
+    min_number_supporting_points:int = 2
+
+    def __post_init__(self):
+        assert isinstance(self.max_point_line_dist_px, Number) and 0 <= self.max_point_line_dist_px
+        assert isinstance(self.min_number_supporting_points, Number) and 0 < self.min_number_supporting_points
+
+def match_2d_line_segments(
+        lines_img1:np.ndarray, 
+        lines_img2:np.ndarray,
+        points_img1:np.ndarray, 
+        points_img2:np.ndarray,
+        line_matching_config:LineMatchingConfig = LineMatchingConfig()
+    )->np.ndarray:
+    """
+    Returns the best matching line segment pairs (only matches one to one)
+    :param lines_img1: Lx4 numpy array of the structure: (x1, y1, x2, y2), of lines in image 1
+    :param lines_img2: Mx4 numpy array of the structure: (x1, y1, x2, y2), of lines in image 2
+    :param points_img1: Nx2 numpy array of points in image 1, p_i in points_img1 has to be matched to p_i in points_img2
+    :param points_img2: Ox2 numpy array of points in image 2
+    :return Px2x4 numpy array of P linepairs
+    """
+    assert lines_img1.ndim == 2 and lines_img1.shape[-1] == 4
+    assert lines_img2.ndim == 2 and lines_img2.shape[-1] == 4
+    assert points_img1.ndim == 2 and points_img1.shape[-1] == 2
+    assert points_img2.ndim == 2 and points_img2.shape[-1] == 2
+
+    if lines_img1.shape[0] == 0 or lines_img2.shape[0] == 0 or points_img1.shape[0] == 0 or points_img2.shape[0] == 0:
+        return np.empty((0,2,4))
+    
+    lines_1_point_distances_mask = np.array([line_segment_to_points_distances_2d(line_seg_2d=l1, points_2d=points_img1) < line_matching_config.max_point_line_dist_px for l1 in lines_img1])
+    lines_2_point_distances_mask = np.array([line_segment_to_points_distances_2d(line_seg_2d=l2, points_2d=points_img2) < line_matching_config.max_point_line_dist_px for l2 in lines_img2])
+    agreement_matrix = np.sum(lines_1_point_distances_mask[:, None, :] & lines_2_point_distances_mask[None, :, :], axis=2)
+
+    best_l2_matching_values = np.full(lines_img2.shape[0], -1)
+    best_l2_matchings = np.full(lines_img2.shape[0], -1)
+
+    for i, l1 in enumerate(lines_img1):
+        best_l2_index = np.argmax(agreement_matrix[i])
+        if agreement_matrix[i,best_l2_index] < line_matching_config.min_number_supporting_points:
+            continue
+        if best_l2_matching_values[best_l2_index] <= agreement_matrix[i, best_l2_index]:
+                best_l2_matching_values[best_l2_index] = agreement_matrix[i, best_l2_index]
+                best_l2_matchings[best_l2_index] = i
+        
+        line_pairs = []
+        for l2_idx, l1_idx in enumerate(best_l2_matchings): 
+            if l1_idx >= 0:
+                line_pairs.append([lines_img1[l1_idx], lines_img2[l2_idx]])
+        return np.array(line_pairs) if len(line_pairs) > 0 else np.empty((0,2,4))

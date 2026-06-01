@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared_utilities import *
-
+from collections import defaultdict
 import matplotlib.pyplot as plt
 
 class ExtractAndMatch(ABC):
@@ -230,7 +230,9 @@ class ExtractAndMatchWrapperConfig:
     extract_and_match:ExtractAndMatch = field(
         default_factory=ExtractAndMatchLoMa
     )
-    use_rotation_augmentations:bool = False
+    rotation_augmentations:list[type[Augmentation]] = field(
+        default_factory=lambda: [Rotate180Deg]
+    )
     crop_augmentations:list[float] | None = None
     ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise
     sheduler:type[Sheduler] = EMASheduler
@@ -250,9 +252,7 @@ class ExtractAndMatchWrapper:
         self.extract_and_match = config.extract_and_match
         self.ransac_config = config.ransac_config
 
-        self.rotation_augmentations = [Augmentation()]
-        if config.use_rotation_augmentations:
-            self.rotation_augmentations.append(Rotate180Deg())
+        self.rotation_augmentations = [aug_class() for aug_class in config.rotation_augmentations]
         
         self.crop_augmentations = [Augmentation()]
         if config.crop_augmentations is not None:
@@ -262,6 +262,10 @@ class ExtractAndMatchWrapper:
         self.cam1_xyz_images = cam1_xyz_images
 
         self.sheduler = config.sheduler(cam1_bgr_images.shape[0])
+
+        # For debugging/additional information
+        self.chosen_augmentations = defaultdict(int)
+        self.used_number_of_tries = []
 
     def get_sheduler(self):
         return self.sheduler
@@ -293,6 +297,7 @@ class ExtractAndMatchWrapper:
             )
             self.sheduler.adjust(idx, est_base_t_cam_and_points is not None)
             number_tries += 1
+        self.used_number_of_tries.append(number_tries)
         return est_base_t_cam_and_points
 
     def est_base_t_cam2_and_points( self,
@@ -302,6 +307,7 @@ class ExtractAndMatchWrapper:
         """
         :return: None or base T_cam, points_image_1, points_image_2, world_obj_points, inliers
         """
+
         augmentation_options_names = []
         world_obj_points_options = []
         image_points_cam2_options = []
@@ -319,7 +325,7 @@ class ExtractAndMatchWrapper:
 
                 world_obj_points = np.array([self.cam1_xyz_images[idx][int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1])
                 if world_obj_points.shape[0] > 5:
-                    augmentation_options_names.append(f"{c_aug}x{r_aug}")
+                    augmentation_options_names.append(f"{c_aug} x {r_aug}")
                     world_obj_points_options.append(world_obj_points)
                     image_points_cam2_options.append(backward_aug2(backward_aug1(image_points_cam2)))
         
@@ -329,6 +335,7 @@ class ExtractAndMatchWrapper:
         best_option_idx = np.argmax(np.array([x.shape[0] for x in world_obj_points_options]))
         world_obj_points = world_obj_points_options[best_option_idx]
         image_points_cam2 = image_points_cam2_options[best_option_idx]
+        self.chosen_augmentations[augmentation_options_names[best_option_idx]] += 1
 
         cam2_t_base__inliers = estimate_point_pose_ransac(
             world_points=world_obj_points,
@@ -336,6 +343,7 @@ class ExtractAndMatchWrapper:
             intrinsic_matrix=self.cam2_mtx,
             config=self.ransac_config
         )
+
         if cam2_t_base__inliers is None:
             return None
         return np.linalg.inv(cam2_t_base__inliers[0]), image_points_cam1, image_points_cam2, world_obj_points, cam2_t_base__inliers[1]
@@ -350,3 +358,11 @@ class ExtractAndMatchWrapper:
             cam2_rgb_image=cam2_rgb_image
         )
         return None if base_t_cam_w_points is None else base_t_cam_w_points[0]
+    
+    def print_used_augmentations(self):
+        print(f"Chosen augmentations:")
+        for name, count in sorted(self.chosen_augmentations.items(), key=lambda x: -x[1]):
+            print(f" {name:<40}  {count}")
+    
+    def avg_number_of_tries(self)->float:
+        return np.mean(self.used_number_of_tries)

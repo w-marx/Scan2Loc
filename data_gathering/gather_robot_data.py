@@ -193,7 +193,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-folder", type=str, default="my_data", help="Output Folder Location")
     parser.add_argument("--gripper-t-cam-path", type=str, default=None, help="Path to gripper_t_cam.npy file, if left to None will be estimated")
-    parser.add_argument("--robot-positions-path", type=str, default=None, help="Path to a csv file with robot joint coordinates")
+    parser.add_argument("--robot-positions-path", type=str, default="positions_panda_personpov_19.csv", help="Path to a csv file with robot joint coordinates")
 
     parser.add_argument("--no-data-gathering", action = "store_false", help = "If used only optimization & evaluation may be done", dest = "gather_data")
     parser.add_argument("--max-number-positions", type=int, default=None, help="Maximum number of positions to gather data by the robot")
@@ -230,7 +230,7 @@ if __name__ == "__main__":
         proto_data = gather_robot_data(
             number_of_positions = args.max_number_positions,
             stabilisation_timeout=args.stabilisation_timeout,
-            position_file = "positions_panda_personpov_19.csv"
+            position_file = args.robot_positions_path
         )
     else:
         proto_data = ProtoRobotData.from_folder(args.output_folder)
@@ -243,10 +243,6 @@ if __name__ == "__main__":
         base_t_gripper_outlier_quantiles=(args.pose_outlier_quants[0], args.pose_outlier_quants[1]),
     )
     gd.see_color_depth_alignment()
-    gd.see_color_depth_alignment(1)
-    gd.see_color_depth_alignment(2)
-    gd.see_color_depth_alignment(3)
-    gd.see_color_depth_alignment(4)
     gd.save(folder=os.path.dirname(args.output_folder), new_name=os.path.basename(args.output_folder), dist_coeff = proto_data.cam_distortion_coefficients)
 
     if args.analyze_results:

@@ -40,6 +40,13 @@ pose_estimation_ransaac_config_precise = RansacPoseEstimationConfig(
     confidence = 0.99
 )
 
+pose_estimation_ransaac_config_less_precise = RansacPoseEstimationConfig(
+    min_number_inlier_afterwards = 6,
+    iterations = 1000,
+    reprojection_error = 5.0,
+    confidence = 0.99
+)
+
 def estimate_point_pose_ransac(
         img_points:np.ndarray, 
         world_points:np.ndarray,

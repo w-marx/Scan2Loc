@@ -23,7 +23,7 @@ class NoExtrasPredictor(PosePredictor):
         )
         time_tracker_init.add_time_stamp("ExtractAndMatchWrapper Initialisation")
     
-    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 2, time_tracker:TimeTracker = TimeTracker()) -> np.ndarray | None:
+    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 1, time_tracker:TimeTracker = TimeTracker()) -> np.ndarray | None:
         time_tracker.reset_elapsed_time()
         base_t_cam =  self.extract_and_match_wrapper.est_base_t_cam2_with_retry(
             cam2_bgr_image=cam2_bgr_image,
@@ -45,9 +45,10 @@ if __name__ == "__main__":
         cam1_bgr_images=robot_data.robot_bgr_images,
         cam1_xyz_images=robot_data.robot_xyz_images,
         extract_and_match_wrapper_config=ExtractAndMatchWrapperConfig(
-            extract_and_match=ExtractAndMatchLoMa(),
-            use_rotation_augmentations=True,
-            ransac_config=pose_estimation_ransaac_config_precise,
+            extract_and_match=ExtractAndLightGlue(
+                extractor="SuperPoint"
+            ),
+            ransac_config=pose_estimation_ransaac_config_less_precise,
         )
     )
 
@@ -60,8 +61,6 @@ if __name__ == "__main__":
         subcomponent_time_tracker=tt2
     )
     
-    print(f"translat errors: \n {grader.translational_errors()} \n")
-    #grader.visualize_predictions()
     print(f"avg rot error: {np.round(np.rad2deg(grader.avg_rotational_error()), 2)} degrees")
     print(f"avg translational error: {np.round(grader.avg_translational_error()*1000, 1)} mm")
     print(f"median rot error: {np.round(np.rad2deg(grader.median_rotational_error()), 2)} degrees")
@@ -74,3 +73,6 @@ if __name__ == "__main__":
     tt1.print_report()
     print(f"\n tt2:")
     tt2.print_report()
+
+    predictor.extract_and_match_wrapper.print_used_augmentations()
+    print(f"avg number of tries: {predictor.extract_and_match_wrapper.avg_number_of_tries()}")
