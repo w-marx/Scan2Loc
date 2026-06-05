@@ -1,4 +1,6 @@
 import numpy as np
+from scipy.spatial.transform import Rotation
+
 
 def r_t_to_hom(r:np.ndarray, t:np.ndarray) -> np.ndarray:
     """
@@ -15,6 +17,26 @@ def r_t_to_hom(r:np.ndarray, t:np.ndarray) -> np.ndarray:
     m[0:n, 0:n] = r
     m[0:n, n] = t
     return m
+
+def t_quat_to_hom(t:np.ndarray, quat:list[float]):
+    """
+    :param t: translation vector of the form: [tx, ty, tz]
+    :param quat: quaternion of the form: [qx, qy, qz, qw]
+    :return: 4x4 homogeneous transformation matrix
+    """
+    rotation = Rotation.from_quat(quat)
+    return r_t_to_hom(r = rotation.as_matrix(), t = t)
+
+
+def build_intrinsic_mat(fx:float, fy:float, cx:float, cy:float):
+    assert fx > 0 and fy > 0 and cx > 0 and cy > 0, f"Cam param must be positive: fx, fy, cx, cy:{fx},{fy},{cx},{cy}"
+    return np.array(
+        [
+            [fx, 0, cx],
+            [0, fy, cy],
+            [0, 0, 1]
+        ]
+    )
 
 def assert_intrinsic_mat(m:np.ndarray, hxw_img: np.ndarray | None = None)->bool:
     """
@@ -54,6 +76,19 @@ def assert_homogeneous_mat(m:np.ndarray, size:None|int = None, abs_tolerance:flo
     assert np.isclose(np.linalg.det(m[:n-1, :n-1]), 1, atol=abs_tolerance), f"Determinant is not 1: {np.linalg.det(m[:3, :3])}"
     return True
 
+def assert_homogeneous_mat_batch(mtx_s:np.ndarray, size:None|int = None, abs_tolerance:float = 0.001) -> bool:
+    """
+    Asserts that mtx_s is a Nxsizexsize batch of homogeneous matrices, with N > 0
+    :param mtx_s: A batch of homogeneous matrices
+    :param size: If not none this size will be asserted
+    :param abs_tolerance: The tolerance for det = 1 & SO(N) @ SO(N).T = unity matrix
+    :return True
+    """
+    assert isinstance(mtx_s, np.ndarray), f"hom mtx. batch must be a numpy array, got {type(mtx_s)}"
+    assert mtx_s.shape[0] > 0 and mtx_s.ndim == 3, f"Invalid shape for hom. batch: {mtx_s.shape}"
+    assert all([assert_homogeneous_mat(m) for m in mtx_s])
+    return True
+
 def assert_mxnx3_np_uint8_image(img:np.ndarray)->bool:
     """
     Asserts that the img has the dimensions mxnx3 with m,n > 0 and the datatype np.uint8
@@ -73,6 +108,30 @@ def assert_mxnx3_np_uint8_image_batch(imgs:np.ndarray)->bool:
     """
     assert isinstance(imgs, np.ndarray), f"img must be a numpy array, got {type(imgs)}"
     assert imgs.ndim == 4, f"Image batch needs to be 4D, is: {imgs.shape}"
+    assert all([assert_mxnx3_np_uint8_image(img) for img in imgs])
+    return True
+
+
+def assert_mxn_np_float_image(img:np.ndarray)->bool:
+    """
+    Asserts that the img has the dimensions mxnx3 with m,n > 0 and the datatype floating
+    :return: True
+    """
+    assert isinstance(img, np.ndarray), f"img must be a numpy array, got {type(img)}"
+    assert img.ndim == 2, f"wrong img shape: {img.shape}"
+    assert img.shape[0] > 0 and img.shape[1] > 0, f"img is empty: {img.shape}"
+    assert np.issubdtype(img.dtype, np.floating), f"wrong img dtype: {img.dtype}"
+    return True
+
+def assert_mxn_np_float_image_batch(imgs:np.ndarray)->bool:
+    """
+    Asserts that the img has the dimensions Nxmxn with m,n > 0 and the datatype floating
+    Mostly meant for depth images
+    :param imgs: A Nxmxnx3-uint8 image batch
+    :returns: True
+    """
+    assert isinstance(imgs, np.ndarray), f"img must be a numpy array, got {type(imgs)}"
+    assert imgs.ndim == 3, f"float image batch needs to be 3D, is: {imgs.shape}"
     return True
 
 def get_image_type_hxw(img:np.ndarray) -> str:

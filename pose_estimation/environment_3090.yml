@@ -20,3 +20,4 @@ dependencies:
     - einops
     - tyro
     - transformers
+    - ultralytics

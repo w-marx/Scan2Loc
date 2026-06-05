@@ -8,7 +8,7 @@ import cv2
 import sys, os
 from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared_utilities import get_image_type_hxw, compute_pose_pseudo_median
+from shared_utilities import *
 
 
 def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
@@ -40,19 +40,23 @@ def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> Callable[[np.ndarray], np.ndar
 @dataclass(frozen=True, kw_only=True)
 class ICPAlignmentConfig:
     """
+    :param do_alginment: Whether to even do alginment
     :param neighboar_dist_threshhold: The distance between points in meters, for consideration in icp
     :param max_number_itterations: The number of itterations for icp optimization per pointcloud
     :param presample_voxel_size: If bigger then 0, the pointclouds will be downsampled to that voxel size for quicker realignment
     """
+    do_alginment:bool = True
     neighboar_dist_threshhold:float = 0.01
     max_number_itterations:int = 1000
     presample_voxel_size:float = 0.0
 
     def __post__init__(self):
-        assert 0 < self.max_number_itterations, f"Number of ICP itterations must be positive: {self.max_number_itterations}"
-        assert 0 < self.neighboar_dist_threshhold, f"ICP neighboar distance must be positive: {self.neighboar_dist_threshhold}"
+        if self.do_alginment:
+            assert 0 < self.max_number_itterations, f"Number of ICP itterations must be positive: {self.max_number_itterations}"
+            assert 0 < self.neighboar_dist_threshhold, f"ICP neighboar distance must be positive: {self.neighboar_dist_threshhold}"
 
 ICPAlignmentConfigs = {
+    "no alginment": ICPAlignmentConfig(do_alginment=False),
     "standard": ICPAlignmentConfig(),
     "downsample_1mm": ICPAlignmentConfig(presample_voxel_size = 0.001),
     "downsample_5mm": ICPAlignmentConfig(presample_voxel_size = 0.005)
@@ -77,6 +81,9 @@ def align_point_clouds_icp(
     """
     assert len(point_clouds) > 1
     assert all([pc.ndim == 2 and pc.shape[-1] == 3 for pc in point_clouds])
+
+    if not config.do_alginment:
+        return point_clouds
 
     o3d_point_clouds = []
     for i, point_cloud in enumerate(point_clouds):
@@ -298,3 +305,65 @@ def create_point_cloud_depth_reproject(
         base_xyz_images.append(base_xyz1_points[:, :3].reshape((h,w,3)))
 
     return base_xyz_images
+
+
+def create_aligned_xyz_images(
+        robot_base_t_robot_camera_s:np.ndarray,
+        robot_bgr_images:np.ndarray,
+        robot_depth_images:np.ndarray | None,
+        intrinsic_camera_matrix:np.ndarray,
+
+        image_gen_config:XYZImageGenerationConfig | None = XYZImageGenerationConfig(),
+        icp_config:ICPAlignmentConfig | None = ICPAlignmentConfig(),
+    ):
+        """
+        Creates xyz images from images & poses & intrinsics
+        :param robot_base_t_robot_camera_s:
+        :param robot_bgr_images:
+        :param robot_depth_images:
+        :param intrinsic_camera_matrix:
+        :param est3d_xyz_image_gen_config: If not None will be used for xyz-image generation via mapanything (recommended method), if not crude Depth-based methods
+        :param est3d_xyz_icp_config: Do icp alignment of the xyz-images using the config if not None
+        :return: Updated bgr-images, the robot_base_xyz_imgs and the updated intrinsics
+        """
+        assert assert_homogeneous_mat_batch(robot_base_t_robot_camera_s, size=4)
+        assert robot_base_t_robot_camera_s.shape[0] == robot_bgr_images.shape[0]
+
+        assert assert_mxnx3_np_uint8_image_batch(robot_bgr_images)
+        assert robot_depth_images is None or assert_mxn_np_float_image_batch(robot_depth_images)
+        assert robot_depth_images.shape[:3] == robot_bgr_images.shape[:3]
+
+        assert assert_intrinsic_mat(intrinsic_camera_matrix)
+
+        assert image_gen_config is None or isinstance(image_gen_config, XYZImageGenerationConfig)
+        assert icp_config is None or isinstance(icp_config, ICPAlignmentConfig)
+
+        robot_base_xyz_imgs = None
+
+        if image_gen_config is not None:
+            robot_bgr_images, robot_base_xyz_imgs, robot_cam_intrinsic_mtx = generate_xyz_images(
+                bgr_images=robot_bgr_images,
+                base_t_cam_s=robot_base_t_robot_camera_s,
+                depth_images=robot_depth_images,
+                camera_intrinsics=intrinsic_camera_matrix,
+                config=image_gen_config
+            )
+        else:
+            robot_base_xyz_imgs = create_point_cloud_depth_reproject(
+                depth_images=robot_depth_images,
+                depth_cam_mtx=robot_data.cam_intrinsic_mtx,
+                base_t_camera_s=robot_base_t_robot_camera_s,
+                distance_cutoff=1.0,
+                visualize_point_cloud=True
+            )
+        
+        if icp_config is not None:
+            robot_base_xyz_imgs = [
+                xyz_img.reshape(robot_base_xyz_imgs.shape[1:]) for xyz_img in 
+                align_point_clouds_icp(
+                    point_clouds = [xyz_img.reshape(-1,3) for xyz_img in robot_base_xyz_imgs],
+                    config = icp_config,
+                )
+            ]
+        
+        return robot_bgr_images, robot_base_xyz_imgs, robot_cam_intrinsic_mtx

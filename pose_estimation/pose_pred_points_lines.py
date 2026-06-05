@@ -182,7 +182,6 @@ class LinePredictor(PosePredictor):
         :param img2: HxWx3 RGB image as numpy array
         :param lines1: Nx4 array of line segments
         :param lines2: Nx4 array of line segments
-        :param line_pairs: Nx2x4 array of matched line pairs
         """
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 
@@ -310,6 +309,8 @@ class LinePredictor(PosePredictor):
             self.visualize_features_2d(
                 img1=self.cam1_bgr_images[idx],
                 img2=cam2_rgb_image,
+                lines1_raw=lines_img1,
+                lines2_raw=lines_img2,
                 lines1_processed=lines_img1,
                 lines2_processed=lines_img2,
                 points1=image_points_cam1,
@@ -427,7 +428,7 @@ if __name__ == "__main__":
         line_fitting_3d_config=LineFitting3dConfig(use_ransac=False),
         pnpl_optimisation_conf=PnPLOptimizerConfig(lm_max_steps=10000,line_relevance=1.0),
         cam2_lsd_size=(514,514),
-        debug_visualize_2d=False, 
+        debug_visualize_2d=True, 
         debug_visualize_pnpl=False
     )
 

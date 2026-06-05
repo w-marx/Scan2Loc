@@ -161,3 +161,11 @@ runs/
 processed_datasets
 pose_estimation/pose_est_env
 pose_estimation/LoMa
+
+pose_estimation/yoloe-26l-seg-pf.pt
+pose_estimation/yoloe-26s-seg.pt
+pose_estimation/yoloe-26l-seg.pt
+pose_estimation/mobileclip2_b.ts
+data_prep_env
+out_data_he/
+out_data_re/

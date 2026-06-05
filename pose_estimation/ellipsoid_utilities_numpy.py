@@ -16,11 +16,11 @@ def assert_primal_conical_hom_ellipse(primal_conical_hom:np.ndarray, atol:float 
     """
     Raises an assertion error if the primal conical is infeasible
     Assumed is the form:
-    | A     B/2     D   |
+    | A     B/2     D/2 |
     | B/2   C       E/2 |
-    | D     E/2     F   |
+    | D/2   E/2     F   |
     Where points are on the ellipse if:
-    Ax + Bxy + Cx + Dx + Ey + F = 0
+    Axx + Bxy + Cyy + Dx + Ey + F = 0
 
     :param primal_conical_hom: The matrix to be checked
     :param atol: The absolute tolerance for all chest
@@ -122,6 +122,21 @@ def assert_gaussian_ellipse_mat_batch(sigma_mu_s:np.ndarray, dim:int|None = None
     assert all([assert_gaussian_ellipse_mat(sigma_mu, dim = dim, r_tol=r_tol) for sigma_mu in sigma_mu_s])
     return True
 
+def assert_gaussian_ellipse_tuple_batch(mu_s:np.ndarray,sigma_s:np.ndarray, dim:int|None = None, r_tol:float = 0.01)->bool:
+    """
+    Asserts that sigma_s and mu_s is a batch of sigma, mu Nx(N+1) matrices.
+    :param mu_s: The mean batch
+    :param sigma_s: The covariance batch
+    :param dim: the dimension of the gaussian, will be enforced if not None
+    :param r_tol: The relative tolerance for all tests
+    :return: True
+    """
+    assert sigma_s.shape[0] == mu_s.shape[0], f"Sigma: {sigma_s.shape}, Mu: {mu_s.shape} dont match"
+    assert sigma_s.ndim == 3 and mu_s.ndim == 2, f"Sigma: {sigma_s.shape}, Mu: {mu_s.shape} not valid"
+    assert dim is None or (sigma_s.shape[-2:] == (dim, dim) and mu_s.shape[-1] == dim), f"Sigma: {sigma_s.shape}, Mu: {mu_s.shape} not {dim} dim"
+    assert assert_gaussian_ellipse_mat_batch(gauss_ellipse_batch_tuple_to_mat_batch(mu_s=mu_s, sigma_s=sigma_s))
+    return True
+
 def gauss_ellipse_mat_to_tuple(sigma_mu:np.ndarray)->tuple[np.ndarray, np.ndarray]:
     """
     Turns a matrix of the shape Nx(N+1) with the structure:
@@ -133,6 +148,16 @@ def gauss_ellipse_mat_to_tuple(sigma_mu:np.ndarray)->tuple[np.ndarray, np.ndarra
     mu = sigma_mu[:, n]
     sigma = sigma_mu[:, :n]
     return mu, sigma
+
+def gauss_ellipse_mat_batch_to_tuple(sigma_mu:np.ndarray)->tuple[np.ndarray, np.ndarray]:
+    """
+    Turns a batch of matrices of the shape Mx(Nx(N+1)) with the structure:
+    [[sigma | mu], ...]
+    into a Mxmu, Mxsigma tuple
+    :return: mu's as an array of size MxN and sigma's as an array of size Mx(NxN)
+    """
+    n = sigma_mu.shape[1]
+    return sigma_mu[:,:, n], sigma_mu[:, :, :n]
 
 def gauss_ellipse_tuple_to_mat(mu:np.ndarray, sigma:np.ndarray):
     """
@@ -157,6 +182,19 @@ def gauss_ellipse_batch_tuple_to_mat_batch(mu_s: np.ndarray, sigma_s: np.ndarray
 ##########################################
 ## Conversions ###########################
 ##########################################
+
+
+def normalize_gaussians(sigma_mu_s:np.ndarray, w:int, h:int)->np.ndarray:
+    assert assert_gaussian_ellipse_mat_batch(sigma_mu_s, dim=2)
+
+    scaled_sigma_mu_s = sigma_mu_s.copy()
+    scaled_sigma_mu_s[:, 0, 2] /= w
+    scaled_sigma_mu_s[:, 1, 2] /= h
+    scaled_sigma_mu_s[:, 0, 0] /= w*w
+    scaled_sigma_mu_s[:, 1, 1] /= h*h
+    scaled_sigma_mu_s[:, 1, 0] /= w*h
+    scaled_sigma_mu_s[:, 0, 1] /= w*h
+    return scaled_sigma_mu_s
 
 
 def project_primal_quadratics_to_primal_conicals(
@@ -253,6 +291,20 @@ def gaussian_ellipse_s_to_matplotlib_ellipse_s(
 ##########################################
 ## Fitting ###############################
 ##########################################
+
+
+def sample_points_in_primal_conic(
+        base_t_ellipsoid:np.ndarray, 
+        primal_conic:np.ndarray,
+        resolution:int = 20
+    ):
+    """
+    Generates points on the surface of a primal quadratic, needs base_t_ellipsoid to be more efficient.
+    :param base_t_ellipsoid: A 4x4 homogeneous transformation matrix
+    :param primal_conic: The 3x3 primal conical matrix
+    :param resolution: The resolution of the point cloud along both rotational axis
+    :return: a point cloud consisting of resolution^2 points
+    """
 
 
 def sample_points_in_primal_quadratic(
@@ -442,13 +494,14 @@ def visualize_primal_quadratics(
         base_t_ellipsoid_s:np.ndarray,
         primal_quadratic_s:np.ndarray,
         bg_point_cloud:np.ndarray | None = None,
-        bg_point_cloud_colors:np.ndarray | None = None
+        bg_point_cloud_colors:np.ndarray | None = None,
+        avg_colors:np.ndarray | None = None
     ):
     """
     :param base_t_ellipsoid_s: Nx4x4 homogeneous transformation matrix from the base to the ellipsoid frames
     :param primal_quadratic_s: Nx4x4 primal quadratics of the ellipsoids
     :param bg_point_cloud: Mx3-float point cloud to display
-    :param bg_point_cloud_colors: Mx3-uint8 RGB color cloud to display
+    :param bg_point_cloud_colors: Mx3-uint8 BGR color cloud to display
     """
     assert base_t_ellipsoid_s.shape[0] == primal_quadratic_s.shape[0]
     assert all(assert_homogeneous_mat(m, size = 4) for m in base_t_ellipsoid_s)
@@ -457,14 +510,20 @@ def visualize_primal_quadratics(
     assert bg_point_cloud is None or bg_point_cloud.ndim == 2 and bg_point_cloud.shape[-1] == 3
     assert bg_point_cloud_colors is None or bg_point_cloud.shape == bg_point_cloud_colors.shape
 
+    assert avg_colors is None or avg_colors.shape == (base_t_ellipsoid_s.shape[0], 3), f"Wrong color shape: {avg_colors.shape}"
+
     base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
 
     to_vis = [base_frame]
 
-    for b_t_e, primal_quad in zip(base_t_ellipsoid_s, primal_quadratic_s):
+    for i, (b_t_e, primal_quad) in enumerate(zip(base_t_ellipsoid_s, primal_quadratic_s)):
         pc_np = sample_points_in_primal_quadratic(b_t_e, primal_quad)
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(pc_np)
+
+        if avg_colors is not None:
+            pcd.paint_uniform_color(avg_colors[i, [2,1,0]].astype(float)/255)
+
         to_vis.append(pcd)
     
     if bg_point_cloud is not None:
@@ -472,7 +531,7 @@ def visualize_primal_quadratics(
         pcd.points = o3d.utility.Vector3dVector(bg_point_cloud)
 
         if bg_point_cloud_colors is not None:
-            pcd.colors = o3d.utility.Vector3dVector(bg_point_cloud_colors.astype(float)/255.0)
+            pcd.colors = o3d.utility.Vector3dVector(bg_point_cloud_colors[:, [2,1,0]].astype(float)/255.0)
         to_vis.append(pcd)
 
     o3d.visualization.draw_geometries(to_vis, f"3D features visualization")    
@@ -513,20 +572,24 @@ def pairwise_sq_wasserstein_distance(
     :param sigma2_s: A batch of Nx2x2 covariance matrices
     :return A NxM matrix of the squared wasserstein distances
     """
+    assert assert_gaussian_ellipse_mat_batch(gauss_ellipse_batch_tuple_to_mat_batch(mu1_s, sigma1_s), dim=2)
+    assert assert_gaussian_ellipse_mat_batch(gauss_ellipse_batch_tuple_to_mat_batch(mu2_s, sigma2_s), dim=2)
+
     n, m = mu1_s.shape[0], mu2_s.shape[0]
 
     sigma2_sqrt_s = mat_sqrt_2x2_batch(sigma2_s) #Mx2x2
-    mean_dist_sq_mat = np.sum((mu1_s[:, None, :]-mu2_s[None, :, :])**2, axis=-1) #NxMx2
+    mean_dist_sq_mat = np.sum((mu1_s[:, None, :]-mu2_s[None, :, :])**2, axis=-1) #NxM
 
     cross_inner_mat = np.einsum('mkl,nla,mab->nmkb',sigma2_sqrt_s, sigma1_s, sigma2_sqrt_s, optimize=True)
     cross_sqrt = mat_sqrt_2x2_batch(cross_inner_mat.reshape(-1,2,2)).reshape(n,m,2,2)
 
-    sigma1_traces = np.einsum('nii->n', sigma1_s, optimize=True)
-    sigma2_traces = np.einsum('mii->m', sigma2_s, optimize=True)
+    sigma1_traces = np.einsum('nii->n', sigma1_s, optimize=True)[:, None]
+    sigma2_traces = np.einsum('mii->m', sigma2_s, optimize=True)[None, :]
     cross_inner_mat_traces = np.einsum('nmii->nm',cross_sqrt, optimize=True)
 
     dist_sq = mean_dist_sq_mat + sigma1_traces + sigma2_traces - 2*cross_inner_mat_traces
     return dist_sq
+
 
 def mat_sqrt_2x2_batch(matrices:np.ndarray)->np.ndarray:
     """
@@ -536,7 +599,7 @@ def mat_sqrt_2x2_batch(matrices:np.ndarray)->np.ndarray:
     """
     assert matrices.ndim == 3 and matrices.shape[-2:] == (2,2), f"Not Bx2x2: {matrices.shape}"
     vals, vecs = np.linalg.eigh(matrices)
-    sqrt_vals = np.sqrt(vals.clamp(min=1e-9))
+    sqrt_vals = np.sqrt(np.clip(vals, 1e-9, None))
     return np.einsum('bik,bk,bjk->bij', vecs, sqrt_vals, vecs, optimize=True)
 
 
