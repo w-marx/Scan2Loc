@@ -7,7 +7,7 @@ import torch
 
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared_utilities import *
+from assertion_helpers import *
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 from time_tracker import *

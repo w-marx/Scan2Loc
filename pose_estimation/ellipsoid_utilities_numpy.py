@@ -1,10 +1,12 @@
-import numpy as np
 import os, sys
 import open3d as o3d
 from matplotlib.patches import Ellipse
 import matplotlib.pyplot as plt
+
+from hom_pose_utilities import r_t_to_hom
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared_utilities import *
+from assertion_helpers import *
 import cv2
 import scipy
 

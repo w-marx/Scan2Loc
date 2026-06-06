@@ -1,12 +1,12 @@
-import numpy as np
-from dataclasses import dataclass
-import sys, os, time, cv2
+import sys, os
+
+from image_camera_manipulation import create_3d_camera
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from robot_environment import RobotEnvironment
 from headset_data import HeadsetData
-from shared_utilities import *
+from assertion_helpers import *
 from tqdm import tqdm
 from time_tracker import TimeTracker
 from abc import ABC, abstractmethod
@@ -71,7 +71,7 @@ class OnePredictorRecordingGrader:
 
     def __str__(self):
         return f"{self._predictor} on {self._headset_data.name}"
-    
+
     def translational_errors(self) -> list[float | None]:
         """
         :return: A list of Euclidean translational errors / None if not computable
@@ -83,7 +83,7 @@ class OnePredictorRecordingGrader:
             else:
                 translational_errors.append(np.linalg.norm(predicted_b_t_h[:3,3] - b_t_h[:3,3]))
         return translational_errors
-    
+
     def rotational_errors(self) -> list[float | None]:
         """
         :return: A list of rotational errors / None if not computable
@@ -93,9 +93,9 @@ class OnePredictorRecordingGrader:
             if predicted_b_t_h is None or b_t_h is None:
                 rotational_errors.append(None)
             else:
-                rotational_errors.append(calc_rotational_difference(predicted_b_t_h, b_t_h))
+                rotational_errors.append(rotational_difference(predicted_b_t_h, b_t_h))
         return rotational_errors
-    
+
     def median_translational_error(self) -> float:
         """
         :return: The median of the Euclidean translational errors
@@ -131,7 +131,7 @@ class OnePredictorRecordingGrader:
             return np.nan
         rotational_errors_no_none = [e for e in self.rotational_errors() if e is not None]
         return float(np.mean(rotational_errors_no_none))
-    
+
     def success_ratio(self)->float:
         """
         :return: The success ratio, so on how many frames a pose was predicted
@@ -201,5 +201,3 @@ class OnePredictorRecordingGrader:
         to_vis.append(obs_line_set)
 
         o3d.visualization.draw_geometries(to_vis, f"Headset Predictions visualization")
-    
-    

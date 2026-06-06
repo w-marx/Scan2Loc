@@ -1,14 +1,16 @@
 from typing import Callable, Literal
 from dataclasses import dataclass
-import torch
+
 import numpy as np
+import torch
 import open3d as o3d
-from PIL import Image
-import cv2
 import sys, os
 from tqdm import tqdm
+
+from hom_pose_utilities import compute_pose_pseudo_median
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared_utilities import *
+from assertion_helpers import *
 
 
 def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
@@ -244,7 +246,7 @@ def generate_xyz_images(
     )
 
 
-    world_xyz_images = np.array([view['pts3d'][0].cpu().numpy() for view in predictions])
+    world_xyz_images = np.asarray([view['pts3d'][0].cpu().numpy() for view in predictions])
 
     if config.camera_realginment_method == "simple":
         world_xyz_images = []
@@ -254,10 +256,10 @@ def generate_xyz_images(
             cam_points_hom = np.hstack([cam_points, np.ones((cam_points.shape[0],1))])
             world_points = (base_t_cam @ cam_points_hom.T).T
             world_xyz_images.append(world_points[:, :3].reshape(cam_img.shape[0], cam_img.shape[1], cam_img.shape[2]))
-        world_xyz_images = np.array(world_xyz_images)
+        world_xyz_images = np.asarray(world_xyz_images)
     elif config.camera_realginment_method == "kabsch-umeyama":
         camera_true_positions = base_t_cam_s[:,:3,3]
-        camera_new_positions = np.array([view['cam_trans'][0].cpu().numpy() for view in predictions])
+        camera_new_positions = np.asarray([view['cam_trans'][0].cpu().numpy() for view in predictions])
         transform_points_to_old = kabsch_umeyama(camera_true_positions, camera_new_positions)
         world_xyz_images = transform_points_to_old(world_xyz_images.reshape(-1,3)).reshape(world_xyz_images.shape)
     else:

@@ -10,7 +10,7 @@ from line_utilities import project_point_onto_line_slow
 
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared_utilities import *
+from assertion_helpers import *
 
 
 class Reproj(nn.Module):

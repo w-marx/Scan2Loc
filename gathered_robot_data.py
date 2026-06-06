@@ -2,7 +2,7 @@ import os
 import numpy as np
 
 from aruco_charuco_detection import MarkerDetector
-from shared_utilities import *
+from assertion_helpers import *
 
 class GatheredRobotData:
     def __init__(
