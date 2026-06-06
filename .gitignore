@@ -169,3 +169,4 @@ pose_estimation/mobileclip2_b.ts
 data_prep_env
 out_data_he/
 out_data_re/
+rgbd_dataset_freiburg2_desk/

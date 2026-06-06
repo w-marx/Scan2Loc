@@ -1,33 +1,33 @@
 import os, cv2
 import numpy as np
 import pandas as pd
-from robot_environment import RobotEnvironment
+from robot_environment import RobotEnvironment, visualize_robot_camera_environment_combo
 from headset_data import HeadsetData
 from shared_utilities import *
-from image_to_pointcloud import create_aligned_xyz_images, ICPAlignmentConfig, XYZImageGenerationConfig
+from image_to_pointcloud import create_aligned_xyz_images, ICPAlignmentConfig, XYZImageGenerationConfig, ICPAlignmentConfigs, XYZImageGenerationConfigs
 from typing import Literal
+import argparse
 
 
 def load_bgr_images(folder:str)->tuple[np.ndarray, np.ndarray]:
     df = pd.read_csv(
-        f"{folder}/rgb.txt", comment = '#', delim_whitespace=True, names=["timestamp", "location"]
+        f"{folder}/rgb.txt", comment = '#', names=["timestamp", "location"], sep=r"\s+"
     )
-    df = df.sort_values('timestamp')
     df['image'] = df['location'].apply(
         lambda x: cv2.imread(f"{folder}/{x}") if os.path.exists(f"{folder}/{x}") else None
     )
     df = df.dropna(subset=['image']).copy()
 
-    timestamps = df['timestamp'].values
-    bgr_images = df['image'].values
+    timestamps = np.array(df['timestamp'].values)
+    bgr_images = np.stack(df['image'].values, axis = 0)
 
-    assert assert_mxnx3_np_uint8_image_batch
+    assert assert_mxnx3_np_uint8_image_batch(bgr_images)
 
     return timestamps, bgr_images
 
 def load_depth_images(folder:str)->tuple[np.ndarray, np.ndarray]:
     df = pd.read_csv(
-        f"{folder}/depth.txt", comment = '#', delim_whitespace=True, names=["timestamp", "location"]
+        f"{folder}/depth.txt", comment = '#', names=["timestamp", "location"], sep=r"\s+"
     )
     df = df.sort_values('timestamp')
     df['image'] = df['location'].apply(
@@ -35,9 +35,11 @@ def load_depth_images(folder:str)->tuple[np.ndarray, np.ndarray]:
     )
     df = df.dropna(subset=['image']).copy()
 
-    timestamps = df['timestamp'].values
-    depth_images_unnorm = df['image'].values
+    timestamps = np.array(df['timestamp'].values)
+    depth_images_unnorm = np.stack(df['image'].values, axis = 0)
+
     depth_images = depth_images_unnorm/5000
+    depth_images[depth_images_unnorm == 0] = np.nan
 
     assert assert_mxn_np_float_image_batch(depth_images)
 
@@ -52,7 +54,7 @@ def load_labels(file:str)->tuple[np.ndarray, np.ndarray]:
     :return: float-array of timestamps + 4x4 hom. pose matrices
     """
     df = pd.read_csv(
-        file, comment = '#', delim_whitespace=True, names=["tx", "ty", "tz", "qx", "qy", "qz", "qw"]
+        file, comment = '#', names=["timestamp","tx", "ty", "tz", "qx", "qy", "qz", "qw"], sep=r"\s+"
     )
     df = df.sort_values('timestamp')
 
@@ -121,6 +123,9 @@ def robot_environment_and_headset_data_from_tum(
 )-> tuple[RobotEnvironment, HeadsetData]:
     assert n_robot_images > 0
 
+    if not os.path.exists(folder):
+        raise FileNotFoundError(f"folder: {folder} doesnt exist")
+
     timestamps_bgr, bgr_images = load_bgr_images(folder=folder)
     timestamps_depth, depth_images = load_depth_images(folder=folder)
     timestamps_world_t_c, world_t_cam_s = load_labels(f"{folder}/groundtruth.txt")
@@ -128,15 +133,18 @@ def robot_environment_and_headset_data_from_tum(
     synchronized_timestamps = synchronize_timestamps([timestamps_bgr, timestamps_depth, timestamps_world_t_c], tolerance=time_tolerance)
 
     n_dp = synchronized_timestamps.shape[0]
-    sync_bgr_images = bgr_images[synchronize_timestamps[:,0]]
-    sync_depth_images = depth_images[synchronize_timestamps[:,1]]
-    sync_world_t_cam_s = world_t_cam_s[synchronize_timestamps[:,2]]
+    print(f"was able to match: {n_dp}/ ({timestamps_bgr.shape[0]}, {timestamps_depth.shape[0]}, {timestamps_world_t_c.shape[0]}) timestamps")
+
+    sync_bgr_images = bgr_images[synchronized_timestamps[:,0]]
+    sync_depth_images = depth_images[synchronized_timestamps[:,1]]
+    sync_world_t_cam_s = world_t_cam_s[synchronized_timestamps[:,2]]
 
 
     # Robot environment generation
-    robot_indices = range(0, n_dp, step = int(n_dp/n_robot_images))
+    robot_indices = range(0, n_dp, int(n_dp/n_robot_images))
 
     robot_bgr_images, robot_xyz_images, robot_intrinsics = create_aligned_xyz_images(
+        robot_base_t_robot_camera_s=sync_world_t_cam_s[robot_indices],
         robot_bgr_images=sync_bgr_images[robot_indices],
         robot_depth_images=sync_depth_images[robot_indices],
         intrinsic_camera_matrix=INTRINSIC_FREIBURG_MATRICES[rgb_camera_name],
@@ -146,9 +154,9 @@ def robot_environment_and_headset_data_from_tum(
 
     robot_env = RobotEnvironment(
         name=f"{os.path.basename(folder)}_robot_env",
-        robot_bgr_images=robot_bgr_images,
+        robot_bgr_images=np.array(robot_bgr_images),
         robot_bgr_intrinsics=robot_intrinsics,
-        robot_xyz_images=robot_xyz_images,
+        robot_xyz_images=np.array(robot_xyz_images),
         robot_base_t_robot_camera_s=sync_world_t_cam_s[robot_indices]
     )
 
@@ -161,3 +169,45 @@ def robot_environment_and_headset_data_from_tum(
     )
 
     return robot_env, headset_data
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-folder", type=str, default="./in_folder", help="Robot input Folder Location")
+
+    parser.add_argument("--number-of-robot-datapoints", type=int, default=30, help="Number of datapoints that are used for the robot environment")
+    parser.add_argument("--time-tolerance", type=float, default=0.05, help="Max difference between 2 datapoint timestamps to be matched")
+
+    parser.add_argument(
+        "--rgb-camera-name", type = str, default="freiburg2", 
+        help = f"What camera generated the data", choices=list(INTRINSIC_FREIBURG_MATRICES.keys()),
+    )
+    parser.add_argument(
+        "--icp-alignment", type = str, default="no alginment", 
+        help = f"How to do the icp alignment", choices=list(ICPAlignmentConfigs.keys()),
+    )
+    parser.add_argument(
+        "--xyz-image-gen", type = str, default="standard", 
+        help = f"How to do the xyz image generation", choices=list(XYZImageGenerationConfigs.keys()),
+    )
+
+    parser.add_argument("--output-base-folder", type=str, default="./out_data", help="Output Folder Location")
+
+    args = parser.parse_args()
+    
+    robot_env, headset_data = robot_environment_and_headset_data_from_tum(
+        folder=args.input_folder,
+        rgb_camera_name=args.rgb_camera_name,
+        time_tolerance= args.time_tolerance,
+        n_robot_images=args.number_of_robot_datapoints,
+        xyz_image_generation_config=XYZImageGenerationConfigs[args.xyz_image_gen],
+        xyz_image_alginment_config=ICPAlignmentConfigs[args.icp_alignment],
+    )
+
+    robot_env.save(args.output_base_folder)
+    headset_data.save(args.output_base_folder)
+
+    rob_load = RobotEnvironment.from_folder(f"{args.output_base_folder}/{os.path.basename(args.input_folder)}_robot_env")
+    head_load = HeadsetData.from_folder(f"{args.output_base_folder}/{os.path.basename(args.input_folder)}_headset_data")
+
+    visualize_robot_camera_environment_combo(robot_env=rob_load, headset_rec=head_load)
