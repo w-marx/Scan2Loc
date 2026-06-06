@@ -107,6 +107,28 @@ class HeadsetData:
             robot_base_t_headset_s = [None] * len(bgr_hxw_imgs)
         )
     
+        
+    def resized_and_cropped(self, *, crop_amount: tuple[int, int] | None = None, new_res: tuple[int, int] | None = None)->'HeadsetData':
+        """
+        Returns a copy of the instance with the new resolution
+        :param crop_amount: The amount to be cropped before scaling to the new resolution (crop_w, crop_h) (applied twice on each side)
+        :param new_res: The new resolution as an (widht, height) tuple
+        :return: A copy where the images have the new resolution
+        """
+        new_images, new_intrinsics = self.bgr_image_s.copy(), self.intrinsic_cam_mtx.copy()
+        if crop_amount is not None:
+            new_images, new_intrinsics = crop_images(new_images, new_intrinsics, crop_amount)
+        if new_res is not None:
+            new_images, new_intrinsics = scale_images(new_images, new_intrinsics, new_res)
+
+        return HeadsetData(
+            name=self.name,
+            bgr_image_s=new_images,
+            intrinsic_cam_mtx=new_intrinsics,
+            robot_base_t_headset_s=self.robot_base_t_headset_s.copy()
+        )
+
+    
     def save(self, folder_path:str, new_name:str|None=None):
         """
         Saves the instance to a folder, in the format that it can be recreated using `from_folder`.

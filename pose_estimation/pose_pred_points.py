@@ -38,16 +38,23 @@ class NoExtrasPredictor(PosePredictor):
 
 
 if __name__ == "__main__":
-    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_r")
-    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_h")
+    #robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_r")
+    #headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_h")
+    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/out_data/rgbd_dataset_freiburg2_desk_robot_env")
+    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/out_data/rgbd_dataset_freiburg2_desk_headset_data")
+    
+    
+    
     predictor = NoExtrasPredictor(
         cam2_intrinsic_mtx=headset_data.intrinsic_cam_mtx,
         cam1_bgr_images=robot_data.robot_bgr_images,
         cam1_xyz_images=robot_data.robot_xyz_images,
         extract_and_match_wrapper_config=ExtractAndMatchWrapperConfig(
-            extract_and_match=ExtractAndLightGlue(
-                extractor="SuperPoint"
-            ),
+            #extract_and_match=ExtractAndLightGlue(
+            #    extractor="SuperPoint"
+            #),
+            extract_and_match=ExtractAndMatchLoMa('LoMaG'),
+            rotation_augmentations= [Augmentation],
             ransac_config=pose_estimation_ransaac_config_less_precise,
         )
     )

@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
+import cv2
 
 
 def r_t_to_hom(r:np.ndarray, t:np.ndarray) -> np.ndarray:
@@ -29,7 +30,19 @@ def t_quat_to_hom(t:np.ndarray, quat:list[float]):
 
 
 def build_intrinsic_mat(fx:float, fy:float, cx:float, cy:float):
-    assert fx > 0 and fy > 0 and cx > 0 and cy > 0, f"Cam param must be positive: fx, fy, cx, cy:{fx},{fy},{cx},{cy}"
+    """
+    Builds an intrinsic matrix from the given parameters of the style (skew is assumed as 0):
+
+    | fx     0       cx |
+    | 0      fy      cy |
+    | 0      0       1  |
+
+    :param fx: The focal length along the x-axis
+    :param fy: The focal length along the y-axis
+    :param cx: The x-coordinate of the principal point
+    :param cy: The y-coordinate of the principal point
+    """
+    assert fx > 0 and fy > 0 and cx > 0 and cy > 0, f"Cam params must be positive: fx, fy, cx, cy:{fx},{fy},{cx},{cy}"
     return np.array(
         [
             [fx, 0, cx],
@@ -37,6 +50,15 @@ def build_intrinsic_mat(fx:float, fy:float, cx:float, cy:float):
             [0, 0, 1]
         ]
     )
+
+def extract_params_from_intrinsic_mat(intrinsic_mat:np.ndarray)->tuple[float, float, float, float]:
+    """
+    :param intrinsic_mat: A 3x3 intrinsic matrix
+    :return: a tuple consisting of: fx, fy, cx, cy
+    """
+    assert assert_intrinsic_mat(intrinsic_mat)
+    return intrinsic_mat[0,0], intrinsic_mat[1,1], intrinsic_mat[0,2], intrinsic_mat[1,2]
+
 
 def assert_intrinsic_mat(m:np.ndarray, hxw_img: np.ndarray | None = None)->bool:
     """
@@ -208,9 +230,57 @@ def compute_pose_pseudo_median(poses:list[np.ndarray])->np.ndarray | None:
     """
     if len(poses) == 0:
         return None
-    assert all([assert_homogeneous_mat(m, size=4) for m in poses])
+    assert assert_homogeneous_mat_batch(poses, size=4)
     
     median_pose = np.eye(4)
     median_pose[:3,3] = min(poses, key = lambda x: sum([np.linalg.norm(x[:3,3]-y[:3,3]) for y in poses]))[:3,3]
     median_pose[:3,:3] = min(poses, key = lambda x: sum([calc_rotational_difference(x,y) for y in poses]))[:3,:3]
     return median_pose
+
+def crop_images(images:np.ndarray, intrinsic_matrix:np.ndarray, crop_amount:tuple[int, int])->tuple[np.ndarray, np.ndarray]:
+    """
+    Takes an image + the intrinsic matrix, crops them and returns the new ones (no distortion & pinhole cam assumed)
+    :param images: BxHxWx3-uint8 numpy image array, with B > 0
+    :param intrinsic_matrix: The 3x3 intrinsic matrix with which the images were taken
+    :param crop_amount: A tuple (crop_w, crop_h) of how much to crop from both sides along each direction
+    :return: Bx(H-2*crop_h)x(W-2*crop_w)x3-uint8 image array & the new 3x3 intrinsic matrix 
+    """
+    assert assert_mxnx3_np_uint8_image_batch(images)
+    assert images.shape[0] > 0
+    assert assert_intrinsic_mat(intrinsic_matrix, hxw_img=images.shape[0])
+    h, w = images.shape[1:3]
+    crop_w, crop_h = crop_amount
+    assert crop_w >= 0 and crop_h >= 0, f"Cant crop negative amount: w: {crop_w}, h: {crop_h}"
+    assert crop_w < int(w/2)-2 and crop_h < int(h/2)-2, f"cant crop {h}x{w} to {h-2*crop_h}x{w-2*crop_w}, not enough left"
+
+    cropped_images = images[:, crop_h:h-crop_h, crop_w:w-crop_w, :].copy()
+
+    fx, fy, cx, cy = extract_params_from_intrinsic_mat(intrinsic_matrix)
+
+    return cropped_images, build_intrinsic_mat(fx, fy, cx-crop_w, cy - crop_h)
+
+def scale_images(images:np.ndarray, intrinsic_matrix:np.ndarray, new_resolution:tuple[int, int])->tuple[np.ndarray, np.ndarray]:
+    """
+    Takes an image + the intrinsic matrix, rescaled them and returns the new ones (no distortion & pinhole cam assumed)
+    :param images: BxHxWx3-uint8 numpy image array, with B > 0
+    :param intrinsic_matrix: The 3x3 intrinsic matrix with which the images were taken
+    :param new_resolution: A tuple (new_w, new_h) of of the new resolution
+    :return: Bx(new_h)x(new_w)x3-uint8 image array & the new 3x3 intrinsic matrix 
+    """
+    assert assert_mxnx3_np_uint8_image_batch(images)
+    assert images.shape[0] > 0
+    assert assert_intrinsic_mat(intrinsic_matrix, images[0])
+    old_h, old_w = images.shape[1:3]
+    new_w, new_h = new_resolution
+    w_scale, h_scale = new_w/old_w, new_h/old_h
+
+    assert new_w > 0 and new_h > 0, f"Cant resize to non-positive size: wxh: {new_w}x{new_h}"
+
+    fx, fy, cx, cy = extract_params_from_intrinsic_mat(intrinsic_matrix)
+
+    resized_images = np.stack([
+        cv2.resize(img, (new_w, new_h), interpolation = cv2.INTER_AREA if (w_scale < 1 or h_scale < 1) else cv2.INTER_LINEAR)
+        for img in images
+    ], axis = 0)
+
+    return resized_images, build_intrinsic_mat(fx*w_scale, fy*h_scale, cx*w_scale, cy*h_scale)
