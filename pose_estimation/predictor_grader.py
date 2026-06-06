@@ -13,9 +13,10 @@ from headset_data import HeadsetData
 from assertion_helpers import *
 from time_tracker import TimeTracker
 import open3d as o3d
-import matplotlib.pyplot as plt
 from predictor_handling import PosePredictor
 from dataclasses import dataclass
+
+import matplotlib.pyplot as plt
 
 
 
@@ -314,4 +315,31 @@ class NPredictors1DatasetGrader:
     def plot_creation_times(self, ax):
         pass
 
-    def plot_
+    def plot_est_base_t_cam_times(self, ax):
+        pass
+
+    def plot_update_pose_times(self, ax):
+        pass
+
+    def _plot_times(self, ax, times:dict[str,tuple[float, list[tuple[str, float]]]]):
+        pass
+
+    def plot_frame_prediction_times(self, ax):
+        pass
+
+    def plot_hz_vs_rotational_error_deg(self, ax):
+        pass
+
+    def plot_hz_vs_translational_error_mm(self, ax):
+        pass
+
+    def _plot_hz_vs_metric(self,
+                           ax,
+                           hz:list[float],
+                           metric:list[float],
+                           names:list[str]
+                           )->None:
+        pass
+
+    def visualize_predictions_3d(self):
+        pass
