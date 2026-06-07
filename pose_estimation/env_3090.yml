@@ -1,0 +1,46 @@
+name: env
+channels:
+  - pytorch
+  - conda-forge
+  - nvidia
+  - defaults
+
+dependencies:
+  - python=3.12
+  - pip
+
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+
+      - torch==2.5.1+cu124
+      - torchvision==0.20.1+cu124
+      - torchaudio==2.5.1+cu124
+
+      - transformers==5.9.0
+      - huggingface-hub
+      - tokenizers
+
+      - numpy>=2
+      - opencv-python
+      - scikit-learn
+      - scikit-image
+      - matplotlib
+      - tqdm
+      - psutil
+      - timm
+      - einops
+      - safetensors
+      - ultralytics
+      - ftfy
+      - open3d
+      - pypose
+      - torch-ransac3d
+      - pycocotools
+      - simple-lama-inpainting
+      - iopath
+      - tyro
+      - uv
+      - setuptools<81
+      - pyrealsense2
+      - rerun-sdk==0.26.2
+      - projectaria-tools

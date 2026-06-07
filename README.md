@@ -10,16 +10,16 @@ cd AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline
 cd data_gathering
 conda env create -f environment.yml -p ./data_gather_env
 conda activate ./data_gather_env
+pip install -e ../shared
 ```
 
-
-## For Data preprocessing
-Only tested with an 3090ti
+## For Pose estimation & data preprocessing
+In `./pose_estimation`:
 
 ```
-cd data_preprocessing
-conda env create -f environment_3090.yml -p ./data_prep_env
-conda activate ./data_prep_env
+conda env create -f env_3090.yml -p ./env
+conda activate ./env
+pip install -e ../shared
 ```
 
 ```
@@ -28,15 +28,6 @@ cd map-anything
 pip install -e .
 cd ..
 ```
-
-
-## For Pose estimation
-
-````commandline
-cd pose_estimation
-conda env create -f environment_3090.yml -p ./pose_est_env
-conda activate ./pose_est_env
-````
 
 When using LightGlue for matching:
 ````commandline

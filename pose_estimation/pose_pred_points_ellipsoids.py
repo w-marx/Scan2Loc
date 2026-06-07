@@ -1,23 +1,24 @@
 import cv2
 import numpy as np
 import open3d as o3d
+import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
+from scipy.optimize import linear_sum_assignment
+
+from shared.assertion_helpers import *
+
+from geometric_utilities.union_find import UnionFind
+from geometric_utilities.pypose_pne_optimizer import *
+from geometric_utilities.ellipsoid_utilities_numpy import *
+from geometric_utilities.pne_delta_pose_otimizer import *
+from geometric_utilities.foreground_segmentation import *
+
+from small_utilities.image_augmentation import *
+from small_utilities.sheduler import *
 
 from predictor_handling import *
 from extractors_and_matchers import *
-from image_augmentation import *
-import matplotlib.pyplot as plt
-from union_find import UnionFind
-from scipy.optimize import linear_sum_assignment
-from pypose_pne_optimizer import *
-from sheduler import *
-import matplotlib.lines as mlines
 
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from foreground_segmentation import *
-
-from ellipsoid_utilities_numpy import *
-from pne_delta_pose_otimizer import *
 
 class ImageMaskStorage:
     """
@@ -392,7 +393,7 @@ class EllipsoidPredictor(PosePredictor):
             image_size=cam2_bgr_image.shape[:2],
             dummy_value=self.matching_no_match_cost,
             k = self.matching_mad_k,
-            visualize_matching=None#cam2_bgr_image
+            visualize_matching=cam2_bgr_image
         )
         time_tracker.add_time_stamp("Matching the 2d gaussians")
 
@@ -406,7 +407,7 @@ class EllipsoidPredictor(PosePredictor):
             primal_quadratics=self.primal_quadratic_s[proj_match_idx_s],
             primal_conicals=np.array(observed_primal_conics)[obs_match_idx_s],
             intrinsic_cam_mat=scaled_cam2_intrinsics,
-            visualize_result=None#cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
+            visualize_result=cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
         )
         #except Exception as e:
         #    print(f"Optimisation failed with error: {e} \n\n returning rough pose")
@@ -419,8 +420,8 @@ class EllipsoidPredictor(PosePredictor):
 
 
 if __name__ == "__main__":
-    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_r")
-    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_h")
+    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_re")
+    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_he")
     
     tt_pne = TimeTracker()
     

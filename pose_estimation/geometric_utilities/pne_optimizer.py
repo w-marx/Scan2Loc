@@ -1,18 +1,15 @@
-from dataclasses import dataclass
 import numpy as np
 from scipy.spatial.transform import Rotation
-import sys, os
-from ellipsoid_utilities_numpy import *
 import torch
-
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from assertion_helpers import *
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
-from time_tracker import *
 from abc import ABC, abstractmethod
-from typing import Literal
+
+from shared.assertion_helpers import *
+
+from .ellipsoid_utilities_numpy import *
+from .time_tracker import *
+
 
 def hom_to_quat_vec(hom_mat:np.ndarray)->np.ndarray:
     """

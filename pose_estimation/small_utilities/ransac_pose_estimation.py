@@ -1,7 +1,8 @@
 import numpy as np
 from dataclasses import dataclass
 import cv2
-from hom_pose_utilities import r_t_to_hom
+
+from shared.se3_utilities import r_t_to_hom
 
 
 @dataclass(frozen=True, kw_only=True)

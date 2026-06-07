@@ -1,6 +1,7 @@
 import argparse, time
 from headset_data import *
 from image_to_pointcloud import *
+from shared.assertion_helpers import *
 
 
 class RobotEnvironment:

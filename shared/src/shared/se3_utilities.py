@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from assertion_helpers import assert_homogeneous_mat, assert_homogeneous_mat_batch
+from shared.assertion_helpers import assert_homogeneous_mat, assert_homogeneous_mat_batch
 
 
 def rotational_difference(hom1:np.ndarray, hom2:np.ndarray)->float:

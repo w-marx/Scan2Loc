@@ -3,15 +3,15 @@ from PIL import Image
 import numpy as np
 import cv2, sys, os, torch
 from abc import ABC, abstractmethod
-from ransac_pose_estimation import * 
-from image_augmentation import * 
-from sheduler import *
 from dataclasses import dataclass, field
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from assertion_helpers import *
 from collections import defaultdict
 import matplotlib.pyplot as plt
+
+
+from shared.assertion_helpers import *
+from small_utilities.ransac_pose_estimation import * 
+from small_utilities.image_augmentation import * 
+from small_utilities.sheduler import *
 
 class ExtractAndMatch(ABC):
 

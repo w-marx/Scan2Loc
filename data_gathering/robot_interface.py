@@ -8,7 +8,7 @@ import pyrealsense2 as rs
 import cv2
 import numpy as np
 import json, os, sys, time
-from proto_robot_data import *
+from shared.src.shared.proto_robot_data import *
 
 def extract_intrinsics(cam_intrinsics) -> tuple[np.ndarray,list[float],np.ndarray, list[float]]:
     """

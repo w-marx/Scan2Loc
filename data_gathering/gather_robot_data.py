@@ -3,11 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
-from proto_robot_data import *
+from shared.src.shared.proto_robot_data import *
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from aruco_charuco_detection import MarkerDetector, ArucoDetector, CharucoDetector, NoMarkerDetector, MarkerDetectionConfig, DEFAULT_MARKER_CONFIGS
-from gathered_robot_data import GatheredRobotData
+from shared.src.shared.aruco_charuco_detection import MarkerDetector, ArucoDetector, CharucoDetector, NoMarkerDetector, MarkerDetectionConfig, DEFAULT_MARKER_CONFIGS
+from shared.src.shared.gathered_robot_data import GatheredRobotData
 from hom_pose_utilities import compute_pose_pseudo_median
 
 calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2)

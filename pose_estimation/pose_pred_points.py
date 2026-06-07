@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from predictor_handling import *
 from extractors_and_matchers import *
-from image_augmentation import *
+from small_utilities.image_augmentation import *
 
 class NoExtrasPredictor(PosePredictor):
     def __init__(
@@ -38,10 +38,10 @@ class NoExtrasPredictor(PosePredictor):
 
 
 if __name__ == "__main__":
-    #robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_r")
-    #headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_h")
-    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/out_data/rgbd_dataset_freiburg2_desk_robot_env")
-    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/out_data/rgbd_dataset_freiburg2_desk_headset_data")
+    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_re")
+    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_he")
+    #robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/out_data/rgbd_dataset_freiburg2_desk_robot_env")
+    #headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/out_data/rgbd_dataset_freiburg2_desk_headset_data")
     
     
     

@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-from assertion_helpers import assert_intrinsic_mat, assert_homogeneous_mat, assert_mxnx3_np_uint8_image_batch
+from shared.assertion_helpers import assert_intrinsic_mat, assert_homogeneous_mat, assert_mxnx3_np_uint8_image_batch
 
 
 def build_intrinsic_mat(fx:float, fy:float, cx:float, cy:float):

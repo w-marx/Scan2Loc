@@ -1,10 +1,11 @@
 import numpy as np
 import torch
-
-from union_find import UnionFind
 from skimage.draw import line
 from dataclasses import dataclass
 from numbers import Number
+
+from .union_find import UnionFind
+
 
 torch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

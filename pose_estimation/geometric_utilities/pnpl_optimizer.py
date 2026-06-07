@@ -5,12 +5,11 @@ import torch, torch.nn as nn
 from pypose.optim.solver import Cholesky, PINV
 import numpy as np
 from scipy.spatial.transform import Rotation
-import sys, os
-from line_utilities import project_point_onto_line_slow
+import matplotlib.pyplot as plt
 
+from shared.assertion_helpers import *
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from assertion_helpers import *
+from .line_utilities import project_point_onto_line_slow
 
 
 class Reproj(nn.Module):
@@ -119,7 +118,6 @@ class Reproj(nn.Module):
 
     
     def visualize_2d(self, img_rgb:np.ndarray, observed_lines_2d:np.ndarray):
-        import matplotlib.pyplot as plt
 
         proj_points = self.project_points().detach().cpu().numpy()
         obs_points = self.observed_points_2d.detach().cpu().numpy()

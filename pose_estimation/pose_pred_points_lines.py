@@ -1,14 +1,17 @@
 import cv2
 import numpy as np
-from predictor_handling import *
-from extractors_and_matchers import *
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
-
-from pose_estimation.pnpl_optimizer import *
-from line_utilities import * 
 from dataclasses import dataclass
 from numbers import Number
+
+from shared.assertion_helpers import assert_intrinsic_mat, assert_mxnx3_np_uint8_image_batch, assert_mxnx3_np_uint8_image
+
+from predictor_handling import *
+from extractors_and_matchers import *
+from geometric_utilities.pnpl_optimizer import *
+from geometric_utilities.line_utilities import * 
+
 
 @dataclass(frozen=True, kw_only=True)
 class LineMerging2dConfig:
@@ -411,8 +414,8 @@ class LinePredictor(PosePredictor):
 
 
 if __name__ == "__main__":
-    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_r")
-    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/data_preprocessing/out_data_h")
+    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_re")
+    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_he")
     
     
     predictor = LinePredictor(

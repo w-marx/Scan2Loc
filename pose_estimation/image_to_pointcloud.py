@@ -7,10 +7,8 @@ import open3d as o3d
 import sys, os
 from tqdm import tqdm
 
-from hom_pose_utilities import compute_pose_pseudo_median
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from assertion_helpers import *
+from shared.se3_utilities import compute_pose_pseudo_median
+from shared.assertion_helpers import *
 
 
 def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> Callable[[np.ndarray], np.ndarray]:

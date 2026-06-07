@@ -1,14 +1,12 @@
-import os, sys
 import open3d as o3d
 from matplotlib.patches import Ellipse
 import matplotlib.pyplot as plt
-
-from hom_pose_utilities import r_t_to_hom
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from assertion_helpers import *
 import cv2
 import scipy
+
+from shared.se3_utilities import r_t_to_hom
+from shared.assertion_helpers import *
+
 
 ##########################################
 ## Assertions ############################

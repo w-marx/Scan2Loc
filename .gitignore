@@ -135,38 +135,16 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Custom additions
-data_preprocessing/sam3/
-data_preprocessing/vggt/
-out_data/
-in_data/
-in_data_vrs/
-data_preprocessing/out_data_h/
-data_preprocessing/out_data_r/
-LightGlue/
-checkerboard_radon.webp
-image_masked.png
+datasets/
+processed_datasets/
 
-data_gathering/rgbd_cam_output
-
-input_data_examples
-input_data_examples/
-
-gathered_data_examples
-gathered_data_examples/
-
-map-anything/
-data_preprocessing/sam3.pt
-data_preprocessing/runs
-runs/
-processed_datasets
-pose_estimation/pose_est_env
+pose_estimation/LightGlue
 pose_estimation/LoMa
+pose_estimation/map-anything
+pose_estimation/env
 
-pose_estimation/yoloe-26l-seg-pf.pt
-pose_estimation/yoloe-26s-seg.pt
-pose_estimation/yoloe-26l-seg.pt
-pose_estimation/mobileclip2_b.ts
-data_prep_env
-out_data_he/
-out_data_re/
-rgbd_dataset_freiburg2_desk/
+pose_estimation/out_data_he
+pose_estimation/out_data_re
+
+pose_estimation/*.pt
+pose_estimation/*.ts

@@ -1,17 +1,18 @@
-import sys, os
-
-from image_camera_manipulation import create_3d_camera
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from robot_environment import RobotEnvironment
-from headset_data import HeadsetData
-from assertion_helpers import *
-from tqdm import tqdm
-from time_tracker import TimeTracker
 from abc import ABC, abstractmethod
 import open3d as o3d
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import numpy as np
+
+from shared.image_camera_manipulation import create_3d_camera
+from shared.se3_utilities import *
+from shared.assertion_helpers import *
+
+
+from geometric_utilities.time_tracker import TimeTracker
+from robot_environment import RobotEnvironment
+from headset_data import HeadsetData
+
 
 class PosePredictor(ABC):
     def __init__(self):
