@@ -1,14 +1,16 @@
 import os
 import pandas as pd
-
-from hom_pose_utilities import t_quat_to_hom
-from image_camera_manipulation import build_intrinsic_mat
-from robot_environment import RobotEnvironment, visualize_robot_camera_environment_combo
-from headset_data import HeadsetData
-from assertion_helpers import *
-from image_to_pointcloud import create_aligned_xyz_images, ICPAlignmentConfig, XYZImageGenerationConfig, ICPAlignmentConfigs, XYZImageGenerationConfigs
 from typing import Literal
 import argparse
+import numpy as np
+
+from shared.se3_utilities import t_quat_to_hom
+from shared.image_camera_manipulation import build_intrinsic_mat
+from shared.assertion_helpers import *
+
+from robot_environment import RobotEnvironment, visualize_robot_camera_environment_combo
+from headset_data import HeadsetData
+from geometric_utilities.image_to_pointcloud import create_aligned_xyz_images, ICPAlignmentConfig, XYZImageGenerationConfig, ICPAlignmentConfigs, XYZImageGenerationConfigs
 
 
 def load_bgr_images(folder:str)->tuple[np.ndarray, np.ndarray]:
