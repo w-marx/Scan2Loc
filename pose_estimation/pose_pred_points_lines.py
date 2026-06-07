@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from dataclasses import dataclass
 from numbers import Number
+import torch
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_mxnx3_np_uint8_image_batch, assert_mxnx3_np_uint8_image
 
@@ -107,18 +108,32 @@ class LinePredictor(PosePredictor):
             cam2_intrinsic_mtx:np.ndarray,
             cam1_bgr_images:np.ndarray,
             cam1_xyz_images:np.ndarray,
-
-            extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig,
+            time_tracker_init: TimeTracker = TimeTracker(),
+            extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig = ExtractAndMatchWrapperConfig(),
             lsd_cleanup_passes_configs:MultiPassLineMergingConfig = MultiPassLineMergingConfig(),
             line_matching_config:LineMatchingConfig = LineMatchingConfig(),
             line_fitting_3d_config:LineFitting3dConfig = LineFitting3dConfig(),
             pnpl_optimisation_conf:PnPLOptimizerConfig = PnPLOptimizerConfig(),
             cam2_lsd_size:None | tuple[int, int] = None,
-
-            debug_visualize_2d:bool = False,
+            debug_visualize_line_cleanup:bool = False,
             debug_visualize_pnpl:bool = False,
-            debug_visualize_3d:bool = False
         ):
+        """
+        A predictor that uses points & lines as features
+
+        :param cam2_intrinsic_mtx: The 3x3 intrinsic matrix for camera 2
+        :param cam1_bgr_images: BxHxWx3-uint8 array of bgr images for camera 1
+        :param cam1_xyz_images: BxHxWx3-float array of xyz-point images for camera 1 in the base ref. frame
+        :param time_tracker_init: A timetracker where important steps during the initialization will be registered
+        :param extract_and_match_wrapper_config: The configuration for how to extract and match the points
+        :param lsd_cleanup_passes_configs: The cleanup passes that will be enacted after LSD on any image
+        :param line_matching_config: How to match lines from 2 different images
+        :param line_fitting_3d_config: How to fit the 3d lines to the 3d point clouds from cam1_xyz_images
+        :param pnpl_optimisation_conf: How to do the PnPL-optimisation
+        :param cam2_lsd_size: If not None the cam2 images will be scaled to that resolution before LSD (smaller -> better runtime)
+        :param debug_visualize_line_cleanup: If True the line features will be visualised
+        :param debug_visualize_pnpl: If True the optimisation by the pnpl-optimisation will be visualized
+        """
         super().__init__()
         assert assert_intrinsic_mat(cam2_intrinsic_mtx)
         self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
@@ -127,18 +142,17 @@ class LinePredictor(PosePredictor):
         assert cam1_xyz_images.shape == cam1_bgr_images.shape
         self.cam1_xyz_images = cam1_xyz_images
 
-        assert isinstance(extract_and_match_wrapper_config, ExtractAndMatchWrapperConfig)
+        time_tracker_init.reset_elapsed_time()
+
         self.extract_and_match_wrapper = ExtractAndMatchWrapper(
             cam2_mtx=cam2_intrinsic_mtx,
             cam1_bgr_images=cam1_bgr_images,
             cam1_xyz_images=cam1_xyz_images,
             config=extract_and_match_wrapper_config
         )
+        time_tracker_init.add_time_stamp("ExtractAndMatchWrapper Initialisation")
 
-        assert isinstance(lsd_cleanup_passes_configs, MultiPassLineMergingConfig)
         self.lsd_cleanup_passes = lsd_cleanup_passes_configs.passes
-
-        assert isinstance(line_matching_config, LineMatchingConfig)
         self.line_matching_config = line_matching_config
 
         self.line_fitting_3d_method = (lambda points3d:(
@@ -149,13 +163,10 @@ class LinePredictor(PosePredictor):
             )
         )) if line_fitting_3d_config.use_ransac else lambda points3d: robust_pca_2d_3d_points_lineseg_regression(points=points3d)
 
-
-        assert isinstance(pnpl_optimisation_conf, PnPLOptimizerConfig)
         self.pnpl_optimisation_conf = pnpl_optimisation_conf
 
 
-        self.debug_visualize_2d = debug_visualize_2d
-        self.debug_visualize_3d = debug_visualize_3d
+        self.debug_visualize_line_cleanup = debug_visualize_line_cleanup
         self.debug_visualize_pnpl = debug_visualize_pnpl
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -163,11 +174,90 @@ class LinePredictor(PosePredictor):
 
         self.cam1_bgr_images = cam1_bgr_images
 
+        time_tracker_init.reset_elapsed_time()
         self.lines_4_images_cam1 = [
-            self.lsd_and_cleanup_on_image(img) for img in cam1_bgr_images
+            self._lsd_and_cleanup_on_image(img) for img in cam1_bgr_images
         ]
+        time_tracker_init.add_time_stamp("LSD and Cleanup")
 
         self.cam2_lsd_size = cam2_lsd_size
+
+    @staticmethod
+    def get_creation_function(
+            cam2_intrinsic_mtx: np.ndarray,
+            extract_and_match_wrapper_config: ExtractAndMatchWrapperConfig = ExtractAndMatchWrapperConfig(),
+            lsd_cleanup_passes_configs: MultiPassLineMergingConfig = MultiPassLineMergingConfig(),
+            line_matching_config: LineMatchingConfig = LineMatchingConfig(),
+            line_fitting_3d_config: LineFitting3dConfig = LineFitting3dConfig(),
+            pnpl_optimisation_conf: PnPLOptimizerConfig = PnPLOptimizerConfig(),
+            cam2_lsd_size: None | tuple[int, int] = None,
+            debug_visualize_line_cleanup: bool = False,
+            debug_visualize_pnpl: bool = False
+    ):
+        """
+        Returns a function with which a new NoExtrasPredictor may be created.
+        For parameter info look at `__init__`
+        :return: f(robot_env,time_tracker) -> NoExtrasPredictor
+        """
+        creation_function = lambda robot_env, init_tt: LinePredictor(
+            cam2_intrinsic_mtx=cam2_intrinsic_mtx.intrinsic_cam_mtx,
+            cam1_bgr_images=robot_env.robot_bgr_images,
+            cam1_xyz_images=robot_env.robot_xyz_images,
+            extract_and_match_wrapper_config=extract_and_match_wrapper_config,
+            lsd_cleanup_passes_configs = lsd_cleanup_passes_configs,
+            line_matching_config = line_matching_config,
+            line_fitting_3d_config = line_fitting_3d_config,
+            pnpl_optimisation_conf = pnpl_optimisation_conf,
+            cam2_lsd_size = cam2_lsd_size,
+            debug_visualize_line_cleanup = debug_visualize_line_cleanup,
+            debug_visualize_pnpl = debug_visualize_pnpl,
+            time_tracker_init=init_tt
+        )
+        return creation_function
+
+
+    @staticmethod
+    def visualize_line_cleanup(
+            lines_before:np.ndarray,
+            lines_after:np.ndarray,
+            background_image:np.ndarray,
+            ax_before: Axes | None = None,
+            ax_after: Axes | None = None,
+    )->None:
+        """
+        Visualises how the lines change through cleanup
+        :param lines_before: Nx4 array of line segments of the style [[x0, y0, x1, y1], ...]
+        :param lines_before: Mx4 array of line segments of the style [[x0, y0, x1, y1], ...]
+        :param background_image_bgr: HxWx3 BGR image as numpy array or HxW Greyscale image
+        :param ax_before: An matplotlib axis on which before will be plotted (if None it will be created and the plot shown)
+        :param ax_after: Same as ax_before for after
+        """
+        has_to_plot = ax_before is None or ax_after is None
+        if has_to_plot:
+            fig, axes = plt.subplots(1, 2, figsize=(12, 10))
+            ax_before = axes[0]
+            ax_after = axes[1]
+
+        if background_image.ndim == 3:
+            background_image = cv2.cvtColor(background_image, cv2.COLOR_BGR2RGB)
+
+        ax_before.imshow(background_image)
+        ax_after.imshow(background_image)
+
+        lines_xy_raw = [((line[0], line[1]), (line[2], line[3])) for line in lines_before]
+        lc1_raw = LineCollection(lines_xy_raw, linewidths=2, alpha=0.8, color = plt.cm.jet(np.linspace(0, 1, lines_before.shape[0])))
+        ax_before.add_collection(lc1_raw)
+        ax_before.set_title("Lines before cleanup")
+
+        line_colors_processed = plt.cm.jet(np.linspace(0, 1, lines_after.shape[0]))
+        lines_xy_processed = [((line[0], line[1]), (line[2], line[3])) for line in lines_after]
+        lc1_processed = LineCollection(lines_xy_processed, linewidths=2, alpha=0.8, color = line_colors_processed)
+        ax_before.add_collection(lc1_processed)
+        ax_before.set_title("Lines after cleanup")
+
+        if has_to_plot:
+            plt.show()
+
 
     def visualize_features_2d(
             self, 
@@ -180,6 +270,7 @@ class LinePredictor(PosePredictor):
             points1:np.ndarray, 
             points2:np.ndarray,
         ):
+        #TODO reuse for video generation
         """
         :param img1: HxWx3 BGR image as numpy array
         :param img2: HxWx3 RGB image as numpy array
@@ -221,60 +312,27 @@ class LinePredictor(PosePredictor):
         axes[1, 1].scatter(points2[:, 0], points2[:, 1], s = 2, color = point_colors, alpha = 0.8)
 
         plt.show()
-    
-    def visualize_features_3d(
-            self,
-            point_cloud:np.ndarray,
-            line_points_3d:np.ndarray,
-            line_segments_3d:np.ndarray
-        ):
-        """
-        Visualizes the inputs in 3d in relation to a base frame
-        :param point_cloud: Nx3 numpy array of xyz-points
-        :param line_points_3d: LxMx3 numpy array of xyz-points
-        :param line_segments_3d: Lx6 numpy array of lines with each line: [x1, y1, z1, x2, y2, z2]
-        """
-        assert point_cloud.ndim == 2 and point_cloud.shape[-1] == 3
-        assert line_points_3d.ndim == 3 and line_points_3d.shape[-1] == 3
-        assert line_segments_3d.ndim == 2 and line_segments_3d.shape[-1] == 6
-
-        import open3d as o3d
-
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(point_cloud)
-        pcd.paint_uniform_color([0, 0, 0])
-
-        base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
-        
-        to_vis = [pcd, base_frame]
-
-        if len(line_points_3d) > 0:
-            pcd_lines = o3d.geometry.PointCloud()
-            pcd_lines.points = o3d.utility.Vector3dVector(np.concatenate(line_points_3d, axis=0))
-            pcd_lines.paint_uniform_color([1, 0, 0])
-            to_vis.append(pcd_lines)
-
-        line_set = o3d.geometry.LineSet()
-        line_set.points = o3d.utility.Vector3dVector(line_segments_3d.reshape(-1,3))
-        line_set.lines = o3d.utility.Vector2iVector(np.array([[i, i+1] for i in range(line_segments_3d.shape[0]*2-1) if i % 2 == 0]))
-        to_vis.append(line_set)
-
-        o3d.visualization.draw_geometries(to_vis, f"3D features visualization")
 
 
-    def est_base_t_cam2_4_idx(
+    def _est_base_t_cam2_4_idx(
             self,
             cam2_rgb_image: np.ndarray,
             idx:int,
             lines_img2:np.ndarray,
             time_tracker:TimeTracker = TimeTracker()
         ) -> np.ndarray | None:
-
+        """
+        Estimates base_t_cam2 for a given cam1-image index
+        :param cam2_rgb_image: HxWx3 BGR image as numpy array
+        :param idx: The index of the cam1 datapoint to use as reference
+        :param lines_img2: Nx4 array of line segments in the cam2-view
+        :param time_tracker: a time tracker where subcomponent times will be tracked
+        """
         time_tracker.reset_elapsed_time()
         base_t_cam_and_points = self.extract_and_match_wrapper.est_base_t_cam2_and_points(
             idx=idx, cam2_rgb_image=cam2_rgb_image
         )
-        time_tracker.add_time_stamp("estimate base_t_cam2 with points")
+        time_tracker.add_time_stamp("point feature pose pred")
 
         if base_t_cam_and_points is None:
             return None
@@ -306,25 +364,7 @@ class LinePredictor(PosePredictor):
         matched_lines_2d = np.array(matched_lines_2d) if len(matched_lines_2d) > 0 else np.empty((0,4))
         matched_lines_3d = np.array(matched_lines_3d) if len(matched_lines_3d) > 0 else np.empty((0,6))
 
-        time_tracker.add_time_stamp("Line 2d to 3d transformation")
-
-        if self.debug_visualize_2d:
-            self.visualize_features_2d(
-                img1=self.cam1_bgr_images[idx],
-                img2=cam2_rgb_image,
-                lines1_raw=lines_img1,
-                lines2_raw=lines_img2,
-                lines1_processed=lines_img1,
-                lines2_processed=lines_img2,
-                points1=image_points_cam1,
-                points2=image_points_cam2
-            )
-        if self.debug_visualize_3d:
-            self.visualize_features_3d(
-                point_cloud=self.cam1_xyz_images[idx].reshape(-1,3), 
-                line_points_3d=[line_seg_2d_to_3d_points(line_pair[0], self.cam1_xyz_images[idx]) for line_pair in line_pairs],
-                line_segments_3d=matched_lines_3d
-            )
+        time_tracker.add_time_stamp("Line 2d -> 3d transformation")
         
         time_tracker.reset_elapsed_time()
 
@@ -339,14 +379,18 @@ class LinePredictor(PosePredictor):
             visualize_result= cam2_rgb_image if self.debug_visualize_pnpl else None
         )
 
-        time_tracker.add_time_stamp("Bundle adjustment")
+        time_tracker.add_time_stamp("PnL Optimisation")
         time_tracker.print_report()
-
         return np.linalg.inv(cam2_t_base_bundle_adjustment)
 
 
 
-    def cleanup_lines(self, lines):
+    def _cleanup_lines(self, lines:np.ndarray)->np.ndarray:
+        """
+        Takes the lines and cleans them up according to the cleanup-config of the instance
+        :param lines: Bx4 array of lines of the style: [[x0, y0, x1, y2], ... ]
+        :return: B'x4 array of lines of the style: [[x0, y0, x1, y2], ... ], with B' <= B
+        """
         lines = lines
         for ref_conf in self.lsd_cleanup_passes:
             lines = remove_short_2d_line_segments(
@@ -357,7 +401,7 @@ class LinePredictor(PosePredictor):
         return lines
     
 
-    def lsd_and_cleanup_on_image(self, bgr_image:np.ndarray, lsd_at_size:None | tuple[int, int] = None)->np.ndarray:
+    def _lsd_and_cleanup_on_image(self, bgr_image:np.ndarray, lsd_at_size: None | tuple[int, int] = None)->np.ndarray:
         """
         Runs LSD on an image that can be scaled down beforehand, then cleans those lines up and scales them back
         :param bgr_image: The HxWx3-uint8 BGR image to be done lsd upon
@@ -368,7 +412,11 @@ class LinePredictor(PosePredictor):
 
         cam2_grey_img = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2GRAY)
         if lsd_at_size is None:
-            return self.cleanup_lines(self.line_seg_detector.detect(cam2_grey_img)[0].squeeze(1))
+            raw_lines = self.line_seg_detector.detect(cam2_grey_img)[0].squeeze(1)
+            clean_lines = self._cleanup_lines(raw_lines)
+            if self.debug_visualize_line_cleanup:
+                self.visualize_line_cleanup(lines_before=raw_lines,lines_after=clean_lines,background_image=cam2_grey_img)
+            return clean_lines
         
         # In case of scaling:
         h_orig, w_orig = bgr_image.shape[:2]
@@ -376,28 +424,46 @@ class LinePredictor(PosePredictor):
 
         cam2_image_scaled = cv2.resize(cam2_grey_img, (w_scaled, h_scaled), interpolation = cv2.INTER_AREA)
         lines_scaled_raw = self.line_seg_detector.detect(cam2_image_scaled)[0].squeeze(1)
-        lines_scaled = self.cleanup_lines(lines_scaled_raw)
+        lines_scaled = self._cleanup_lines(lines_scaled_raw)
+
+        if self.debug_visualize_line_cleanup:
+            self.visualize_line_cleanup(
+                lines_before=lines_scaled_raw,
+                lines_after=lines_scaled,
+                background_image=cam2_image_scaled
+            )
 
         if lines_scaled.size > 0:
             lines_scaled[:, [0,2]] *= w_orig/w_scaled
             lines_scaled[:, [1,3]] *= h_orig/h_scaled
+
         return lines_scaled
 
     
 
-    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 2, time_tracker:TimeTracker = TimeTracker()) -> np.ndarray | None:
+    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 1, time_tracker:TimeTracker = TimeTracker()) -> np.ndarray | None:
+        """
+        Estimates the hom. transformation: baseT_cam2 based on point and line features
+        :param cam2_bgr_image: The camera 2 image (HxWx3-uint8 array)
+        :param number_retry: With how many different cam1 images the prediction may be tried (upper bound)
+        :param time_tracker: A time tracker where timestamps for the different subcomponents will be added.
+        :return: The 4x4 Pose in SE3 if prediction was successful else None
+        """
+        assert assert_mxnx3_np_uint8_image(cam2_bgr_image)
+        assert number_retry > 0
+
         number_tries = 0
         est_base_t_cam = None
         cam2_rgb_image = cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
 
 
         time_tracker.reset_elapsed_time()
-        lines_img2 = self.lsd_and_cleanup_on_image(cam2_bgr_image, lsd_at_size=self.cam2_lsd_size)
+        lines_img2 = self._lsd_and_cleanup_on_image(cam2_bgr_image, lsd_at_size=self.cam2_lsd_size)
         time_tracker.add_time_stamp("Image 2 LSD + cleanup")
 
         while est_base_t_cam is None and number_tries < number_retry:
             idx = self.extract_and_match_wrapper.sheduler.get_best()
-            est_base_t_cam = self.est_base_t_cam2_4_idx(
+            est_base_t_cam = self._est_base_t_cam2_4_idx(
                 idx=idx,
                 lines_img2 = lines_img2,
                 cam2_rgb_image = cam2_rgb_image,
@@ -407,6 +473,13 @@ class LinePredictor(PosePredictor):
         return est_base_t_cam
     
     def update_pose(self,cam2_bgr_image: np.ndarray, rough_base_t_cam2:np.ndarray, time_tracker:TimeTracker) -> np.ndarray | None:
+        """
+        Acts exactly the same as est_base_t_cam2 with this predictor
+        :param cam2_bgr_image: HxWx3 bgr image
+        :param rough_base_t_cam2: A rough base_t_cam2 estimate.
+        :param time_tracker: a time-tracker object, that will be used by the Pose Predictor to note the runtimes
+        :return: 4x4 Pose in SE3 if prediction was successful else None
+        """
         return self.est_base_t_cam2(cam2_bgr_image=cam2_bgr_image, number_retry=1, time_tracker=time_tracker)
 
 

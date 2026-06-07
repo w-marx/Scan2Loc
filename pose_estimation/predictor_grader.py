@@ -153,6 +153,17 @@ class PredictionOnDataset:
             actual=actual_sync
         )
 
+    def print_summary(self)->None:
+        print(f"Success rate: {self.success_ratio} for {self.number_attempted_predictions} predictions")
+
+        print(f"Avg. time per prediction: {self.avg_time_for_frame_prediction*1000}ms")
+        print(f"est_base_t_cam subcomponent times:\n")
+        self._est_base_t_cam_time_tracker.print_report()
+
+        print(f"Avg. error: {self.avg_translational_error*1000}mm and {np.rad2deg(self.avg_rotational_error)}°")
+        print(f"Median. error: {self.median_translational_error*1000}mm and {np.rad2deg(self.median_rotational_error)}°")
+        print(f"ATE RMSE: {self.ate_translation_rmse * 1000}mm and {np.rad2deg(self.ate_rot_rmse)}°")
+        print(f"RTE RMSE: {self.rte_translation_rmse * 1000}mm and {np.rad2deg(self.rte_rotational_rmse)}°")
 
 
     def get_avg_time_per_est_base_t_cam_call(self)->tuple[float, list[tuple[str, float]]]:
@@ -311,6 +322,22 @@ class NPredictors1DatasetGrader:
                 subc_tt.return_averaged_times()
             )
         return times
+
+    def print_summary(self):
+        """
+        Print the summary of the PosePredictors performances
+        """
+        print(f"{'name':<30} {'success ratio %':<12} {'T/frame [ms]':<10} {'avg t_err [mm]':<10} {'avg r_err [deg]':<10} \n")
+        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
+            print(
+                f"{gpp.name:<30} "
+                f"{grader.success_ratio * 100:>10.2f} "
+                f"{grader.avg_time_for_frame_prediction * 1000:>10.0f} "
+                f"{grader.avg_translational_error * 1000:>12.1f} "
+                f"{np.rad2deg(grader.avg_rotational_error):>12.1f}"
+            )
+
+
 
     def plot_creation_times(self, ax):
         pass

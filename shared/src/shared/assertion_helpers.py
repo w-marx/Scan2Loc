@@ -74,6 +74,29 @@ def assert_mxnx3_np_uint8_image_batch(imgs:np.ndarray)->bool:
     assert all([assert_mxnx3_np_uint8_image(img) for img in imgs])
     return True
 
+def assert_mxnx3_np_float_image(img:np.ndarray)->bool:
+    """
+    Asserts that the img has the dimensions mxnx3 with m,n > 0 and the datatype np.uint8
+    mostly meant for images where pixels are 3d cartesian coordinates
+    :return: True
+    """
+    assert isinstance(img, np.ndarray), f"img must be a numpy array, got {type(img)}"
+    assert img.ndim == 3 and img.shape[2] == 3, f"wrong img shape: {img.shape} should be mxnx3"
+    assert img.shape[0] > 0 and img.shape[1] > 0, f"img is empty: {img.shape}"
+    assert isinstance(img.dtype, np.floating), f"wrong img dtype: {img.dtype} should be np.floating"
+    return True
+
+def assert_mxnx3_np_float_image_batch(imgs:np.ndarray)->bool:
+    """
+    Asserts that the img has the dimensions Bxmxnx3 with m,n > 0 and the datatype floating
+    mostly meant for images where pixels are 3d cartesian coordinates
+    :param imgs: A Bxmxnx3-float image batch
+    :returns: True
+    """
+    assert isinstance(imgs, np.ndarray), f"img must be a numpy array, got {type(imgs)}"
+    assert imgs.ndim == 3, f"float image batch needs to be 3D, is: {imgs.shape}"
+    assert all([assert_mxnx3_np_float_image(img) for img in imgs])
+    return True
 
 def assert_mxn_np_float_image(img:np.ndarray)->bool:
     """
@@ -88,13 +111,14 @@ def assert_mxn_np_float_image(img:np.ndarray)->bool:
 
 def assert_mxn_np_float_image_batch(imgs:np.ndarray)->bool:
     """
-    Asserts that the img has the dimensions Nxmxn with m,n > 0 and the datatype floating
+    Asserts that the img has the dimensions Bxmxn with m,n > 0 and the datatype floating
     Mostly meant for depth images
-    :param imgs: A Nxmxnx3-uint8 image batch
+    :param imgs: A Bxmxnxfloat image batch
     :returns: True
     """
     assert isinstance(imgs, np.ndarray), f"img must be a numpy array, got {type(imgs)}"
     assert imgs.ndim == 3, f"float image batch needs to be 3D, is: {imgs.shape}"
+    all([assert_mxn_np_float_image(img) for img in imgs])
     return True
 
 def get_image_type_hxw(img:np.ndarray) -> str:
