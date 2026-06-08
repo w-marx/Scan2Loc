@@ -173,6 +173,24 @@ def generate_xyz_images(
     assert depth_images is None or depth_images.shape[:3] == bgr_images.shape[:3], f"BGR: {bgr_images.shape}, Depth: {depth_images.shape} image dims dont match"    
     assert camera_intrinsics.shape == (3,3), f"Camera intrinsics shape is not 3x3: {camera_intrinsics.shape}"
 
+    if not hasattr(generate_xyz_images, "model"):
+        import os
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+        from mapanything.models import MapAnything
+        from mapanything.utils.image import preprocess_inputs
+        from mapanything.utils.image import rgb
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        model = MapAnything.from_pretrained("facebook/map-anything").to(device)
+
+        generate_xyz_images.preprocess_inputs = preprocess_inputs
+        generate_xyz_images.rgb = rgb
+        generate_xyz_images.device = device
+        generate_xyz_images.model = model
+
+
     if config.crop_square:
         h_orig = bgr_images.shape[1]
         w_orig = bgr_images.shape[2]
@@ -188,16 +206,7 @@ def generate_xyz_images(
             depth_images = depth_images[:, crop_amount:-crop_amount,:]
             camera_intrinsics[1,2] -= crop_amount
 
-    import os
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    from mapanything.models import MapAnything
-    from mapanything.utils.image import preprocess_inputs
-    from mapanything.utils.image import rgb
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    model = MapAnything.from_pretrained("facebook/map-anything").to(device)
     if bgr_images.dtype in [np.uint8, np.uint16, np.uint32, np.uint64]:
         bgr_images = bgr_images.astype(np.float32)/255.0 # wrong in the documentation :( needs 0-1
 
@@ -214,18 +223,18 @@ def generate_xyz_images(
         for view, depth_image in zip(views, depth_images):
             view.update({
                 'depth_z': depth_image.astype(np.float32),
-                'is_metric_scale': torch.tensor([True], device=device),
+                'is_metric_scale': torch.tensor([True], device=generate_xyz_images.device),
             })
 
-    processed_views = preprocess_inputs(views)
+    processed_views = generate_xyz_images.preprocess_inputs(views)
 
 
-    bgr_images = [rgb(view['img'], view['data_norm_type'][0])[0] for view in processed_views]
+    bgr_images = [generate_xyz_images.rgb(view['img'], view['data_norm_type'][0])[0] for view in processed_views]
     bgr_images = [((img*255).astype(np.uint8) if img.dtype in [np.float16, np.float32, np.float64] else img) for img in bgr_images]
 
     camera_intrinsics = [view['intrinsics'][0].cpu().numpy() for view in processed_views][0]
 
-    predictions = model.infer(
+    predictions = generate_xyz_images.model.infer(
         processed_views,
         memory_efficient_inference=True,
         minibatch_size = None,

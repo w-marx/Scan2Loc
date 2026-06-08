@@ -176,6 +176,7 @@ def hom_to_quat_vec(hom_mat:np.ndarray)->np.ndarray:
     quat_vec = np.array([t[0], t[1], t[2], quat[0], quat[1], quat[2], quat[3]])
     return quat_vec
 
+
 @dataclass(frozen=True, kw_only=True)
 class PnPLOptimizerConfig:
     """

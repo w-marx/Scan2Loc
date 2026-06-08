@@ -10,6 +10,7 @@ class UnionFind:
         self.parent = np.arange(n)
         self.rank = np.zeros(n, dtype=int)
 
+
     def find(self, e:int)->int:
         """
         Find operation with path compression
@@ -21,6 +22,7 @@ class UnionFind:
             self.parent[e] = self.parent[self.parent[e]]
             e = self.parent[e]
         return e
+
 
     def union(self, e1:int, e2:int):
         """
@@ -45,6 +47,7 @@ class UnionFind:
             self.parent[representative_e2] = representative_e1
             self.rank[representative_e1] += 1
     
+
     def return_clusters(self)->list[list[int]]:
         """
         :return a list of all clusters (each cluster as a list of indices)

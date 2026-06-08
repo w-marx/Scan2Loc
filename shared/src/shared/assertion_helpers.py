@@ -83,7 +83,7 @@ def assert_mxnx3_np_float_image(img:np.ndarray)->bool:
     assert isinstance(img, np.ndarray), f"img must be a numpy array, got {type(img)}"
     assert img.ndim == 3 and img.shape[2] == 3, f"wrong img shape: {img.shape} should be mxnx3"
     assert img.shape[0] > 0 and img.shape[1] > 0, f"img is empty: {img.shape}"
-    assert isinstance(img.dtype, np.floating), f"wrong img dtype: {img.dtype} should be np.floating"
+    assert np.issubdtype(img.dtype, np.floating), f"wrong img dtype: {img.dtype} should be np.floating"
     return True
 
 def assert_mxnx3_np_float_image_batch(imgs:np.ndarray)->bool:
@@ -94,7 +94,7 @@ def assert_mxnx3_np_float_image_batch(imgs:np.ndarray)->bool:
     :returns: True
     """
     assert isinstance(imgs, np.ndarray), f"img must be a numpy array, got {type(imgs)}"
-    assert imgs.ndim == 3, f"float image batch needs to be 3D, is: {imgs.shape}"
+    assert imgs.ndim == 4, f"float image batch needs to be 4D, is: {imgs.shape}"
     assert all([assert_mxnx3_np_float_image(img) for img in imgs])
     return True
 

@@ -1,22 +1,19 @@
 import sys, os
 from typing import Callable
-
+import open3d as o3d
+from dataclasses import dataclass
 import numpy as np
+import matplotlib.pyplot as plt
 
-from hom_pose_utilities import translational_difference, rotational_difference, ate_rmse, rte_rotational_errors_rmse, rte_translational_errors_rmse
-from image_camera_manipulation import create_3d_camera
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from shared.assertion_helpers import *
+from shared.se3_utilities import translational_difference, rotational_difference, ate_rmse, rte_rotational_errors_rmse, rte_translational_errors_rmse
+from shared.image_camera_manipulation import create_3d_camera
 
 from robot_environment import RobotEnvironment
 from headset_data import HeadsetData
-from assertion_helpers import *
-from time_tracker import TimeTracker
-import open3d as o3d
-from predictor_handling import PosePredictor
-from dataclasses import dataclass
+from geometric_utilities.time_tracker import TimeTracker
 
-import matplotlib.pyplot as plt
+from predictor_handling import PosePredictor
 
 
 
@@ -45,7 +42,6 @@ class PredictionOnDataset:
         assert isinstance(number_retry, int) and number_retry > 0
 
 
-        self._predictor = predictor
         self._headset_data = headset_data
 
         self._est_base_t_cam_time_tracker = TimeTracker()
@@ -160,10 +156,10 @@ class PredictionOnDataset:
         print(f"est_base_t_cam subcomponent times:\n")
         self._est_base_t_cam_time_tracker.print_report()
 
-        print(f"Avg. error: {self.avg_translational_error*1000}mm and {np.rad2deg(self.avg_rotational_error)}°")
-        print(f"Median. error: {self.median_translational_error*1000}mm and {np.rad2deg(self.median_rotational_error)}°")
-        print(f"ATE RMSE: {self.ate_translation_rmse * 1000}mm and {np.rad2deg(self.ate_rot_rmse)}°")
-        print(f"RTE RMSE: {self.rte_translation_rmse * 1000}mm and {np.rad2deg(self.rte_rotational_rmse)}°")
+        print(f"Avg. error: {np.round(self.avg_translational_error*1000,1)}mm and {np.round(np.rad2deg(self.avg_rotational_error),1)}°")
+        print(f"Median. error: {np.round(self.median_translational_error*1000,1)}mm and {np.round(np.rad2deg(self.median_rotational_error),1)}°")
+        print(f"ATE RMSE: {np.round(self.ate_translation_rmse * 1000,1)}mm and {np.round(np.rad2deg(self.ate_rot_rmse))}°")
+        print(f"RTE RMSE: {np.round(self.rte_translation_rmse * 1000,1)}mm and {np.round(np.rad2deg(self.rte_rotational_rmse),1)}°")
 
 
     def get_avg_time_per_est_base_t_cam_call(self)->tuple[float, list[tuple[str, float]]]:
@@ -287,21 +283,16 @@ class NPredictors1DatasetGrader:
         self.predictors = []
         self.creation_subcomponent_time_trackers = []
         self.creation_time_tracker = TimeTracker()
+        self.headset_data = headset_data
+        self.graders = []
 
         for gradable_pose_predictor in gradable_pose_predictors:
             self.creation_time_tracker.reset_elapsed_time()
             creation_subcomponent_time_tracker = TimeTracker()
-            self.predictors.append(
-                gradable_pose_predictor.creator(robot_env, creation_subcomponent_time_tracker)
-            )
+            predictor = gradable_pose_predictor.creator(robot_env, creation_subcomponent_time_tracker)
             self.creation_subcomponent_time_trackers.append(creation_subcomponent_time_tracker)
             self.creation_time_tracker.add_time_stamp(gradable_pose_predictor.name)
 
-
-        # Run predictions
-        self.headset_data = headset_data
-        self.graders = []
-        for predictor, gradable_pose_predictor in zip(self.predictors, gradable_pose_predictors):
             grader = PredictionOnDataset(
                 predictor=predictor,
                 headset_data=headset_data,
@@ -327,14 +318,14 @@ class NPredictors1DatasetGrader:
         """
         Print the summary of the PosePredictors performances
         """
-        print(f"{'name':<30} {'success ratio %':<12} {'T/frame [ms]':<10} {'avg t_err [mm]':<10} {'avg r_err [deg]':<10} \n")
+        print(f"{'name':<30} {'success ratio %':<20} {'T/frame [ms]':<15} {'avg t_err [mm]':<15} {'avg r_err [deg]':<15} \n")
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
             print(
                 f"{gpp.name:<30} "
-                f"{grader.success_ratio * 100:>10.2f} "
-                f"{grader.avg_time_for_frame_prediction * 1000:>10.0f} "
-                f"{grader.avg_translational_error * 1000:>12.1f} "
-                f"{np.rad2deg(grader.avg_rotational_error):>12.1f}"
+                f"{grader.success_ratio * 100:<20.2f} "
+                f"{grader.avg_time_for_frame_prediction * 1000:<15.0f} "
+                f"{grader.avg_translational_error * 1000:<15.1f} "
+                f"{np.rad2deg(grader.avg_rotational_error):<15.1f}"
             )
 
 

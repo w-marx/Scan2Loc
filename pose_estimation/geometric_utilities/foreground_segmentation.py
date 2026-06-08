@@ -27,12 +27,18 @@ class Sam3Prompt:
     threshold: float = 0.5
 
 class SAM3Segmenter(Segmenter):
+    _device = None
+    _model = None
+    _processor = None
+
     def __init__(self, prompt:Sam3Prompt) -> None:
-        from transformers import Sam3Processor, Sam3Model
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = Sam3Model.from_pretrained("facebook/sam3").to(self.device)
-        self.processor = Sam3Processor.from_pretrained("facebook/sam3")
         self.prompt = prompt
+
+        if SAM3Segmenter._model is None:
+            from transformers import Sam3Processor, Sam3Model
+            SAM3Segmenter._device = "cuda" if torch.cuda.is_available() else "cpu"
+            SAM3Segmenter._model = Sam3Model.from_pretrained("facebook/sam3").to(SAM3Segmenter._device)
+            SAM3Segmenter._processor = Sam3Processor.from_pretrained("facebook/sam3")
 
 
     def update_current_prompt(self, new_prompt:Sam3Prompt):
@@ -45,16 +51,16 @@ class SAM3Segmenter(Segmenter):
             bgr_image = (bgr_image * 255).astype(np.uint8)
         pil_rgb_image = Image.fromarray(cv2.cvtColor(bgr_image.astype(np.uint8), cv2.COLOR_BGR2RGB))
 
-        inputs = self.processor(
+        inputs = SAM3Segmenter._processor(
             images=pil_rgb_image,
             text=self.prompt.text,
             return_tensors="pt"
-        ).to(self.device)
+        ).to(SAM3Segmenter._device)
 
         with torch.inference_mode():
-            outputs = self.model(**inputs)
+            outputs = SAM3Segmenter._model(**inputs)
 
-            results = self.processor.post_process_instance_segmentation(
+            results = SAM3Segmenter._processor.post_process_instance_segmentation(
                 outputs,
                 threshold=self.prompt.threshold,
                 mask_threshold=self.prompt.mask_threshold,
@@ -71,7 +77,7 @@ class SAM3Segmenter(Segmenter):
             return masks
 
 
-
+# TODO force only one in memory at a time
 class YOLOv26Segmenter(Segmenter):
     def __init__(
             self,

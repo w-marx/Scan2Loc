@@ -23,6 +23,7 @@ def hom_to_quat_vec(hom_mat:np.ndarray)->np.ndarray:
     quat_vec = np.array([t[0], t[1], t[2], quat[0], quat[1], quat[2], quat[3]])
     return quat_vec
 
+
 def project_dual_quadratics_to_primal_conicals_torch(
     dual_quadratics:torch.Tensor,
     cam_t_base:torch.Tensor,
@@ -43,6 +44,7 @@ def project_dual_quadratics_to_primal_conicals_torch(
     cam_primal_conic = torch.linalg.inv(cam_dual_conic) # [N, 3 , 3]
 
     return (cam_primal_conic+cam_primal_conic.transpose(-2,-1))/2 # [N, 3, 3]
+
 
 def primal_conics_to_gaussian_ellipses_torch(
         primal_conic_s:torch.Tensor,
@@ -68,6 +70,7 @@ def primal_conics_to_gaussian_ellipses_torch(
 
     return mu, sigma
 
+
 def wasserstein_distances_sq_torch(
         mu1_s:torch.Tensor,
         sigma1_s:torch.Tensor,
@@ -89,7 +92,8 @@ def wasserstein_distances_sq_torch(
     cross = sqrtm_2x2_torch(cross_sq)
     dist_sq = mean_dist_sq + (sigma1_s+sigma2_s-2*cross).diagonal(dim1 = -2, dim2 = -1).sum(-1)
     return dist_sq
-    
+
+
 def sqrtm_2x2_torch(matrices:torch.Tensor):
     """
     :param matrices: Nx2x2 matrix array
@@ -98,6 +102,7 @@ def sqrtm_2x2_torch(matrices:torch.Tensor):
     vals, vecs = torch.linalg.eigh(matrices)
     sqrt_vals = torch.sqrt(vals.clamp(min = 1e-9))
     return (vecs * sqrt_vals.unsqueeze(-2)) @ vecs.mT
+
 
 def full_error_calculation(
         dual_quadratics:torch.Tensor,
@@ -121,7 +126,8 @@ def full_error_calculation(
             sigma2_s_sqrt=obs_sigma_s_sqrt
         )
 
-full_error_calculataion_compiled = torch.compile(full_error_calculation)
+#TODO get compiled speedup
+#full_error_calculataion_compiled = torch.compile(full_error_calculation)
 
 
 class PnEOptimizer(ABC):

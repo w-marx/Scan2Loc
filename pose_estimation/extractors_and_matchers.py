@@ -228,7 +228,7 @@ class ExtractAndMatchEffLoFTR(ExtractAndMatch):
 @dataclass
 class ExtractAndMatchWrapperConfig:
     extract_and_match:ExtractAndMatch = field(
-        default_factory=ExtractAndMatchLoMa
+        default_factory=ExtractAndLightGlue
     )
     rotation_augmentations:list[type[Augmentation]] = field(
         default_factory=lambda: [Rotate180Deg]

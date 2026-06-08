@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
+from matplotlib.axes import Axes
 from dataclasses import dataclass
 from numbers import Number
 import torch
@@ -195,12 +196,12 @@ class LinePredictor(PosePredictor):
             debug_visualize_pnpl: bool = False
     ):
         """
-        Returns a function with which a new NoExtrasPredictor may be created.
+        Returns a function with which a new LinePredictor may be created.
         For parameter info look at `__init__`
-        :return: f(robot_env,time_tracker) -> NoExtrasPredictor
+        :return: f(robot_env,time_tracker) -> LinePredictor
         """
         creation_function = lambda robot_env, init_tt: LinePredictor(
-            cam2_intrinsic_mtx=cam2_intrinsic_mtx.intrinsic_cam_mtx,
+            cam2_intrinsic_mtx=cam2_intrinsic_mtx,
             cam1_bgr_images=robot_env.robot_bgr_images,
             cam1_xyz_images=robot_env.robot_xyz_images,
             extract_and_match_wrapper_config=extract_and_match_wrapper_config,
@@ -380,7 +381,6 @@ class LinePredictor(PosePredictor):
         )
 
         time_tracker.add_time_stamp("PnL Optimisation")
-        time_tracker.print_report()
         return np.linalg.inv(cam2_t_base_bundle_adjustment)
 
 

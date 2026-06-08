@@ -3,6 +3,7 @@ import pandas as pd
 from typing import Literal
 import argparse
 import numpy as np
+import cv2
 
 from shared.se3_utilities import t_quat_to_hom
 from shared.image_camera_manipulation import build_intrinsic_mat
@@ -10,7 +11,7 @@ from shared.assertion_helpers import *
 
 from robot_environment import RobotEnvironment, visualize_robot_camera_environment_combo
 from headset_data import HeadsetData
-from geometric_utilities.image_to_pointcloud import create_aligned_xyz_images, ICPAlignmentConfig, XYZImageGenerationConfig, ICPAlignmentConfigs, XYZImageGenerationConfigs
+from image_to_pointcloud import create_aligned_xyz_images, ICPAlignmentConfig, XYZImageGenerationConfig, ICPAlignmentConfigs, XYZImageGenerationConfigs
 
 
 def load_bgr_images(folder:str)->tuple[np.ndarray, np.ndarray]:
@@ -214,4 +215,4 @@ if __name__ == "__main__":
     rob_load = RobotEnvironment.from_folder(f"{args.output_base_folder}/{os.path.basename(args.input_folder)}_robot_env")
     head_load = HeadsetData.from_folder(f"{args.output_base_folder}/{os.path.basename(args.input_folder)}_headset_data")
 
-    visualize_robot_camera_environment_combo(robot_env=rob_load, headset_rec=head_load)
+    visualize_robot_camera_environment_combo(robot_env=rob_load, headset_data=head_load)

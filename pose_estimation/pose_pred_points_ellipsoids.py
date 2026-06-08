@@ -3,7 +3,6 @@ import numpy as np
 import open3d as o3d
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
-from scipy.optimize import linear_sum_assignment
 
 from shared.assertion_helpers import *
 
@@ -11,11 +10,10 @@ from geometric_utilities.union_find import UnionFind
 from geometric_utilities.pypose_pne_optimizer import *
 from geometric_utilities.ellipsoid_utilities_numpy import *
 from geometric_utilities.pne_delta_pose_otimizer import *
-from geometric_utilities.foreground_segmentation import *
 
+from geometric_utilities.foreground_segmentation import Segmenter, display_image_masks, YOLOv26Segmenter, Sam3Prompt, SAM3Segmenter
 from small_utilities.image_augmentation import *
 from small_utilities.sheduler import *
-
 from predictor_handling import *
 from extractors_and_matchers import *
 
@@ -187,83 +185,7 @@ def image_to_primal_conics(
         rows, cols = np.where(object_mask)
         pc_2d = np.column_stack((cols, rows))
         primal_conic_s.append(fit_primal_conic_to_2d_point_cloud(pc_2d))
-    return np.array(primal_conic_s)
-
-def match_gaussians_hungarian_on_wasserstein(
-        sigma_mu1_s:np.ndarray, 
-        sigma_mu2_s:np.ndarray,
-        image_size:tuple[int, int],
-        dummy_value:float = 1,
-        k:float = 10,
-        visualize_matching:None | np.ndarray = None
-    ):
-    """
-    Uses the hungarian algorithm to match distributions
-    :param sigma_mu1_s: Nx2x3 array of the form [[sigma_1 | mu_1], ... ]
-    :param sigma_mu2_s: Mx2x3 array of the form [[sigma_1 | mu_1], ... ]
-    :param image_size: A tuple of the image size (h,w) where the gaussians come from (used for normalisation)
-    :param dummy_value: The value for the no-match alternative
-    :param k: valid matches hav the cost: cost < median-cost + k * mad
-    """
-    n, m = sigma_mu1_s.shape[0], sigma_mu2_s.shape[0]
-    assert assert_gaussian_ellipse_mat_batch(sigma_mu1_s)
-    assert assert_gaussian_ellipse_mat_batch(sigma_mu2_s)
-
-    h, w = image_size
-    sigma_mu1_s_n = normalize_gaussians(sigma_mu1_s, h, w)
-    sigma_mu2_s_n = normalize_gaussians(sigma_mu2_s, h, w)
-
-    adjecency_mat = np.full((m+n, m+n), dummy_value, dtype = np.float32)
-    mu1_s, sigma1_s = gauss_ellipse_mat_batch_to_tuple(sigma_mu1_s_n)
-    mu2_s, sigma2_s = gauss_ellipse_mat_batch_to_tuple(sigma_mu2_s_n)
-    adjecency_mat[:n, :m] = pairwise_sq_wasserstein_distance(mu1_s, sigma1_s, mu2_s, sigma2_s)
-
-    row_ind, col_ind = linear_sum_assignment(adjecency_mat)
-    valid_ind = (col_ind < m) & (row_ind < n)
-    row_ind, col_ind = row_ind[valid_ind], col_ind[valid_ind]
-    
-    median_cost = np.median(adjecency_mat[row_ind, col_ind])
-    mad = np.median(np.abs(adjecency_mat[row_ind, col_ind] - median_cost))
-
-    valid_matches = (adjecency_mat[row_ind, col_ind] < median_cost+ k * mad)
-    matched_idx_1_s, matched_idx_2_s = row_ind[valid_matches], col_ind[valid_matches]
-
-    if visualize_matching is not None:
-        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
-        plt.imshow(visualize_matching, extent=[0, 1, 0, 1], origin="lower")
-        ax.set_ylim(1, 0)
-
-        elli1_s = gaussian_ellipse_s_to_matplotlib_ellipse_s(sigma_mu1_s_n, line_style="--", line_widths=2, colors='black')
-        elli2_s = gaussian_ellipse_s_to_matplotlib_ellipse_s(sigma_mu2_s_n, line_style="-", line_widths=2, colors='black')
-
-        ax.set_title("Matching visualisation")
-
-        for e1 in elli1_s:
-            ax.add_patch(e1)
-        for e2 in elli2_s:
-            ax.add_patch(e2)
-
-        ax.scatter(sigma_mu1_s_n[:,0,2],sigma_mu1_s_n[:,1,2], s=5, marker = 'o', color = 'black')
-        ax.scatter(sigma_mu2_s_n[:,0,2],sigma_mu2_s_n[:,1,2], s=5, marker = 's', color = 'black')
-
-        ax.quiver(
-            sigma_mu1_s_n[matched_idx_1_s,0,2],
-            sigma_mu1_s_n[matched_idx_1_s,1,2],
-            sigma_mu2_s_n[matched_idx_2_s,0,2]-sigma_mu1_s_n[matched_idx_1_s,0,2], 
-            sigma_mu2_s_n[matched_idx_2_s,1,2]-sigma_mu1_s_n[matched_idx_1_s,1,2],
-            angles='xy', scale_units='xy', scale=1,
-            color='lime',
-            alpha=0.6,
-            width=0.005
-        )
-
-        empty_lines = [
-            mlines.Line2D([], [], color='black', linestyle='-',  linewidth=2, label='Frame 1'),
-            mlines.Line2D([], [], color='black', linestyle='--', linewidth=2, label='Frame 2'),
-        ]
-        ax.legend(handles=empty_lines, loc='upper right')
-        plt.show()
-    return matched_idx_1_s, matched_idx_2_s    
+    return np.array(primal_conic_s)    
 
 
 class EllipsoidPredictor(PosePredictor):
@@ -272,19 +194,51 @@ class EllipsoidPredictor(PosePredictor):
             cam2_intrinsic_mtx:np.ndarray,
             cam1_bgr_images:np.ndarray,
             cam1_xyz_images:np.ndarray,
-            extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig,
-            cam1_segmenter:Segmenter = SAM3Segmenter(Sam3Prompt()),
-            cam2_segmenter:Segmenter = YOLOv26Segmenter(),
-            pne_optimizer:PnEOptimizer = PyposePNEOptimizer(),
-            time_tracker_init:TimeTracker = TimeTracker(),
-            min_number_matched_ellipsoids_for_opt = 1,
+            time_tracker_init:TimeTracker | None = None,
+            extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig = ExtractAndMatchWrapperConfig(),
+            cam1_segmenter:Segmenter | None = None,
+            cam2_segmenter:Segmenter | None = None,
+            pne_optimizer:PnEOptimizer | None = None,
+            min_number_matched_ellipsoids_for_opt:int = 1,
             ellipsoid_refinement_at_res: None | tuple[int, int] = None,
-            matching_no_match_cost = 0.05,
-            matching_mad_dist = 1000
+            matching_config:GaussianMatchingConfig = GaussianMatchingConfig(),
+            visualize_pne_optimisation:bool = False,
+            visualize_matching:bool = False
         ):
+        """
+        Creates an Predictor that uses ellipsoids as features
+        :param cam2_intrinsic_mtx: The 3x3 intrinsic matrix for camera 2
+        :param cam1_bgr_images: BxHxWx3-uint8 array of bgr images for camera 1
+        :param cam1_xyz_images: BxHxWx3-float array of xyz-point images for camera 1 in the base ref. frame
+        :param time_tracker_init: A timetracker where important steps during the initialization will be registered
+        :param extract_and_match_wrapper_config: The config for the initial point based prediction
+        :param cam1_segmenter: The tool to detect objects in the images during initialisation (Standard Sam3Segmenter if left to None)
+        :param cam2_segmenter: The tool to detect objects in the images after initialisation (Standard YOLOv26Segmenter if left to None)
+        :param pne_optimizer: The optimizer to optimize a pose given ellipsoids
+        :param min_number_matched_ellipsoids_for_opt: How many ellipsoids have to be matched between cam1 & cam2 image to do optimisation
+        :param ellipsoid_refinement_at_res: If not None cam2 images will be scaled to this resolution for anything ellipsoid related (can boost runtime)
+        :param matching_config: How to match the observed and projected gaussians
+        :param visualize_pne_optimisation: If True will visualize the pne optimizer calls
+        :param visualize_matching: If True will visualize the obs & proj ellipsoid matching
+        """
         super().__init__()
-        self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
+        assert assert_intrinsic_mat(cam2_intrinsic_mtx)
+        
+        self.cam2_segmenter = cam2_segmenter
         self.pne_optimizer = pne_optimizer
+
+        if cam1_segmenter is None:
+            cam1_segmenter = SAM3Segmenter(Sam3Prompt())
+
+        if self.cam2_segmenter is None:
+            self.cam2_segmenter = YOLOv26Segmenter()
+        if self.pne_optimizer is None:
+            self.pne_optimizer = PyposePNEOptimizer()
+        if time_tracker_init is None:
+            time_tracker_init = TimeTracker()
+
+        self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
+
         self.ellipsoid_refinement_res = ellipsoid_refinement_at_res
 
         assert min_number_matched_ellipsoids_for_opt > 0
@@ -312,16 +266,55 @@ class EllipsoidPredictor(PosePredictor):
         time_tracker_init.add_time_stamp("Extract and match wrapper initialisation")
 
         self.cam1_image_size = cam1_bgr_images.shape[1:3]
-        self.cam1_segmenter = cam1_segmenter
-        self.cam2_segmenter = cam2_segmenter
+        self.matching_config = matching_config
 
-        self.matching_no_match_cost = matching_no_match_cost
-        self.matching_mad_k = matching_mad_dist
+        self.visualize_pne_optimisation = visualize_pne_optimisation
+        self.visualize_matching = visualize_matching
+        
+
+    @staticmethod
+    def get_creation_function(
+            cam2_intrinsic_mtx:np.ndarray,
+            extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig = ExtractAndMatchWrapperConfig(),
+            cam1_segmenter:Segmenter | None = None,
+            cam2_segmenter:Segmenter | None = None,
+            pne_optimizer:PnEOptimizer | None = None,
+            min_number_matched_ellipsoids_for_opt:int = 1,
+            ellipsoid_refinement_at_res: None | tuple[int, int] = None,
+            matching_config:GaussianMatchingConfig = GaussianMatchingConfig(),
+            visualize_pne_optimisation:bool = False,
+            visualize_matching:bool = False
+    ):
+        """
+        Returns a function with which a new EllipsoidPredictor may be created.
+        For parameter info look at `__init__`
+        :return: f(robot_env,time_tracker) -> EllipsoidPredictor
+        """
+        creation_function = lambda robot_env, init_tt: EllipsoidPredictor(
+            cam2_intrinsic_mtx = cam2_intrinsic_mtx,
+            cam1_bgr_images = robot_env.robot_bgr_images,
+            cam1_xyz_images = robot_env.robot_xyz_images,
+            time_tracker_init = init_tt,
+            extract_and_match_wrapper_config = extract_and_match_wrapper_config,
+            cam1_segmenter = cam1_segmenter,
+            cam2_segmenter = cam2_segmenter,
+            pne_optimizer = pne_optimizer,
+            min_number_matched_ellipsoids_for_opt = min_number_matched_ellipsoids_for_opt,
+            ellipsoid_refinement_at_res = ellipsoid_refinement_at_res,
+            matching_config = matching_config,
+            visualize_pne_optimisation = visualize_pne_optimisation,
+            visualize_matching = visualize_matching
+        )
+        return creation_function
 
 
     def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 2, time_tracker:TimeTracker = TimeTracker()) -> np.ndarray | None:
         """
-        Predicts the homogenous transformation base_t_cam2
+        Estimates the hom. transformation: baseT_cam2 based on point features and then refines it using ellipsoids
+        :param cam2_bgr_image: The camera 2 image (HxWx3-uint8 array)
+        :param number_retry: With how many different cam1 images the prediction may be tried (upper bound)
+        :param time_tracker: A time tracker where timestamps for the different subcomponents will be added.
+        :return: The 4x4 Pose in SE3 if prediction was successful else None
         """
         time_tracker.reset_elapsed_time()
         est_base_t_cam = self.extract_and_match_wrapper.est_base_t_cam2_with_retry(
@@ -391,9 +384,8 @@ class EllipsoidPredictor(PosePredictor):
             sigma_mu1_s=proj_gaussian_ellipses,
             sigma_mu2_s=obs_gauss_ellipses,
             image_size=cam2_bgr_image.shape[:2],
-            dummy_value=self.matching_no_match_cost,
-            k = self.matching_mad_k,
-            visualize_matching=cam2_bgr_image
+            config=self.matching_config,
+            visualize_matching=cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB) if self.visualize_matching else None
         )
         time_tracker.add_time_stamp("Matching the 2d gaussians")
 
@@ -405,9 +397,9 @@ class EllipsoidPredictor(PosePredictor):
         cam2_t_base_opt = self.pne_optimizer.optimize_pne(
             initial_cam_t_base=rough_cam_t_base,
             primal_quadratics=self.primal_quadratic_s[proj_match_idx_s],
-            primal_conicals=np.array(observed_primal_conics)[obs_match_idx_s],
+            primal_conicals= np.array(observed_primal_conics)[obs_match_idx_s],
             intrinsic_cam_mat=scaled_cam2_intrinsics,
-            visualize_result=cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
+            visualize_result= cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB) if self.visualize_pne_optimisation else None
         )
         #except Exception as e:
         #    print(f"Optimisation failed with error: {e} \n\n returning rough pose")
@@ -415,7 +407,6 @@ class EllipsoidPredictor(PosePredictor):
         
         time_tracker.add_time_stamp("PNE optimisation")
 
-        print(f"optimisation difference: {np.sum(np.abs(rough_cam_t_base-cam2_t_base_opt))}")
         return cam2_t_base_opt
 
 

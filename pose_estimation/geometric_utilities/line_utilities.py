@@ -419,6 +419,7 @@ class LineMatchingConfig:
         assert isinstance(self.max_point_line_dist_px, Number) and 0 <= self.max_point_line_dist_px
         assert isinstance(self.min_number_supporting_points, Number) and 0 < self.min_number_supporting_points
 
+
 def match_2d_line_segments(
         lines_img1:np.ndarray, 
         lines_img2:np.ndarray,

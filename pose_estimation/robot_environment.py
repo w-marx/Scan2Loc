@@ -220,12 +220,12 @@ class RobotEnvironment:
         return self._robot_base_t_robot_camera_s
     
 
-def visualize_robot_camera_environment_combo(robot_env:RobotEnvironment, headset_rec:HeadsetData):
+def visualize_robot_camera_environment_combo(robot_env:RobotEnvironment, headset_data:HeadsetData):
     to_vis_robot = robot_env.visualize_3d_data(visualize=False)
-    to_vis_headset = headset_rec.visualize_3d_data(visualize=False)
+    to_vis_headset = headset_data.visualize_3d_data(visualize=False)
     o3d.visualization.draw_geometries(
         to_vis_robot+to_vis_headset, 
-        f"Robot: {robot_env.name} x Headset: {headset_rec.name} visualization"
+        f"Robot: {robot_env.name} x Headset: {headset_data.name} visualization"
     )
 
 
@@ -270,5 +270,5 @@ if __name__ == "__main__":
     rob_load = RobotEnvironment.from_folder(args.robot_output_folder)
     head_load = HeadsetData.from_folder(args.headset_output_folder)
 
-    visualize_robot_camera_environment_combo(robot_env=rob_load, headset_rec=head_load)
+    visualize_robot_camera_environment_combo(robot_env=rob_load, headset_data=head_load)
     print(f"Data processing took {(time.perf_counter() - start_time):.6f} seconds")

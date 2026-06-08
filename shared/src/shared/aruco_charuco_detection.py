@@ -87,9 +87,12 @@ class ImageMasker:
 
 
 class LamaMasker(ImageMasker):
+    _model = None
+
     def __init__(self):
-        from simple_lama_inpainting import SimpleLama
-        self.model = SimpleLama()
+        if LamaMasker._model is None:
+            from simple_lama_inpainting import SimpleLama
+            LamaMasker._model = SimpleLama()
 
     def remove_area(self, bgr_images:np.ndarray, hulls:list[np.ndarray]):
         assert bgr_images.ndim == 4 and bgr_images.shape[0] > 0
@@ -102,7 +105,7 @@ class LamaMasker(ImageMasker):
             if hull_points is not None:
                 cv2.fillPoly(mask, [hull_points.astype(np.int32)], 255)
                 cv2.polylines(mask, [hull_points.astype(np.int32)], isClosed=True, color=255, thickness=5)
-            result = self.model(bgr_img, mask)
+            result = LamaMasker._model(bgr_img, mask)
             masked_images.append(result)
         return np.array(masked_images)
 

@@ -1,8 +1,13 @@
 import open3d as o3d
 from matplotlib.patches import Ellipse
+from matplotlib.axes import Axes
+import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import cv2
 import scipy
+from scipy.optimize import linear_sum_assignment
+import numpy as np
+from dataclasses import dataclass
 
 from shared.se3_utilities import r_t_to_hom
 from shared.assertion_helpers import *
@@ -305,6 +310,7 @@ def sample_points_in_primal_conic(
     :param resolution: The resolution of the point cloud along both rotational axis
     :return: a point cloud consisting of resolution^2 points
     """
+    raise NotImplementedError()
 
 
 def sample_points_in_primal_quadratic(
@@ -591,6 +597,63 @@ def pairwise_sq_wasserstein_distance(
     return dist_sq
 
 
+def plot_matchings(
+        ax:Axes, 
+        rgb_image:np.ndarray, 
+        observed_sigma_mu_s:np.ndarray,
+        proj_sigma_mu_s:np.ndarray,
+        observed_matched_idx_s:np.ndarray,
+        proj_matched_idx_s:np.ndarray
+    )->None:
+    """
+    Plots the ellipsoids and matches
+    :param ax: The axis to plot upon
+    :param rgb_image: The HxWx3-uint8 background image
+    :param observed_sigma_mu_s: A Nx2x3 array of [[Sigma_0 | mu_0], ...] gaussians
+    :param proj_sigma_mu_s: A Mx2x3 array of [[Sigma_0 | mu_0], ...] gaussians
+    :param observed_matched_idx_s: The indices such that obs_sigmas[obs_idx[i]] was matched to proj_sigmas[proj_idx[i]]
+    :param proj_matched_idx_s: Array of the same length as observed_matched_idx_s
+    :return: None
+    """
+    ax.imshow(rgb_image, extent=[0, 1, 0, 1], origin="lower")
+    ax.set_ylim(1, 0)
+
+    elli1_s = gaussian_ellipse_s_to_matplotlib_ellipse_s(observed_sigma_mu_s, line_style="--", line_widths=2, colors='black')
+    elli2_s = gaussian_ellipse_s_to_matplotlib_ellipse_s(proj_sigma_mu_s, line_style="-", line_widths=2, colors='black')
+
+    ax.set_title("Matching visualisation")
+
+    for e1 in elli1_s:
+        ax.add_patch(e1)
+    for e2 in elli2_s:
+        ax.add_patch(e2)
+
+    ax.scatter(observed_sigma_mu_s[:,0,2],observed_sigma_mu_s[:,1,2], s=5, marker = 'o', color = 'black')
+    ax.scatter(proj_sigma_mu_s[:,0,2],proj_sigma_mu_s[:,1,2], s=5, marker = 's', color = 'black')
+
+    ax.quiver(
+        observed_sigma_mu_s[observed_matched_idx_s,0,2],
+        observed_sigma_mu_s[observed_matched_idx_s,1,2],
+        proj_sigma_mu_s[proj_matched_idx_s,0,2]-observed_sigma_mu_s[observed_matched_idx_s,0,2], 
+        proj_sigma_mu_s[proj_matched_idx_s,1,2]-observed_sigma_mu_s[observed_matched_idx_s,1,2],
+        angles='xy', scale_units='xy', scale=1,
+        color='lime',
+        alpha=0.6,
+        width=0.005
+    )
+
+    empty_lines = [
+        mlines.Line2D([], [], color='black', linestyle='-',  linewidth=2, label='Observed'),
+        mlines.Line2D([], [], color='black', linestyle='--', linewidth=2, label='Projected'),
+    ]
+    ax.legend(handles=empty_lines, loc='upper right')
+
+
+##########################################
+## Wasserstein & Distances ###############
+##########################################
+
+
 def mat_sqrt_2x2_batch(matrices:np.ndarray)->np.ndarray:
     """
     Computes a batch of mat^{1/2}
@@ -621,3 +684,71 @@ def wasserstein_distance_sq(sigma_mu1, sigma_mu2):
 
     dist_sq = mean_dist_sq + np.linalg.trace(sigma1+sigma2-2*s)
     return dist_sq
+
+
+@dataclass(frozen=True, kw_only=True)
+class GaussianMatchingConfig:
+    """
+    A dataclass describe hot to match gaussians
+    :param dummy_value: The cost of no-match, lower -> less False Positives
+    :param k: Filter out matching costs >= median_cost + k*MAD 
+    """
+    dummy_value:float = 0.05
+    k:float = 1000
+
+    def __post__init__(self):
+        assert self.dummy_value > 0
+        assert self.k > 0
+
+
+def match_gaussians_hungarian_on_wasserstein(
+        sigma_mu1_s:np.ndarray, 
+        sigma_mu2_s:np.ndarray,
+        image_size:tuple[int, int],
+        config:GaussianMatchingConfig = GaussianMatchingConfig(),
+        visualize_matching:None | np.ndarray = None
+    )->tuple[np.ndarray, np.ndarray]:
+    """
+    Uses the hungarian algorithm to match distributions
+    :param sigma_mu1_s: Nx2x3 array of the form [[sigma_1 | mu_1], ... ]
+    :param sigma_mu2_s: Mx2x3 array of the form [[sigma_1 | mu_1], ... ]
+    :param image_size: A tuple of the image size (h,w) where the gaussians come from (used for normalisation)
+    :param dummy_value: The value for the no-match alternative
+    :param k: valid matches hav the cost: cost < median-cost + k * mad
+    :return: 2 arrays of length n, with the indices for the matching gaussians 
+    """
+    n, m = sigma_mu1_s.shape[0], sigma_mu2_s.shape[0]
+    assert assert_gaussian_ellipse_mat_batch(sigma_mu1_s)
+    assert assert_gaussian_ellipse_mat_batch(sigma_mu2_s)
+
+    h, w = image_size
+    sigma_mu1_s_n = normalize_gaussians(sigma_mu1_s, h, w)
+    sigma_mu2_s_n = normalize_gaussians(sigma_mu2_s, h, w)
+
+    adjecency_mat = np.full((m+n, m+n), config.dummy_value, dtype = np.float32)
+    mu1_s, sigma1_s = gauss_ellipse_mat_batch_to_tuple(sigma_mu1_s_n)
+    mu2_s, sigma2_s = gauss_ellipse_mat_batch_to_tuple(sigma_mu2_s_n)
+    adjecency_mat[:n, :m] = pairwise_sq_wasserstein_distance(mu1_s, sigma1_s, mu2_s, sigma2_s)
+
+    row_ind, col_ind = linear_sum_assignment(adjecency_mat)
+    valid_ind = (col_ind < m) & (row_ind < n)
+    row_ind, col_ind = row_ind[valid_ind], col_ind[valid_ind]
+    
+    median_cost = np.median(adjecency_mat[row_ind, col_ind])
+    mad = np.median(np.abs(adjecency_mat[row_ind, col_ind] - median_cost))
+
+    valid_matches = (adjecency_mat[row_ind, col_ind] < median_cost+ config.k * mad)
+    matched_idx_1_s, matched_idx_2_s = row_ind[valid_matches], col_ind[valid_matches]
+
+    if visualize_matching is not None:
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        plot_matchings(
+            ax = ax, 
+            rgb_image=visualize_matching, 
+            proj_sigma_mu_s=sigma_mu1_s,
+            proj_matched_idx_s=matched_idx_1_s,
+            observed_sigma_mu_s=sigma_mu2_s,
+            observed_matched_idx_s=matched_idx_2_s
+        )
+        plt.show()
+    return matched_idx_1_s, matched_idx_2_s

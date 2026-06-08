@@ -4,8 +4,7 @@ from predictor_handling import *
 from extractors_and_matchers import *
 from shared.assertion_helpers import assert_intrinsic_mat
 
-from shared.src.shared.assertion_helpers import assert_mxn_np_float_image_batch, assert_mxnx3_np_uint8_image_batch
-from small_utilities.image_augmentation import *
+from shared.assertion_helpers import assert_mxn_np_float_image_batch, assert_mxnx3_np_uint8_image_batch
 
 class OnlyPointsPredictor(PosePredictor):
     def __init__(
@@ -54,7 +53,7 @@ class OnlyPointsPredictor(PosePredictor):
         assert assert_intrinsic_mat(cam2_intrinsic_mtx)
 
         creation_function = lambda robot_env, init_tt: OnlyPointsPredictor(
-            cam2_intrinsic_mtx=cam2_intrinsic_mtx.intrinsic_cam_mtx,
+            cam2_intrinsic_mtx=cam2_intrinsic_mtx,
             cam1_bgr_images=robot_env.robot_bgr_images,
             cam1_xyz_images=robot_env.robot_xyz_images,
             extract_and_match_wrapper_config=extract_and_match_wrapper_config,
