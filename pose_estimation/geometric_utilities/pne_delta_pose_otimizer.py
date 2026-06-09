@@ -7,54 +7,55 @@ from typing import Literal
 
 from .pne_optimizer import *
 
-def d_rot(w):
+def rot_vec_to_so3(w:torch.Tensor) -> torch.Tensor:
+    """
+    Computes hat(w) from w and doesnt break gradient flow
+    :param w: A rotation vector of size 3
+    """
     wx, wy, wz = w
-
     z = torch.zeros((), dtype=w.dtype, device=w.device)
-
     return torch.stack([
         torch.stack([z,  -wz,  wy]),
         torch.stack([wz,  z,  -wx]),
         torch.stack([-wy, wx,  z]),
     ])
 
-def exp_se3(S:torch.Tensor):
+def compute_exp_what(w:torch.Tensor) -> torch.Tensor:
     """
-    Takes an array: S = (Sw, Sv)
-    And returns exp([S]*theta)
+    Compute exp(w_hat * theta), ! divides by ||w||
+    :param w: A rotation vector of size 3
+    """
+    theta = torch.norm(w)
+    w_hat_norm = rot_vec_to_so3(w/theta)
+    I = torch.eye(3, device=w.device, dtype=w.dtype)
+    return I + w_hat_norm * torch.sin(theta) + (w_hat_norm @ w_hat_norm) * (1-torch.cos(theta))
+
+def exp_se3(s:torch.Tensor, eps = 1e-8):
+    """
+    Takes an array: S = (w, v)
+    And returns exp([S])
     :param s: An array: [w1, w2, w3, s1, s2, s3]
+    :param eps: The theta threshold for simplified calculation
     :return: 4x4 hom. matrix: exp([S]*theta)
     """
-    Sw, Sv = S[:3], S[3:]
+    w, v = s[:3], s[3:]
 
     # theta = |Sw|
-    theta = torch.norm(Sw)
-    r = torch.eye(3, device=S.device, dtype=S.dtype)
+    theta = torch.norm(w)
 
-
-    # |Sw| = 0
-    # exp([S]theta) = | I   Sv*theta    |
-    #                 | 0       1       |
-    if theta < 1e-8:
-        r += d_rot(Sw)
-        V = r
-    # |Sw| = 1:
-    # exp([S]theta) = | exp[Sw*theta]   (I*theta + (1-c(theta))*Sw + (theta-s(theta)*Sw^2))Sv  |
-    #                 | 0                                                               1      |
-
+    if theta < eps:
+        exp_what = torch.eye(3, device=s.device, dtype=s.dtype) + rot_vec_to_so3(w)
+        t = v + 0.5 * torch.cross(w, v, dim = 0)
     else:
-        K = d_rot(Sw / theta)
-        r += torch.sin(theta) * K + (1 - torch.cos(theta)) * (K @ K)
+        w_norm = w / theta
+        exp_what = compute_exp_what(w)
+        eye_minus_exp_what = torch.eye(3, device=s.device, dtype=s.dtype) - exp_what
+        wxv = torch.cross(w_norm, v, dim = 0)
+        t = eye_minus_exp_what @ wxv + w_norm @ (w_norm.T @ v) * theta
 
-        V = (
-            r
-            + (1 - torch.cos(theta)) / theta * K
-            + (theta - torch.sin(theta)) / (theta**2) * (K @ K)
-        )
-
-    T = torch.eye(4, device=S.device, dtype=S.dtype)
-    T[:3, :3] = r
-    T[:3, 3] = V @ Sv
+    T = torch.eye(4, device=s.device, dtype=s.dtype)
+    T[:3, :3] = exp_what
+    T[:3, 3] = t
     return T
 
 def compute_pose(x_i, cam_t_base):
@@ -93,7 +94,7 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
         primal_conicals:np.ndarray,
         intrinsic_cam_mat:np.ndarray,
         visualize_result:None | np.ndarray = None
-    ):
+    )->np.ndarray:
         # Convert everything to torch & precompute
         torch_intrinsic = torch.tensor(intrinsic_cam_mat, dtype = torch.float32)
         dual_quadratics = torch.linalg.inv(torch.tensor(primal_quadratics, dtype = torch.float32))
@@ -103,7 +104,7 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
 
 
         x_i = torch.zeros(6, dtype = torch.float32, requires_grad = True)
-        self.optimizer = LBFGS([x_i], 
+        optimizer = LBFGS([x_i],
                                lr=self.config.learning_rate, 
                                max_iter=self.config.max_itterations, 
                                tolerance_grad=self.config.stop_at_grad, 
@@ -132,14 +133,14 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
         
         losses = []
         def closure():
-            self.optimizer.zero_grad()
+            optimizer.zero_grad()
             loss = get_loss()
             loss.backward()
             losses.append(loss.item())
             return loss
         
         self.time_tracker.add_time_stamp("Initialisation")
-        self.optimizer.step(closure)
+        optimizer.step(closure)
         self.time_tracker.add_time_stamp("Optimisation")
 
         if visualize_result is not None:

@@ -3,6 +3,7 @@ from scipy.spatial.transform import Rotation
 import torch
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
+from matplotlib.axes import Axes
 from abc import ABC, abstractmethod
 
 from shared.assertion_helpers import *
@@ -32,11 +33,10 @@ def project_dual_quadratics_to_primal_conicals_torch(
     """
     Takes Nx4x4 dual quadratics in the world frame
     and returns the Nx3x3 primal conics in the camera frame
-    :param primal_quadratic: The primal quadratic as a Nx4x4 matrix
+    :param dual_quadratics: The duals quadratic as a Nx4x4 matrix
     :param cam_t_base: A 4x4 camera->base homogeneous transformation matrix
     :param intrinsic_mtx: The 3x3 intrinsic matrix of the camera
-
-     :return: The 3x3 primal conic of the projected ellipse
+    :return: The 3x3 primal conic of the projected ellipse
     """
     P = cam_t_base[:3, :] # [N, 3, 4]
     KP = intrinsic_mtx @ P # [N, 3, 4]
@@ -51,7 +51,7 @@ def primal_conics_to_gaussian_ellipses_torch(
         )-> tuple[torch.Tensor, torch.Tensor]:
     """
     Takes Nx3x3 primal conics and returns normal distributions where the edge of the elipsoid is the Mahalanobis of one
-    :param primal_conic: The Nx3x3 primal conics
+    :param primal_conic_s: The Nx3x3 primal conics
     :return a tuple: Nx2 of the mu's and Nx2x2 of the sigma's
     """
     a = primal_conic_s[:, 0:2, 0:2] # [N, 2, 2]
@@ -84,6 +84,7 @@ def wasserstein_distances_sq_torch(
     :param sigma1_s: An Nx2x2 array of covariance matrices
     :param mu2_s: An Nx2 array of means
     :param sigma2_s: An Nx2x2 array of covariance matrices
+    :param sigma2_s_sqrt: The roots of the covariance matrices
     :returns an array of length N of the distances
     """
 
@@ -96,6 +97,7 @@ def wasserstein_distances_sq_torch(
 
 def sqrtm_2x2_torch(matrices:torch.Tensor):
     """
+    Computes the Square root of an 2x2 matrix
     :param matrices: Nx2x2 matrix array
     :return Nx2x2 array with sqrt(m)
     """
@@ -132,6 +134,10 @@ def full_error_calculation(
 
 class PnEOptimizer(ABC):
     def __init__(self) -> None:
+        """
+       An PnEOptimizer is an class that optimized a given pose, so that the difference between projected and
+       observed ellipsoids is minimized.
+        """
         super().__init__()
         self.fig, self.axes = None, None
         self._vis_img_rgb = None
@@ -147,8 +153,18 @@ class PnEOptimizer(ABC):
         primal_conicals:np.ndarray,
         intrinsic_cam_mat:np.ndarray,
         visualize_result:None | np.ndarray = None
-    ):
-        pass
+    )->np.ndarray:
+        """
+        :param initial_cam_t_base: An homogeneous 4x4 matrix of the initial camera pose
+        :param primal_quadratics: An Bx4x4 batch of the primal quadratics in world space
+        :param primal_conicals: An Bx3x3 batch of the observed primal conicals in camera space
+        :param intrinsic_cam_mat: The 3x3 intrinsic camera matrix
+        :param visualize_result: either an RGB image as an HxWx3 numpy array or None if visualisation is not wanted
+        :return: The optimised 4x4 hom. matrix
+        """
+        raise NotImplementedError("Optimize PnE not implemented in base class")
+
+
 
     def register_visualisation1(self,
                                 img_rgb:np.ndarray, 
@@ -159,6 +175,9 @@ class PnEOptimizer(ABC):
                                 obs_gaussians_mu_s:torch.Tensor,
                                 title:str = "Before optimisation"
                                 ):
+        """
+        Draws the given state onto the first of 3 axes
+        """
         self.fig, self.axes = plt.subplots(1, 3, figsize=(24, 8))
         self._vis_img_rgb = img_rgb
         self._vis_intrinsic_mtx = intrinsic_mtx
@@ -178,6 +197,9 @@ class PnEOptimizer(ABC):
 
 
     def register_visualisation2(self,cam_t_base:torch.Tensor,title:str = "After optimisation"):
+        """
+        Draws the state given in `register_visualisation1` from the new perspective onto the second of 3 axes
+        """
         self.visualize_errors(
             img_rgb=self._vis_img_rgb, 
             ax=self.axes[1], 
@@ -190,6 +212,9 @@ class PnEOptimizer(ABC):
         )
 
     def register_visualisation_loss(self, losses:list[float]):
+        """
+        Draws a list of losses onto the 3rd of 3 axes
+        """
         self.axes[2].plot(losses)
         self.axes[2].set_title("Loss over iterations")
         self.axes[2].set_xlabel("Iteration")
@@ -198,14 +223,25 @@ class PnEOptimizer(ABC):
     @staticmethod    
     def visualize_errors( 
             img_rgb:np.ndarray, 
-            ax, 
+            ax:Axes,
             dual_quadratics:torch.Tensor,
             cam_t_base:torch.Tensor,
             intrinsic_mtx:torch.Tensor,
             obs_gaussians_sigma_s:torch.Tensor,
             obs_gaussians_mu_s:torch.Tensor,
-            title:str = "Pne errors"
+            title:str = "PnE errors"
         ):
+        """
+        Visualises the PnE optimisation problem
+        :param img_rgb: The RGB image where the obs_gaussians were observed
+        :param ax: The axis to draw the visualisation upon
+        :param dual_quadratics: The dual quadratics that are projected onto the image
+        :param cam_t_base: A 4x4 hom. matrix of the camera pose
+        :param intrinsic_mtx: The 3x3 intrinsic camera matrix
+        :param obs_gaussians_sigma_s: The cov. matrices of the observed gaussians
+        :param obs_gaussians_mu_s: The means of the observed gaussians
+        :param title: The title of the plot
+        """
         # To projection
         proj_primal_conincals = project_dual_quadratics_to_primal_conicals_torch(
             dual_quadratics=dual_quadratics,
