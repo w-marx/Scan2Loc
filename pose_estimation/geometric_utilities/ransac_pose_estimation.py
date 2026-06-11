@@ -1,9 +1,10 @@
 import numpy as np
 from dataclasses import dataclass
 import cv2
+from matplotlib.axes import Axes
 
 from shared.se3_utilities import r_t_to_hom
-
+from .slam2mp4 import FeatureDrawing, project_points
 
 @dataclass(frozen=True, kw_only=True)
 class RansacPoseEstimationConfig:
@@ -15,7 +16,7 @@ class RansacPoseEstimationConfig:
     :param confidence: the confidence for RANSAC
     :param method: The solving method e.g. cv2.SOLVEPNP_EPNP
     """
-    min_number_inlier_afterwards:int = 6
+    min_number_inlier_afterwards:int = 10
     iterations:int = 500
     reprojection_error:float = 5.0
     confidence:float = 0.9
@@ -48,11 +49,13 @@ pose_estimation_ransaac_config_less_precise = RansacPoseEstimationConfig(
     confidence = 0.99
 )
 
+
 def estimate_point_pose_ransac(
         img_points:np.ndarray, 
         world_points:np.ndarray,
         intrinsic_matrix:np.ndarray, 
-        config:RansacPoseEstimationConfig
+        config:RansacPoseEstimationConfig,
+        fd:FeatureDrawing | None = None
     )->tuple[np.ndarray, np.ndarray]|None:
     """
     Solves for the cam_t_world position using ransac
@@ -60,6 +63,7 @@ def estimate_point_pose_ransac(
     :param world_points: Nx3 array of 3d points [[x1, y1, z1], ...]
     :param intrinsic_matrix: 3x3 intrinsic matrix
     :param config: The RANSAC configuration to use
+    :param ax: Will draw the proj-points <-> observed points onto the axes
     :return None if optimisation fails, else tuple[cam_t_base, inlier_indices] (cam_t_base is 4x4 hom)
     """
     number_points = img_points.shape[0]
@@ -81,4 +85,13 @@ def estimate_point_pose_ransac(
         
     if not success or len(inliers) < config.min_number_inlier_afterwards:
         return None
-    return r_t_to_hom(cv2.Rodrigues(r_img_t_obj)[0], t_img_t_obj.flatten()), inliers.flatten()
+    
+    cam_t_base = r_t_to_hom(cv2.Rodrigues(r_img_t_obj)[0], t_img_t_obj.flatten())
+
+    if fd is not None:
+        fd.draw_point_pairs(
+            points_observed=img_points[inliers.flatten()], 
+            points_projected=project_points(world_points[inliers.flatten()], cam_t_base=cam_t_base, intrinsic_mat=intrinsic_matrix)
+        )
+
+    return cam_t_base, inliers.flatten()

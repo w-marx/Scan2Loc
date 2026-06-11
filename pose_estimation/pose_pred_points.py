@@ -6,6 +6,8 @@ from shared.assertion_helpers import assert_intrinsic_mat
 
 from shared.assertion_helpers import assert_mxn_np_float_image_batch, assert_mxnx3_np_uint8_image_batch
 
+from robot_environment import RobotEnvironment
+
 class OnlyPointsPredictor(PosePredictor):
     def __init__(
             self,
@@ -65,7 +67,8 @@ class OnlyPointsPredictor(PosePredictor):
     def est_base_t_cam2(self,
                         cam2_bgr_image: np.ndarray,
                         number_retry:int = 1,
-                        time_tracker:TimeTracker = TimeTracker()
+                        time_tracker:TimeTracker = TimeTracker(),
+                        fd:FeatureDrawing | None = None
                         ) -> np.ndarray | None:
         """
         Estimates the hom. transformation: baseT_cam2 based on only point features
@@ -81,64 +84,7 @@ class OnlyPointsPredictor(PosePredictor):
         base_t_cam =  self.extract_and_match_wrapper.est_base_t_cam2_with_retry(
             cam2_bgr_image=cam2_bgr_image,
             number_retry=number_retry,
+            fd = fd
         )
         time_tracker.add_time_stamp("extract and match wrapper call")
         return base_t_cam
-    
-    def update_pose(self,cam2_bgr_image: np.ndarray, rough_base_t_cam2:np.ndarray, time_tracker:TimeTracker) -> np.ndarray | None:
-        """
-        Acts exactly the same as est_base_t_cam2 with this predictor
-        :param cam2_bgr_image: HxWx3 bgr image
-        :param rough_base_t_cam2: A rough base_t_cam2 estimate.
-        :param time_tracker: a time-tracker object, that will be used by the Pose Predictor to note the runtimes
-        """
-        return self.est_base_t_cam2(cam2_bgr_image=cam2_bgr_image, time_tracker=time_tracker, number_retry=1)
-
-
-
-if __name__ == "__main__":
-    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_re")
-    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_he")
-    #robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/out_data/rgbd_dataset_freiburg2_desk_robot_env")
-    #headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/out_data/rgbd_dataset_freiburg2_desk_headset_data")
-    
-    
-    
-    predictor = OnlyPointsPredictor(
-        cam2_intrinsic_mtx=headset_data.intrinsic_cam_mtx,
-        cam1_bgr_images=robot_data.robot_bgr_images,
-        cam1_xyz_images=robot_data.robot_xyz_images,
-        extract_and_match_wrapper_config=ExtractAndMatchWrapperConfig(
-            #extract_and_match=ExtractAndLightGlue(
-            #    extractor="SuperPoint"
-            #),
-            extract_and_match=ExtractAndMatchLoMa('LoMaG'),
-            rotation_augmentations= [Augmentation],
-            ransac_config=pose_estimation_ransaac_config_less_precise,
-        )
-    )
-
-    tt1 = TimeTracker()
-    tt2 = TimeTracker()
-    grader = OnePredictorRecordingGrader(
-        predictor=predictor, 
-        headset_data=headset_data,
-        prediction_time_tracker=tt1,
-        subcomponent_time_tracker=tt2
-    )
-    
-    print(f"avg rot error: {np.round(np.rad2deg(grader.avg_rotational_error()), 2)} degrees")
-    print(f"avg translational error: {np.round(grader.avg_translational_error()*1000, 1)} mm")
-    print(f"median rot error: {np.round(np.rad2deg(grader.median_rotational_error()), 2)} degrees")
-    print(f"median translational error: {np.round(grader.median_translational_error()*1000, 1)} mm")
-    print(f"sucess_ratio: {np.round(grader.success_ratio(),2)}")
-
-    grader.visualize_predictions(robot_env=robot_data, show_label=True)
-
-    print(f"tt1:")
-    tt1.print_report()
-    print(f"\n tt2:")
-    tt2.print_report()
-
-    predictor.extract_and_match_wrapper.print_used_augmentations()
-    print(f"avg number of tries: {predictor.extract_and_match_wrapper.avg_number_of_tries()}")

@@ -30,6 +30,7 @@ def assert_homogeneous_mat(m:np.ndarray, size:None|int = None, abs_tolerance:flo
     :param abs_tolerance: The tolerance for det = 1 & SO(N) @ SO(N).T = unity matrix
     :return True
     """
+    assert isinstance(m, np.ndarray), f"SE3 matrix must be a numpy array, got {type(m)}: {m}"
     n = m.shape[0]
     assert size is None or n == size, f"Matrix is {m.shape} not {size}x{size}"
     assert m.shape == (n, n), f"M not 4x4 {m.shape}"

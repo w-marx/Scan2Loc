@@ -88,6 +88,11 @@ class YOLOv26Segmenter(Segmenter):
         ) -> None:
         from ultralytics import YOLO
 
+        from ultralytics.utils import LOGGER
+        import logging
+
+        LOGGER.setLevel(logging.ERROR)
+
         self.model = YOLO(model)
         self.model.set_classes(prompts)
     

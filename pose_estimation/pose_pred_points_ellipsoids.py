@@ -188,6 +188,90 @@ def image_to_primal_conics(
     return np.array(primal_conic_s)    
 
 
+def visualize_pose_prediction(
+        fd:FeatureDrawing,
+        dual_quadratics:np.ndarray,
+        cam_t_base:np.ndarray,
+        intrinsic_mtx:np.ndarray,
+        obs_gaussians_sigma_mu_s:np.ndarray,
+        proj_match_indices:list[int],
+        obs_match_indices:list[int]
+    ):
+    """
+    :param fd: The feature drawing with the axis to draw upon and the style guide
+    :param dual_quadratics: The dual quadratics to project (Nx4x4)
+    :param cam_t_base: The 4x4 SE3 cam-T_base matrix
+    :param intrinsic_mtx: The 3x3 intrinsic matrix
+    :param obs_gaussians_sigma_s: Mx2x3 array of gaussians: [[sigma_0 | mu_0], ...]
+    :param proj_match_indices: List of length n, where dual_quadratics[proj_match_indices[i]] ~ obs_gaussians_sigma_mu_s[obs_match_indices[i]]
+    :param obs_match_indices: List of length n
+    """
+    
+    proj_primal_conincals = project_primal_quadratics_to_primal_conicals(
+        primal_quadratics=np.linalg.inv(dual_quadratics),
+        cam_t_base=cam_t_base,
+        intrinsic_mtx=intrinsic_mtx
+    )
+    proj_mu_s, proj_sigma_s = primal_conics_to_gaussian_ellipses(proj_primal_conincals)
+    proj_sigma_mu_s = gauss_ellipse_batch_tuple_to_mat_batch(mu_s=proj_mu_s, sigma_s=proj_sigma_s)
+
+
+    n_obs = obs_gaussians_sigma_mu_s.shape[0]
+    n_proj = proj_sigma_mu_s.shape[0]
+
+    unmatched_obs = list(set(range(n_obs))-set(obs_match_indices))
+    unmatched_proj = list(set(range(n_proj))-set(proj_match_indices))
+    # Plot unmatched ones:
+    ellipses_unmatched = gaussian_ellipse_s_to_matplotlib_ellipse_s(
+        gaussian_ellipse_s=proj_sigma_mu_s[unmatched_proj],
+        colors=fd.sc.unmatched_color,
+        line_style=fd.sc.proj_line_style
+    ) + gaussian_ellipse_s_to_matplotlib_ellipse_s(
+        gaussian_ellipse_s=obs_gaussians_sigma_mu_s[unmatched_obs],
+        colors=fd.sc.unmatched_color,
+        line_style=fd.sc.obs_line_style
+    )
+    for e in ellipses_unmatched:
+        fd.ax.add_patch(e)
+
+
+    # Plot matched ones
+    n = len(obs_match_indices)
+    colors = plt.cm.jet(np.linspace(0,1, n))
+    proj_ellipses_matched = gaussian_ellipse_s_to_matplotlib_ellipse_s(
+        gaussian_ellipse_s=proj_sigma_mu_s[proj_match_indices],
+        colors=colors,
+        line_style=fd.sc.proj_line_style
+    )
+    obs_ellipses_matched = gaussian_ellipse_s_to_matplotlib_ellipse_s(
+        gaussian_ellipse_s=obs_gaussians_sigma_mu_s[obs_match_indices],
+        colors=colors,
+        line_style=fd.sc.obs_line_style
+    )
+    for proj_e, obs_e in zip(proj_ellipses_matched, obs_ellipses_matched):
+        fd.ax.add_patch(proj_e)
+        fd.ax.add_patch(obs_e)
+    fd.ax.scatter(
+        obs_gaussians_sigma_mu_s[obs_match_indices,0,2],
+        obs_gaussians_sigma_mu_s[obs_match_indices,1,2],
+        color=colors, s=fd.sc.point_size, alpha=fd.sc.point_alpha, marker = fd.sc.obs_point_style)
+    
+    fd.ax.scatter(
+        proj_sigma_mu_s[proj_match_indices,0,2],
+        proj_sigma_mu_s[proj_match_indices,1,2],
+        color=colors, s=fd.sc.point_size, alpha=fd.sc.point_alpha, marker = fd.sc.proj_point_style)
+    
+    fd.ax.quiver(
+        proj_sigma_mu_s[proj_match_indices,0,2],
+        proj_sigma_mu_s[proj_match_indices,1,2],
+        obs_gaussians_sigma_mu_s[obs_match_indices,0,2]-proj_sigma_mu_s[proj_match_indices,0,2], 
+        obs_gaussians_sigma_mu_s[obs_match_indices,1,2]-proj_sigma_mu_s[proj_match_indices,1,2],
+        angles='xy', scale_units='xy', scale=1,
+        color=colors,
+        alpha=fd.sc.arrow_alpha,
+        width=0.005
+    )
+    
 class EllipsoidPredictor(PosePredictor):
     def __init__(
             self,
@@ -308,7 +392,7 @@ class EllipsoidPredictor(PosePredictor):
         return creation_function
 
 
-    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 2, time_tracker:TimeTracker = TimeTracker()) -> np.ndarray | None:
+    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 1, time_tracker:TimeTracker = TimeTracker(), fd:FeatureDrawing | None = None) -> np.ndarray | None:
         """
         Estimates the hom. transformation: baseT_cam2 based on point features and then refines it using ellipsoids
         :param cam2_bgr_image: The camera 2 image (HxWx3-uint8 array)
@@ -319,7 +403,8 @@ class EllipsoidPredictor(PosePredictor):
         time_tracker.reset_elapsed_time()
         est_base_t_cam = self.extract_and_match_wrapper.est_base_t_cam2_with_retry(
             cam2_bgr_image=cam2_bgr_image, 
-            number_retry=number_retry
+            number_retry=number_retry,
+            fd = fd
         )
         time_tracker.add_time_stamp("Point based initial guess")
         if est_base_t_cam is None:
@@ -328,7 +413,8 @@ class EllipsoidPredictor(PosePredictor):
         optimized_cam_t_base = self.update_pose(
             cam2_bgr_image=cam2_bgr_image,
             rough_cam_t_base=np.linalg.inv(est_base_t_cam),
-            time_tracker=time_tracker
+            time_tracker=time_tracker,
+            fd=fd
         )
         if optimized_cam_t_base is None:
             print(f"ellipsoid optimisation failed")
@@ -337,7 +423,7 @@ class EllipsoidPredictor(PosePredictor):
         return np.linalg.inv(optimized_cam_t_base)
     
 
-    def update_pose(self,cam2_bgr_image: np.ndarray, rough_cam_t_base:np.ndarray, time_tracker:TimeTracker) -> np.ndarray | None:
+    def update_pose(self,cam2_bgr_image: np.ndarray, rough_cam_t_base:np.ndarray, time_tracker:TimeTracker, fd:FeatureDrawing | None = None) -> np.ndarray | None:
         """
         Optimizes a given pose using ellipsoids
         :param cam2_bgr_image: HxWx3 bgr image
@@ -393,75 +479,25 @@ class EllipsoidPredictor(PosePredictor):
             print(f"to few ellipsoids for optimisation: {proj_match_idx_s.shape[0]}")
             return None
 
-        #try:
         cam2_t_base_opt = self.pne_optimizer.optimize_pne(
             initial_cam_t_base=rough_cam_t_base,
             primal_quadratics=self.primal_quadratic_s[proj_match_idx_s],
             primal_conicals= np.array(observed_primal_conics)[obs_match_idx_s],
             intrinsic_cam_mat=scaled_cam2_intrinsics,
-            visualize_result= cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB) if self.visualize_pne_optimisation else None
+            visualize_result= cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB) if self.visualize_pne_optimisation else None,
         )
-        #except Exception as e:
-        #    print(f"Optimisation failed with error: {e} \n\n returning rough pose")
-        #    return rough_cam_t_base
         
         time_tracker.add_time_stamp("PNE optimisation")
 
+        if fd is not None:
+            visualize_pose_prediction(
+                fd=fd,
+                dual_quadratics=np.linalg.inv(self.primal_quadratic_s),
+                cam_t_base=cam2_t_base_opt if cam2_t_base_opt is not None else rough_cam_t_base,
+                intrinsic_mtx=self.cam2_intrinsic_mtx,
+                obs_gaussians_sigma_mu_s=obs_gauss_ellipses,
+                proj_match_indices=list(proj_match_idx_s),
+                obs_match_indices=list(obs_match_idx_s)
+            )
+
         return cam2_t_base_opt
-
-
-if __name__ == "__main__":
-    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_re")
-    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_he")
-    
-    tt_pne = TimeTracker()
-    
-    #pne_optimizer = PyposePNEOptimizer(PyposePnEOptimizerConfig(), tt_pne)
-    #pne_optimizer = PnEDeltaPoseLBFGSOptimizer(time_tracker=tt_pne)
-    pne_optimizer = PnEDeltaPoseAdamOptimizer(time_tracker=tt_pne)
-
-    predictor = EllipsoidPredictor(
-        cam2_intrinsic_mtx=headset_data.intrinsic_cam_mtx,
-        cam1_bgr_images=robot_data.robot_bgr_images,
-        cam1_xyz_images=robot_data.robot_xyz_images,
-        extract_and_match_wrapper_config=ExtractAndMatchWrapperConfig(
-            rotation_augmentations=[Rotate180Deg],
-            extract_and_match=ExtractAndLightGlue(),
-            ransac_config=pose_estimation_ransaac_config_less_precise,
-        ),
-        pne_optimizer=pne_optimizer,
-        ellipsoid_refinement_at_res=(1400, 1400),
-        cam1_segmenter=SAM3Segmenter(Sam3Prompt()),
-        cam2_segmenter=YOLOv26Segmenter("yoloe-26l-seg.pt"),#SAM3Segmenter(Sam3Prompt())
-        matching_no_match_cost=0.01
-    )
-
-    tt1 = TimeTracker()
-    tt2 = TimeTracker()
-    grader = OnePredictorRecordingGrader(
-        predictor=predictor, 
-        headset_data=headset_data,
-        prediction_time_tracker=tt1,
-        subcomponent_time_tracker=tt2
-    )
-    
-    print(f"avg rot error: {np.round(np.rad2deg(grader.avg_rotational_error()), 2)} degrees")
-    print(f"avg translational error: {np.round(grader.avg_translational_error()*1000, 1)} mm")
-    print(f"median rot error: {np.round(np.rad2deg(grader.median_rotational_error()), 2)} degrees")
-    print(f"median translational error: {np.round(grader.median_translational_error()*1000, 1)} mm")
-    print(f"sucess_ratio: {np.round(grader.success_ratio(),2)}")
-
-    grader.visualize_predictions(robot_env=robot_data)
-
-    print(f"tt1:")
-    tt1.print_report()
-    print(f"\n tt2:")
-    tt2.print_report()
-    print(f"\n tt_pne")
-    tt_pne.print_report()
-    #print(f"\n pypose pne:")
-    #pne_optimizer.optimize_pne_tt.print_report()
-    #print(f"avg number fw calls: {np.mean(pne_optimizer.number_fw_calls)}")
-
-    predictor.extract_and_match_wrapper.print_used_augmentations()
-    print(f"avg number of tries: {predictor.extract_and_match_wrapper.avg_number_of_tries()}")

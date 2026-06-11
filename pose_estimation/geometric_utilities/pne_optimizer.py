@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from shared.assertion_helpers import *
 
 from .ellipsoid_utilities_numpy import *
+from .slam2mp4 import FeatureDrawing
 from .time_tracker import *
 
 
@@ -152,7 +153,8 @@ class PnEOptimizer(ABC):
         primal_quadratics:np.ndarray,
         primal_conicals:np.ndarray,
         intrinsic_cam_mat:np.ndarray,
-        visualize_result:None | np.ndarray = None
+        visualize_result:None | np.ndarray = None,
+        fd:FeatureDrawing | None = None
     )->np.ndarray:
         """
         :param initial_cam_t_base: An homogeneous 4x4 matrix of the initial camera pose
@@ -219,6 +221,7 @@ class PnEOptimizer(ABC):
         self.axes[2].set_title("Loss over iterations")
         self.axes[2].set_xlabel("Iteration")
         self.axes[2].set_ylabel("Loss")
+
 
     @staticmethod    
     def visualize_errors( 

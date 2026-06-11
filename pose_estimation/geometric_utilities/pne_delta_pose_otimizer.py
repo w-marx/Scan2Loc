@@ -51,7 +51,7 @@ def exp_se3(s:torch.Tensor, eps = 1e-8):
         exp_what = compute_exp_what(w)
         eye_minus_exp_what = torch.eye(3, device=s.device, dtype=s.dtype) - exp_what
         wxv = torch.cross(w_norm, v, dim = 0)
-        t = eye_minus_exp_what @ wxv + w_norm @ (w_norm.T @ v) * theta
+        t = eye_minus_exp_what @ wxv + (w_norm[:, None] @ w_norm[:, None].T) @ v * theta
 
     T = torch.eye(4, device=s.device, dtype=s.dtype)
     T[:3, :3] = exp_what
@@ -69,7 +69,7 @@ class PnEDeltaPoseLBFGSOptimizerConfig:
     """
     learning_rate:float = 0.001
     max_itterations:int = 40
-    stop_at_grad:float = 1e-6
+    stop_at_grad:float = 1e-9
     convergence_threshold:float = 1e-6
     history_size:int = 10
     line_search_function:Literal["strong_wolfe"] = 'strong_wolfe'
@@ -93,7 +93,7 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
         primal_quadratics:np.ndarray,
         primal_conicals:np.ndarray,
         intrinsic_cam_mat:np.ndarray,
-        visualize_result:None | np.ndarray = None
+        visualize_result:None | np.ndarray = None,
     )->np.ndarray:
         # Convert everything to torch & precompute
         torch_intrinsic = torch.tensor(intrinsic_cam_mat, dtype = torch.float32)
@@ -183,7 +183,7 @@ class PnEDeltaPoseAdamOptimizer(PnEOptimizer):
         primal_quadratics:np.ndarray,
         primal_conicals:np.ndarray,
         intrinsic_cam_mat:np.ndarray,
-        visualize_result:None | np.ndarray = None
+        visualize_result:None | np.ndarray = None,
     ):
         # Convert everything to torch & precompute
         torch_intrinsic = torch.tensor(intrinsic_cam_mat, dtype = torch.float32)

@@ -19,50 +19,35 @@ from geometric_utilities.line_utilities import *
 class LineMerging2dConfig:
     """
     Discribes a line merging pass, that merges the lines and then removes
-    lines with line_length < min_line_length
+    lines with line_length < min_line_length.
+    Distances are in a percentage of the diagonal length
     """
-    max_angle_diff_deg:float = 3
-    max_midpoint_dist_px:float = 3
-    max_endpoint_dist_px:float = 20
+    max_angle_diff:float = 3
+    max_midpoint_dist:float = 3
+    max_endpoint_dist:float = 20
     min_line_length:float = 20
     use_quick_merge:bool = False
 
     def __post_init__(self):
-        assert isinstance(self.max_angle_diff_deg, Number) and 0 <= self.max_angle_diff_deg <= 180 
-        assert isinstance(self.max_angle_diff_deg, Number) and 0 <= self.max_midpoint_dist_px
-        assert isinstance(self.max_angle_diff_deg, Number) and 0 <= self.max_endpoint_dist_px
-        assert isinstance(self.max_angle_diff_deg, Number) and 0 <= self.min_line_length
+        assert isinstance(self.max_angle_diff, Number) and 0 <= self.max_angle_diff <= 180 
+        assert isinstance(self.max_angle_diff, Number) and 0 <= self.max_midpoint_dist
+        assert isinstance(self.max_angle_diff, Number) and 0 <= self.max_endpoint_dist
+        assert isinstance(self.max_angle_diff, Number) and 0 <= self.min_line_length
         assert isinstance(self.use_quick_merge, bool)
 
-line_merging_2d_config_for_short_lines_quick_merge = LineMerging2dConfig(
-    max_angle_diff_deg = 1,
-    max_midpoint_dist_px = 2,
-    max_endpoint_dist_px = 5,
-    min_line_length = 10,
-    use_quick_merge = True
-)
-
-line_merging_2d_config_for_longer_lines_quick_merge = LineMerging2dConfig(
-    max_angle_diff_deg = 2,
-    max_midpoint_dist_px = 3,
-    max_endpoint_dist_px = 10,
-    min_line_length = 40,
-    use_quick_merge = True
-)
-
 line_merging_2d_config_for_short_lines = LineMerging2dConfig(
-    max_angle_diff_deg = 2,
-    max_midpoint_dist_px = 3,
-    max_endpoint_dist_px = 5,
-    min_line_length = 10,
+    max_angle_diff = 2,
+    max_midpoint_dist = 3/850,
+    max_endpoint_dist = 0.01,
+    min_line_length = 10/850,
     use_quick_merge = False
 )
 
 line_merging_2d_config_for_longer_lines = LineMerging2dConfig(
-    max_angle_diff_deg = 3,
-    max_midpoint_dist_px = 4,
-    max_endpoint_dist_px = 15,
-    min_line_length = 40,
+    max_angle_diff = 3,
+    max_midpoint_dist = 4/850,
+    max_endpoint_dist = 0.02,
+    min_line_length = 40/850,
     use_quick_merge = False
 )
 
@@ -71,8 +56,8 @@ class MultiPassLineMergingConfig:
     passes: list[LineMerging2dConfig] = field(
         default_factory=lambda: (
             [
-                line_merging_2d_config_for_short_lines_quick_merge,
-                line_merging_2d_config_for_longer_lines_quick_merge
+                line_merging_2d_config_for_short_lines,
+                line_merging_2d_config_for_longer_lines
             ]
         )
     )
@@ -101,6 +86,47 @@ class LineFitting3dConfig:
             assert isinstance(self.ransac_inlier_distance, Number) and 0 <= self.ransac_inlier_distance
 
 
+def visualize_features_2d(
+        fd:FeatureDrawing,
+        obs_lines_matched_2d:np.ndarray, 
+        proj_lines_matched_3d:np.ndarray,
+        cam_t_base:np.ndarray,
+        intrinsic_mat:np.ndarray
+    ):
+        n_matched_lines = obs_lines_matched_2d.shape[0]
+        colors_lines = plt.cm.jet(np.linspace(0,1, n_matched_lines))
+
+        for i,(x1, y1, x2, y2) in enumerate(obs_lines_matched_2d):
+            fd.ax.axline((x1, y1), (x2, y2), color=colors_lines[i], linestyle=fd.sc.obs_line_style, linewidth=1)
+            fd.ax.plot([x1, x2], [y1, y2], color=colors_lines[i], linewidth=1)
+
+        for i, (line_3d, obs_line) in enumerate(zip(proj_lines_matched_3d, obs_lines_matched_2d)):
+            projected_points = project_points(
+                base_points=line_3d.reshape(-1, 3),
+                cam_t_base=cam_t_base,
+                intrinsic_mat=intrinsic_mat,
+            )
+            fd.ax.scatter(
+                projected_points[:,0], 
+                projected_points[:,1], 
+                color=colors_lines[i], 
+                s=fd.sc.point_size, alpha=fd.sc.point_alpha, marker = fd.sc.proj_point_style)
+
+            x1, y1 = projected_points[0]
+            x2, y2 = projected_points[1]
+            ox0, oy0, ox1, oy1 = obs_line
+
+            px0, py0 = project_point_onto_line_slow(x1, y1, ox0, oy0, ox1, oy1)
+            px1, py1 = project_point_onto_line_slow(x2, y2, ox0, oy0, ox1, oy1)
+
+            fd.ax.quiver(
+                [x1, x2],
+                [y1, y2],
+                [px0 - x1, px1 - x2],
+                [py0 - y1, py1 - y2],
+                angles='xy', scale_units='xy', scale=1,
+                color=colors_lines[i], alpha=fd.sc.arrow_alpha, width=0.005
+            )
 
 
 class LinePredictor(PosePredictor):
@@ -115,7 +141,7 @@ class LinePredictor(PosePredictor):
             line_matching_config:LineMatchingConfig = LineMatchingConfig(),
             line_fitting_3d_config:LineFitting3dConfig = LineFitting3dConfig(),
             pnpl_optimisation_conf:PnPLOptimizerConfig = PnPLOptimizerConfig(),
-            cam2_lsd_size:None | tuple[int, int] = None,
+            cam2_lsd_diagonal_size:None | float = None,
             debug_visualize_line_cleanup:bool = False,
             debug_visualize_pnpl:bool = False,
         ):
@@ -131,7 +157,7 @@ class LinePredictor(PosePredictor):
         :param line_matching_config: How to match lines from 2 different images
         :param line_fitting_3d_config: How to fit the 3d lines to the 3d point clouds from cam1_xyz_images
         :param pnpl_optimisation_conf: How to do the PnPL-optimisation
-        :param cam2_lsd_size: If not None the cam2 images will be scaled to that resolution before LSD (smaller -> better runtime)
+        :param cam2_lsd_diagonal_size: If not None the cam2 images will be scaled to that diagonal size before LSD (smaller -> better runtime)
         :param debug_visualize_line_cleanup: If True the line features will be visualised
         :param debug_visualize_pnpl: If True the optimisation by the pnpl-optimisation will be visualized
         """
@@ -181,7 +207,7 @@ class LinePredictor(PosePredictor):
         ]
         time_tracker_init.add_time_stamp("LSD and Cleanup")
 
-        self.cam2_lsd_size = cam2_lsd_size
+        self.cam2_lsd_diagonal_size = cam2_lsd_diagonal_size
 
     @staticmethod
     def get_creation_function(
@@ -191,7 +217,7 @@ class LinePredictor(PosePredictor):
             line_matching_config: LineMatchingConfig = LineMatchingConfig(),
             line_fitting_3d_config: LineFitting3dConfig = LineFitting3dConfig(),
             pnpl_optimisation_conf: PnPLOptimizerConfig = PnPLOptimizerConfig(),
-            cam2_lsd_size: None | tuple[int, int] = None,
+            cam2_lsd_diagonal_size: None | float = None,
             debug_visualize_line_cleanup: bool = False,
             debug_visualize_pnpl: bool = False
     ):
@@ -209,7 +235,7 @@ class LinePredictor(PosePredictor):
             line_matching_config = line_matching_config,
             line_fitting_3d_config = line_fitting_3d_config,
             pnpl_optimisation_conf = pnpl_optimisation_conf,
-            cam2_lsd_size = cam2_lsd_size,
+            cam2_lsd_diagonal_size = cam2_lsd_diagonal_size,
             debug_visualize_line_cleanup = debug_visualize_line_cleanup,
             debug_visualize_pnpl = debug_visualize_pnpl,
             time_tracker_init=init_tt
@@ -253,66 +279,11 @@ class LinePredictor(PosePredictor):
         line_colors_processed = plt.cm.jet(np.linspace(0, 1, lines_after.shape[0]))
         lines_xy_processed = [((line[0], line[1]), (line[2], line[3])) for line in lines_after]
         lc1_processed = LineCollection(lines_xy_processed, linewidths=2, alpha=0.8, color = line_colors_processed)
-        ax_before.add_collection(lc1_processed)
-        ax_before.set_title("Lines after cleanup")
+        ax_after.add_collection(lc1_processed)
+        ax_after.set_title("Lines after cleanup")
 
         if has_to_plot:
             plt.show()
-
-
-    def visualize_features_2d(
-            self, 
-            img1:np.ndarray, 
-            img2:np.ndarray, 
-            lines1_raw:np.ndarray, 
-            lines2_raw:np.ndarray, 
-            lines1_processed:np.ndarray, 
-            lines2_processed:np.ndarray, 
-            points1:np.ndarray, 
-            points2:np.ndarray,
-        ):
-        #TODO reuse for video generation
-        """
-        :param img1: HxWx3 BGR image as numpy array
-        :param img2: HxWx3 RGB image as numpy array
-        :param lines1: Nx4 array of line segments
-        :param lines2: Nx4 array of line segments
-        """
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-
-        # Display the raw lines
-        lines_xy1_raw = [((line[0], line[1]), (line[2], line[3])) for line in lines1_raw]
-        lc1_raw = LineCollection(lines_xy1_raw, linewidths=2, alpha=0.8, color = plt.cm.jet(np.linspace(0, 1, lines1_raw.shape[0])))
-        axes[0, 0].imshow(cv2.cvtColor(img1, cv2.COLOR_BGR2RGB))
-        axes[0, 0].add_collection(lc1_raw)
-        axes[0, 0].set_title("Raw lines cam1")
-
-        lines_xy2_raw = [((line[0], line[1]), (line[2], line[3])) for line in lines2_raw]
-        lc2_raw = LineCollection(lines_xy2_raw, linewidths=2, alpha=0.8, color = plt.cm.jet(np.linspace(0, 1, lines2_raw.shape[0])))
-        axes[0, 1].imshow(img2)
-        axes[0, 1].add_collection(lc2_raw)
-        axes[0, 1].set_title("Raw lines cam1")
-
-        # Display the processed lines
-        point_colors = plt.cm.jet(np.linspace(0, 1, points1.shape[0]))
-        line_colors = plt.cm.jet(np.linspace(0, 1, lines1_processed.shape[0]))
-
-        lines_xy1 = [((line[0], line[1]), (line[2], line[3])) for line in lines1_processed]
-        lc1 = LineCollection(lines_xy1, linewidths=2, alpha=0.8, color = line_colors)
-        axes[1, 0].imshow(cv2.cvtColor(img1, cv2.COLOR_BGR2RGB))
-        axes[1, 0].add_collection(lc1)
-        axes[1, 0].set_title("Processed features cam1")
-        axes[1, 0].scatter(points1[:, 0], points1[:, 1], s = 2, color = point_colors, alpha = 0.8)
-
-
-        lines_xy2 = [((line[0], line[1]), (line[2], line[3])) for line in lines2_processed]
-        lc2 = LineCollection(lines_xy2, linewidths=2, alpha=0.8, color = line_colors)
-        axes[1, 1].imshow(cv2.cvtColor(img2, cv2.COLOR_BGR2RGB))
-        axes[1, 1].add_collection(lc2)
-        axes[1, 1].set_title("Processed features cam2")
-        axes[1, 1].scatter(points2[:, 0], points2[:, 1], s = 2, color = point_colors, alpha = 0.8)
-
-        plt.show()
 
 
     def _est_base_t_cam2_4_idx(
@@ -320,7 +291,8 @@ class LinePredictor(PosePredictor):
             cam2_rgb_image: np.ndarray,
             idx:int,
             lines_img2:np.ndarray,
-            time_tracker:TimeTracker = TimeTracker()
+            time_tracker:TimeTracker = TimeTracker(),
+            fd:FeatureDrawing | None = None
         ) -> np.ndarray | None:
         """
         Estimates base_t_cam2 for a given cam1-image index
@@ -331,7 +303,7 @@ class LinePredictor(PosePredictor):
         """
         time_tracker.reset_elapsed_time()
         base_t_cam_and_points = self.extract_and_match_wrapper.est_base_t_cam2_and_points(
-            idx=idx, cam2_rgb_image=cam2_rgb_image
+            idx=idx, cam2_rgb_image=cam2_rgb_image, fd=fd
         )
         time_tracker.add_time_stamp("point feature pose pred")
 
@@ -350,6 +322,9 @@ class LinePredictor(PosePredictor):
             line_matching_config=self.line_matching_config
         )
         time_tracker.add_time_stamp("Match 2d line segments")
+
+        if line_pairs.shape[0] < 1:
+            return base_t_cam_pnp
 
 
         matched_lines_2d = []
@@ -381,67 +356,81 @@ class LinePredictor(PosePredictor):
         )
 
         time_tracker.add_time_stamp("PnL Optimisation")
+
+        if fd is not None:
+            visualize_features_2d(
+                fd = fd,
+                obs_lines_matched_2d=matched_lines_2d,
+                proj_lines_matched_3d=matched_lines_3d,
+                cam_t_base=cam2_t_base_bundle_adjustment if cam2_t_base_bundle_adjustment is not None else base_t_cam_pnp,
+                intrinsic_mat= self.cam2_intrinsic_mtx
+            )
+
         return np.linalg.inv(cam2_t_base_bundle_adjustment)
 
 
 
-    def _cleanup_lines(self, lines:np.ndarray)->np.ndarray:
+    def _cleanup_lines(self, lines:np.ndarray, diagonal_length:float = 1.0)->np.ndarray:
         """
         Takes the lines and cleans them up according to the cleanup-config of the instance
         :param lines: Bx4 array of lines of the style: [[x0, y0, x1, y2], ... ]
+        :param diagonal_length: The length of the diagonal of the image (lines will be normalized by this)
         :return: B'x4 array of lines of the style: [[x0, y0, x1, y2], ... ], with B' <= B
         """
-        lines = lines
+        assert diagonal_length > 0, f"image cant have size 0 or smaller: diagonal length = {diagonal_length}"
+
+        lines = lines/diagonal_length
+
         for ref_conf in self.lsd_cleanup_passes:
             lines = remove_short_2d_line_segments(
                 merge_close_line_segments(
-                    lines,ref_conf.max_angle_diff_deg,ref_conf.max_midpoint_dist_px, ref_conf.max_endpoint_dist_px, ref_conf.use_quick_merge
+                    lines,ref_conf.max_angle_diff,ref_conf.max_midpoint_dist, ref_conf.max_endpoint_dist, ref_conf.use_quick_merge
                 ),
             min_line_length_px= ref_conf.min_line_length)
-        return lines
-    
+        return lines*diagonal_length
 
-    def _lsd_and_cleanup_on_image(self, bgr_image:np.ndarray, lsd_at_size: None | tuple[int, int] = None)->np.ndarray:
+    @staticmethod
+    def _image_diagonal(image:np.ndarray)->float:
+        h, w = image.shape[:2]
+        return np.sqrt(h**2 + w**2)
+
+    def _lsd_and_cleanup_on_image(self, bgr_image:np.ndarray, lsd_at_diag_size:float | None = None)->np.ndarray:
         """
         Runs LSD on an image that can be scaled down beforehand, then cleans those lines up and scales them back
         :param bgr_image: The HxWx3-uint8 BGR image to be done lsd upon
-        :param lsd_at_size: None or a tuple: (height, width) in px
+        :param lsd_at_diag_size: None or the diagonal size with which to run LSD (for runtime improvements)
         :return Nx4 line array of the format: [[x1, y1, x2, y2], ...]
         """
         assert assert_mxnx3_np_uint8_image(bgr_image)
 
-        cam2_grey_img = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2GRAY)
-        if lsd_at_size is None:
-            raw_lines = self.line_seg_detector.detect(cam2_grey_img)[0].squeeze(1)
-            clean_lines = self._cleanup_lines(raw_lines)
-            if self.debug_visualize_line_cleanup:
-                self.visualize_line_cleanup(lines_before=raw_lines,lines_after=clean_lines,background_image=cam2_grey_img)
-            return clean_lines
-        
-        # In case of scaling:
-        h_orig, w_orig = bgr_image.shape[:2]
-        h_scaled, w_scaled = lsd_at_size
+        grey_img = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2GRAY)
 
-        cam2_image_scaled = cv2.resize(cam2_grey_img, (w_scaled, h_scaled), interpolation = cv2.INTER_AREA)
-        lines_scaled_raw = self.line_seg_detector.detect(cam2_image_scaled)[0].squeeze(1)
-        lines_scaled = self._cleanup_lines(lines_scaled_raw)
+        if lsd_at_diag_size is not None:
+            h_orig, w_orig = bgr_image.shape[:2]
+            lsd_scale = lsd_at_diag_size/self._image_diagonal(bgr_image)
+            grey_img = cv2.resize(grey_img, (int(w_orig*lsd_scale), int(h_orig*lsd_scale)), interpolation = cv2.INTER_AREA)
+
+
+        raw_lines = self.line_seg_detector.detect(grey_img)[0].squeeze(1)
+        clean_lines = self._cleanup_lines(raw_lines, diagonal_length=self._image_diagonal(grey_img))
+
 
         if self.debug_visualize_line_cleanup:
-            self.visualize_line_cleanup(
-                lines_before=lines_scaled_raw,
-                lines_after=lines_scaled,
-                background_image=cam2_image_scaled
-            )
-
-        if lines_scaled.size > 0:
-            lines_scaled[:, [0,2]] *= w_orig/w_scaled
-            lines_scaled[:, [1,3]] *= h_orig/h_scaled
-
-        return lines_scaled
-
+            self.visualize_line_cleanup(lines_before=raw_lines,lines_after=clean_lines,background_image=grey_img)
+    
+        if lsd_at_diag_size is not None:
+            clean_lines *= self._image_diagonal(bgr_image)/self._image_diagonal(grey_img)
+        
+        return clean_lines
     
 
-    def est_base_t_cam2(self,cam2_bgr_image: np.ndarray, number_retry:int = 1, time_tracker:TimeTracker = TimeTracker()) -> np.ndarray | None:
+    def est_base_t_cam2(
+            self,
+            cam2_bgr_image: np.ndarray, 
+            number_retry:int = 1, 
+            time_tracker:TimeTracker = TimeTracker(),
+            fd:FeatureDrawing | None = None
+        ) -> np.ndarray | None:
         """
         Estimates the hom. transformation: baseT_cam2 based on point and line features
         :param cam2_bgr_image: The camera 2 image (HxWx3-uint8 array)
@@ -458,7 +447,7 @@ class LinePredictor(PosePredictor):
 
 
         time_tracker.reset_elapsed_time()
-        lines_img2 = self._lsd_and_cleanup_on_image(cam2_bgr_image, lsd_at_size=self.cam2_lsd_size)
+        lines_img2 = self._lsd_and_cleanup_on_image(cam2_bgr_image, lsd_at_diag_size=self.cam2_lsd_diagonal_size)
         time_tracker.add_time_stamp("Image 2 LSD + cleanup")
 
         while est_base_t_cam is None and number_tries < number_retry:
@@ -467,68 +456,8 @@ class LinePredictor(PosePredictor):
                 idx=idx,
                 lines_img2 = lines_img2,
                 cam2_rgb_image = cam2_rgb_image,
+                fd = fd
             )
             self.extract_and_match_wrapper.sheduler.adjust(idx, est_base_t_cam is not None)
             number_tries += 1
         return est_base_t_cam
-    
-    def update_pose(self,cam2_bgr_image: np.ndarray, rough_base_t_cam2:np.ndarray, time_tracker:TimeTracker) -> np.ndarray | None:
-        """
-        Acts exactly the same as est_base_t_cam2 with this predictor
-        :param cam2_bgr_image: HxWx3 bgr image
-        :param rough_base_t_cam2: A rough base_t_cam2 estimate.
-        :param time_tracker: a time-tracker object, that will be used by the Pose Predictor to note the runtimes
-        :return: 4x4 Pose in SE3 if prediction was successful else None
-        """
-        return self.est_base_t_cam2(cam2_bgr_image=cam2_bgr_image, number_retry=1, time_tracker=time_tracker)
-
-
-
-
-
-if __name__ == "__main__":
-    robot_data = RobotEnvironment.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_re")
-    headset_data = HeadsetData.from_folder("/home/wmarx/AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline/pose_estimation/out_data_he")
-    
-    
-    predictor = LinePredictor(
-        cam2_intrinsic_mtx=headset_data.intrinsic_cam_mtx,
-        cam1_bgr_images=robot_data.robot_bgr_images,
-        cam1_xyz_images=robot_data.robot_xyz_images,
-        extract_and_match_wrapper_config=ExtractAndMatchWrapperConfig(
-            extract_and_match=ExtractAndLightGlue(
-                extractor="SuperPoint"
-            ),
-            ransac_config=pose_estimation_ransaac_config_less_precise,
-        ),
-        line_fitting_3d_config=LineFitting3dConfig(use_ransac=False),
-        pnpl_optimisation_conf=PnPLOptimizerConfig(lm_max_steps=10000,line_relevance=1.0),
-        cam2_lsd_size=(514,514),
-        debug_visualize_2d=True, 
-        debug_visualize_pnpl=False
-    )
-
-    tt1 = TimeTracker()
-    tt2 = TimeTracker()
-    grader = OnePredictorRecordingGrader(
-        predictor=predictor, 
-        headset_data=headset_data,
-        prediction_time_tracker=tt1,
-        subcomponent_time_tracker=tt2
-    )
-    
-    print(f"avg rot error: {np.round(np.rad2deg(grader.avg_rotational_error()), 2)} degrees")
-    print(f"avg translational error: {np.round(grader.avg_translational_error()*1000, 1)} mm")
-    print(f"median rot error: {np.round(np.rad2deg(grader.median_rotational_error()), 2)} degrees")
-    print(f"median translational error: {np.round(grader.median_translational_error()*1000, 1)} mm")
-    print(f"sucess_ratio: {np.round(grader.success_ratio(),2)}")
-
-    grader.visualize_predictions(robot_env=robot_data)
-
-    print(f"tt1:")
-    tt1.print_report()
-    print(f"\n tt2:")
-    tt2.print_report()
-
-    predictor.extract_and_match_wrapper.print_used_augmentations()
-    

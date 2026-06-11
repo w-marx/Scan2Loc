@@ -6,10 +6,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from collections import defaultdict
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 
 
 from shared.assertion_helpers import *
-from small_utilities.ransac_pose_estimation import * 
+from geometric_utilities.ransac_pose_estimation import * 
 from small_utilities.image_augmentation import * 
 from small_utilities.sheduler import *
 
@@ -45,7 +46,8 @@ class ExtractAndMatch(ABC):
                 img1_rgb=img1_rgb, img2_rgb=img2_rgb, points1=points1, points2=points2
             )
         return points1, points2
-    
+
+
     @staticmethod
     def plot_matched_points(img1_rgb:np.ndarray, img2_rgb:np.ndarray, points1:np.ndarray, points2:np.ndarray):
         """
@@ -270,17 +272,26 @@ class ExtractAndMatchWrapper:
     def get_sheduler(self):
         return self.sheduler
     
-    def est_base_t_cam2_with_retry(self,cam2_bgr_image: np.ndarray, number_retry:int = 1) -> np.ndarray | None:
+    def est_base_t_cam2_with_retry(self,cam2_bgr_image: np.ndarray, number_retry:int = 1, fd:FeatureDrawing|None = None) -> np.ndarray | None:
         """
         Will try to match points until a pose is found or number_retry was reached
         """
         base_t_cam_w_points = self.est_base_t_cam2_and_points_with_retry(
             cam2_bgr_image=cam2_bgr_image, 
             number_retry=number_retry,
+            fd = fd
         )
-        return None if base_t_cam_w_points is None else base_t_cam_w_points[0]
+        if base_t_cam_w_points is None:
+            return None
+        return base_t_cam_w_points[0]
     
-    def est_base_t_cam2_and_points_with_retry(self,cam2_bgr_image: np.ndarray, number_retry:int = 1) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+
+    def est_base_t_cam2_and_points_with_retry(
+            self,
+            cam2_bgr_image: np.ndarray, 
+            number_retry:int = 1,
+            fd:FeatureDrawing | None = None
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         """
         Will try to match points until a pose is found or number_retry was reached
         :return None or base T_cam, points_image_1, points_image_2, world_obj_points, inliers
@@ -294,16 +305,20 @@ class ExtractAndMatchWrapper:
             est_base_t_cam_and_points = self.est_base_t_cam2_and_points(
                 idx=idx,
                 cam2_rgb_image = cam2_rgb_image,
+                fd=fd
             )
             self.sheduler.adjust(idx, est_base_t_cam_and_points is not None)
             number_tries += 1
         self.used_number_of_tries.append(number_tries)
         return est_base_t_cam_and_points
 
-    def est_base_t_cam2_and_points( self,
-                                    idx:int,
-                                    cam2_rgb_image: np.ndarray,
-                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int]] | None:
+
+    def est_base_t_cam2_and_points(
+            self,
+            idx:int,
+            cam2_rgb_image: np.ndarray,
+            fd:FeatureDrawing | None = None
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int]] | None:
         """
         :return: None or base T_cam, points_image_1, points_image_2, world_obj_points, inliers
         """
@@ -341,7 +356,8 @@ class ExtractAndMatchWrapper:
             world_points=world_obj_points,
             img_points=image_points_cam2,
             intrinsic_matrix=self.cam2_mtx,
-            config=self.ransac_config
+            config=self.ransac_config,
+            fd = fd
         )
 
         if cam2_t_base__inliers is None:

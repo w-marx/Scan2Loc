@@ -4,6 +4,7 @@ import open3d as o3d
 from dataclasses import dataclass
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 from shared.assertion_helpers import *
 from shared.se3_utilities import translational_difference, rotational_difference, ate_rmse, rte_rotational_errors_rmse, rte_translational_errors_rmse
@@ -12,40 +13,34 @@ from shared.image_camera_manipulation import create_3d_camera
 from robot_environment import RobotEnvironment
 from headset_data import HeadsetData
 from geometric_utilities.time_tracker import TimeTracker
+from geometric_utilities.slam2mp4 import VideoGenerator, FeatureDrawing, InfoCard
+
 
 from predictor_handling import PosePredictor
-
 
 
 class PredictionOnDataset:
     def __init__(self,
                  predictor:PosePredictor,
                  headset_data:HeadsetData,
-                 number_consecutive_update_pose_calls:int = 0,
-                 number_retry:int = 1
-                ):
+                 number_retry:int = 1,
+                 vid_gen:VideoGenerator | None = None,
+                 video_save_location:str = "test.mp4"
+            ):
         """
         Uses the predictor to run predictions on the dataset and gather metrics.
-        It uses the following scheme:
-        - get initial pose using `est_base_t_cam`
-        - on the next `number_consecutive_update_pose_calls` frames use `update_pose`
-        - if `update_pose` fails use `est_base_t_cam` instead
-
         :param predictor: The predictor that will do the predictions
         :param headset_data: The headset data that provides the prediction frames & maybe labels
-        :param number_consecutive_update_pose_calls: Max number of consecutive update_pose_calls
         :param number_retry: Max number of retries given to est_base_t_cam
         """
         assert isinstance(predictor, PosePredictor)
         assert isinstance(headset_data, HeadsetData)
-        assert isinstance(number_consecutive_update_pose_calls, int) and number_consecutive_update_pose_calls >= 0
         assert isinstance(number_retry, int) and number_retry > 0
 
 
         self._headset_data = headset_data
 
         self._est_base_t_cam_time_tracker = TimeTracker()
-        self._update_pose_time_tracker = TimeTracker()
         self._per_frame_prediction_time_tracker = TimeTracker()
 
         self._predictions_whole_time_tracker = TimeTracker()
@@ -53,41 +48,36 @@ class PredictionOnDataset:
 
         self.predicted_base_t_headset_s = []
 
-        update_pose_successful_count = 0
-        update_pose_failed_count = 0
-
-        i = 0
-        c = 0
-        while i < headset_data.n_frames:
+        for i in tqdm(range(headset_data.n_frames)):
+            self._per_frame_prediction_time_tracker.reset_elapsed_time()
             headset_image = headset_data.bgr_image_s[i]
-            c = c % (number_consecutive_update_pose_calls + 1)
-            est_base_t_cam = None
 
-            if c != 0 and self.predicted_base_t_headset_s[-1] is not None:
-                self._predictions_whole_time_tracker.reset_elapsed_time()
-                est_base_t_cam = predictor.update_pose(
-                    cam2_bgr_image=headset_image,
-                    rough_base_t_cam2=self.predicted_base_t_headset_s[-1],
-                    time_tracker=self._update_pose_time_tracker,
-                )
-                self._predictions_whole_time_tracker.add_time_stamp("1 update_pose call")
-                update_pose_successful_count += 0 if est_base_t_cam is None else 1
-                update_pose_failed_count += 1 if est_base_t_cam is None else 0
-                c += 1
+            if vid_gen is not None:
+                vid_gen.start_new_frame(headset_image)
 
-            if est_base_t_cam is None:
-                self._predictions_whole_time_tracker.reset_elapsed_time()
-                est_base_t_cam = predictor.est_base_t_cam2(
-                    cam2_bgr_image=headset_image,
-                    number_retry=number_retry,
-                    time_tracker=self._est_base_t_cam_time_tracker,
-                )
-                self._predictions_whole_time_tracker.add_time_stamp("1 est_base_t_cam call")
-                c = 1
-
+            self._predictions_whole_time_tracker.reset_elapsed_time()
+            est_base_t_cam = predictor.est_base_t_cam2(
+                cam2_bgr_image=headset_image,
+                number_retry=number_retry,
+                time_tracker=self._est_base_t_cam_time_tracker,
+                fd=vid_gen.current_feature_drawer if vid_gen is not None else None
+            )
+            self._predictions_whole_time_tracker.add_time_stamp(f"1 est_base_t_cam call {"fail" if est_base_t_cam is None else "success"}")
+            self._per_frame_prediction_time_tracker.add_time_stamp(f"predicted 1 frame {"fail" if est_base_t_cam is None else "success"}")
             self.predicted_base_t_headset_s.append(est_base_t_cam)
-            i += 1
-            self._per_frame_prediction_time_tracker.add_time_stamp("predicted 1 frame")
+
+            if vid_gen is not None:
+                vid_gen.annotate_frame(
+                    info_card=InfoCard(
+                        predicted_base_t_cam=est_base_t_cam,
+                        actual_base_t_cam=headset_data.robot_base_t_headset_s[i]
+                        )
+                    )
+                vid_gen.end_current_frame()
+        
+        if vid_gen is not None:
+            vid_gen.save_video(location=video_save_location)
+
 
         self.predicted_base_t_headset_s_no_none = [
             b_t_h
@@ -100,6 +90,9 @@ class PredictionOnDataset:
         self.success_ratio = self.number_successful_predictions / self.number_attempted_predictions
 
         # Time metrics
+        self.time_per_successful_prediction = self._per_frame_prediction_time_tracker.get_timestamp_name_avg_time("predicted 1 frame success")
+        self.time_per_failed_prediction = self._per_frame_prediction_time_tracker.get_timestamp_name_avg_time("predicted 1 frame fail")
+
         self.avg_time_for_frame_prediction = self._per_frame_prediction_time_tracker.get_timestamp_name_avg_time("predicted 1 frame")
 
         # Accuracy metrics
@@ -152,17 +145,17 @@ class PredictionOnDataset:
     def print_summary(self)->None:
         print(f"Success rate: {self.success_ratio} for {self.number_attempted_predictions} predictions")
 
-        print(f"Avg. time per prediction: {self.avg_time_for_frame_prediction*1000}ms")
+        print(f"Avg. time per prediction: {self.time_per_successful_prediction*1000}ms")
         print(f"est_base_t_cam subcomponent times:\n")
         self._est_base_t_cam_time_tracker.print_report()
 
-        print(f"Avg. error: {np.round(self.avg_translational_error*1000,1)}mm and {np.round(np.rad2deg(self.avg_rotational_error),1)}°")
+        print(f"\n\nAvg. error: {np.round(self.avg_translational_error*1000,1)}mm and {np.round(np.rad2deg(self.avg_rotational_error),1)}°")
         print(f"Median. error: {np.round(self.median_translational_error*1000,1)}mm and {np.round(np.rad2deg(self.median_rotational_error),1)}°")
         print(f"ATE RMSE: {np.round(self.ate_translation_rmse * 1000,1)}mm and {np.round(np.rad2deg(self.ate_rot_rmse))}°")
         print(f"RTE RMSE: {np.round(self.rte_translation_rmse * 1000,1)}mm and {np.round(np.rad2deg(self.rte_rotational_rmse),1)}°")
 
 
-    def get_avg_time_per_est_base_t_cam_call(self)->tuple[float, list[tuple[str, float]]]:
+    def get_subcomponent_times_est_base_t_cam_call(self)-> list[tuple[str, float]]:
         """
         Returns the avg. times and their subcomponents per est_base_t_cam call
         :return: The time per call and a list of [subcomponent_name, avg time in seconds] tuples (sorted by time descending)
@@ -171,7 +164,7 @@ class PredictionOnDataset:
         sub_times = self._est_base_t_cam_time_tracker.return_averaged_times()
         return complete_time, sub_times
 
-    def get_avg_time_per_update_pose_call(self)->tuple[float, list[tuple[str, float]]]:
+    def get_subcomponent_times_update_pose_call(self)->list[tuple[str, float]]:
         """
         Returns the avg. times and their subcomponents per update_pose call
         :return: The time per call and a list of [subcomponent_name, avg time in seconds] tuples (sorted by time descending)
@@ -258,12 +251,10 @@ class GradablePosePredictor:
     creator:Callable[[RobotEnvironment, TimeTracker], PosePredictor]
     name: str
     number_retries: int = 1
-    max_number_consecutive_update_pose_calls: int = 0
 
     def __post__init__(self):
         assert isinstance(self.name, str)
         assert self.number_retries > 0
-        assert self.max_number_consecutive_update_pose_calls >= 0
 
 class NPredictors1DatasetGrader:
     def __init__(
@@ -278,13 +269,14 @@ class NPredictors1DatasetGrader:
         :param headset_data: A HeadsetData object on which the PosePredictors will be evaluated
         """
         self.gradable_pose_predictors = gradable_pose_predictors
+        self.robot_env = robot_env
+
 
         # Creation of n predictors
-        self.predictors = []
         self.creation_subcomponent_time_trackers = []
         self.creation_time_tracker = TimeTracker()
         self.headset_data = headset_data
-        self.graders = []
+        self.graders:list[PredictionOnDataset] = []
 
         for gradable_pose_predictor in gradable_pose_predictors:
             self.creation_time_tracker.reset_elapsed_time()
@@ -296,7 +288,6 @@ class NPredictors1DatasetGrader:
             grader = PredictionOnDataset(
                 predictor=predictor,
                 headset_data=headset_data,
-                number_consecutive_update_pose_calls=gradable_pose_predictor.max_number_consecutive_update_pose_calls,
                 number_retry=gradable_pose_predictor.number_retries
             )
             self.graders.append(grader)
@@ -318,38 +309,123 @@ class NPredictors1DatasetGrader:
         """
         Print the summary of the PosePredictors performances
         """
-        print(f"{'name':<30} {'success ratio %':<20} {'T/frame [ms]':<15} {'avg t_err [mm]':<15} {'avg r_err [deg]':<15} \n")
+        print(f"{'name':<30} {'success ratio %':<20} {'T/frame [ms]':<15} {'avg t_err [mm]':<15} {'avg r_err [deg]':<15} {'med t_err [mm]':<15} {'med r_err [deg]':<15}\n")
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
             print(
                 f"{gpp.name:<30} "
                 f"{grader.success_ratio * 100:<20.2f} "
-                f"{grader.avg_time_for_frame_prediction * 1000:<15.0f} "
+                f"{grader.time_per_successful_prediction * 1000:<15.0f} "
                 f"{grader.avg_translational_error * 1000:<15.1f} "
                 f"{np.rad2deg(grader.avg_rotational_error):<15.1f}"
+                f"{grader.median_translational_error * 1000:<15.1f} "
+                f"{np.rad2deg(grader.median_rotational_error):<15.1f}"
             )
 
 
-
     def plot_creation_times(self, ax):
-        pass
+        creation_times = self.get_creation_times()
+        self._plot_times(ax = ax, times=creation_times, title="Creation times")
 
-    def plot_est_base_t_cam_times(self, ax):
-        pass
+    def _plot_times(
+            self, 
+            ax, 
+            times:dict[str,tuple[float, list[tuple[str, float]]]],
+            title:str = "Time breakdown"
+        ):
+        labels = list(times.keys())
+        x = np.arange(len(labels))
+        bottoms = np.zeros(len(labels))
 
-    def plot_update_pose_times(self, ax):
-        pass
+        all_sub_labels = set()
 
-    def _plot_times(self, ax, times:dict[str,tuple[float, list[tuple[str, float]]]]):
-        pass
+        total_times = []
+        sub_dicts = []
 
-    def plot_frame_prediction_times(self, ax):
-        pass
+        for label in labels:
+            total, sub_times = times[label]
+            total_times.append(total)
+            sub_dicts.append(dict(sub_times))
+            all_sub_labels.update(sub_dicts[-1].keys())
+
+        for sub_label in sorted(all_sub_labels):
+            values = []
+            for i, label in enumerate(labels):
+                values.append(sub_dicts[i].get(sub_label, 0.0)*1000)
+
+            ax.bar(x, values, bottom=bottoms, label=sub_label)
+            bottoms += np.array(values)
+
+        # compute and plot "rest"
+        total_times = np.array(total_times)*1000
+        rest = total_times - bottoms
+        print(f"rest: {rest}")
+
+        ax.bar(x, rest, bottom=bottoms, label="rest", alpha=0.5)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels)
+        ax.set_ylabel("Time [ms]")
+        ax.set_title(title)
+        ax.legend()
+        ax.grid(True, axis="y", alpha=0.3)
+
+
+    def plot_successful_frame_prediction_times(self, ax):
+        names = []
+        times = []
+        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
+            time = grader.time_per_successful_prediction
+            if time is not None:
+                names.append(gpp.name) 
+                times.append(time*1000)
+
+        sorted_pairs = sorted(zip(names, times), key=lambda x: x[1])
+        names, times = zip(*sorted_pairs)
+
+        ax.bar(names, times)
+
+        ax.set_xlabel("Predictor")
+        ax.set_ylabel("Avg time per successful prediction [ms]")
+        ax.tick_params(axis='x', rotation=45)
+
+        
 
     def plot_hz_vs_rotational_error_deg(self, ax):
         pass
 
     def plot_hz_vs_translational_error_mm(self, ax):
         pass
+
+    def plot_translational_errors(self, ax):
+        for gpp, grader in zip(self.gradable_pose_predictors,self.graders):
+            timed_translat_errors = grader.timed_translational_errors
+            name = gpp.name
+            times = [i for i, _ in timed_translat_errors]
+            errors_mm = [e*1000 for _, e in timed_translat_errors]
+            ax.plot(times, errors_mm, label = f"{name} avg: {np.round(grader.avg_translational_error*1000,1)}", alpha = 1.0)
+
+        ax.set_title("Translational errors over time")
+        ax.set_xlabel("Frame")
+        ax.set_ylabel("Translational log error [mm]")
+        ax.set_yscale('log')
+        ax.grid(True)
+        ax.legend()
+
+    def plot_rotational_errors(self, ax):
+        for gpp, grader in zip(self.gradable_pose_predictors,self.graders):
+            times = [i for i, _ in grader.timed_rotational_errors]
+            errors_deg = [np.rad2deg(e) for _, e in grader.timed_rotational_errors]
+            ax.plot(times, errors_deg, label = f"{gpp.name} avg: {np.round(np.rad2deg(grader.avg_rotational_error), 1)}", alpha = 1.0)
+
+        ax.set_title("Rotational errors over time")
+        ax.set_xlabel("Frame")
+        ax.set_ylabel("Rotational log error [deg]")
+        ax.set_yscale('log')
+        ax.grid(True)
+        ax.legend()
+        
+
+
 
     def _plot_hz_vs_metric(self,
                            ax,
@@ -360,4 +436,28 @@ class NPredictors1DatasetGrader:
         pass
 
     def visualize_predictions_3d(self):
-        pass
+        """
+        Visualizes the predictions made by the predictors using open3d
+        :param robot_env: RobotEnvironment or None, if not None will be added to the plot
+        :param show_label: whether to show the label camera frames or not
+        """
+        to_vis = self.robot_env.visualize_3d_data(visualize=False)
+
+        colors = plt.cm.plasma(np.linspace(0, 1, len(self.graders)))[:, :3]
+        colors = [[0, 1.0, 0]] + list(colors)
+
+        trajectories = [[b_t_h for b_t_h in self.headset_data.robot_base_t_headset_s if b_t_h is not None]]
+        trajectories += [g.predicted_base_t_headset_s_no_none for g in self.graders]
+
+
+        for i, trajectory in enumerate(trajectories):
+            if len(trajectory) == 0:
+                continue
+
+            traj_line_set = o3d.geometry.LineSet()
+            traj_line_set.points = o3d.utility.Vector3dVector(np.asarray(trajectory)[:,:3,3])
+            traj_line_set.lines = o3d.utility.Vector2iVector([[j, j+1] for j in range(len(trajectory)-1)])
+            traj_line_set.paint_uniform_color(colors[i])
+            to_vis.append(traj_line_set)
+
+        o3d.visualization.draw_geometries(to_vis, f"Predicted trajectories visualisation")

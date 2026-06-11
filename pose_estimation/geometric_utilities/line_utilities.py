@@ -458,8 +458,8 @@ def match_2d_line_segments(
                 best_l2_matching_values[best_l2_index] = agreement_matrix[i, best_l2_index]
                 best_l2_matchings[best_l2_index] = i
         
-        line_pairs = []
-        for l2_idx, l1_idx in enumerate(best_l2_matchings): 
-            if l1_idx >= 0:
-                line_pairs.append([lines_img1[l1_idx], lines_img2[l2_idx]])
-        return np.array(line_pairs) if len(line_pairs) > 0 else np.empty((0,2,4))
+    line_pairs = []
+    for l2_idx, l1_idx in enumerate(best_l2_matchings): 
+        if l1_idx >= 0:
+            line_pairs.append([lines_img1[l1_idx], lines_img2[l2_idx]])
+    return np.array(line_pairs) if len(line_pairs) > 0 else np.empty((0,2,4))

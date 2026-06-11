@@ -25,7 +25,7 @@ class PyposePnEHelper(nn.Module):
         """
         self.time_tracker = time_tracker
         self.time_tracker.reset_elapsed_time()
-        assert_intrinsic_mat(cam_intrinsic)
+        assert assert_intrinsic_mat(cam_intrinsic)
         assert cam_t_base_quat_vec.shape == (7,), f"wrong pose shape: {cam_t_base_quat_vec.shape} != (7,)"
 
         self.cam_t_base_se3 = pp.Parameter(pp.SE3(torch.tensor(cam_t_base_quat_vec, dtype = torch.float32)))
@@ -68,74 +68,6 @@ class PyposePnEHelper(nn.Module):
         self.time_tracker.add_time_stamp("everything")
         self.num_fw_calls += 1
         return torch.sqrt(distances)
-    
-    
-    def visualize_errors(self, img_rgb:np.ndarray, ax, title:str = "Pne errors"):
-        # To projection
-        proj_primal_conincals = project_dual_quadratics_to_primal_conicals_torch(
-            dual_quadratics=self.dual_quadratics,
-            cam_t_base=self.cam_t_base_se3.matrix(),
-            intrinsic_mtx=self.intrinsic_mtx
-        )
-        proj_mu_s, proj_sigma_s = primal_conics_to_gaussian_ellipses_torch(proj_primal_conincals)
-        proj_sigma_mu_s = torch.cat([proj_sigma_s, proj_mu_s.unsqueeze(-1)], dim = -1)
-        proj_sigma_mu_s_np = proj_sigma_mu_s.detach().cpu().numpy()
-
-
-        obs_sigma_mu_s = torch.cat([self.obs_gaussians_sigma_s, self.obs_gaussians_mu_s.unsqueeze(-1)], dim = -1)
-        obs_sigma_mu_s_np = obs_sigma_mu_s.detach().cpu().numpy()
-
-        ax.set_title(title)
-        ax.imshow(img_rgb)
-
-        n = obs_sigma_mu_s_np.shape[0]
-
-        colors = plt.cm.jet(np.linspace(0,1, n))
-
-        proj_ellipses = gaussian_ellipse_s_to_matplotlib_ellipse_s(
-            gaussian_ellipse_s=proj_sigma_mu_s_np,
-            colors=colors
-        )
-
-        obs_ellipses = gaussian_ellipse_s_to_matplotlib_ellipse_s(
-            gaussian_ellipse_s=obs_sigma_mu_s_np,
-            colors=colors,
-            line_style="-"
-        )
-
-        for proj_e, obs_e in zip(proj_ellipses, obs_ellipses):
-            ax.add_patch(proj_e)
-            ax.add_patch(obs_e)
-
-
-        ax.scatter(
-            obs_sigma_mu_s_np[:,0,2],
-            obs_sigma_mu_s_np[:,1,2],
-            color=colors, s=5, alpha=0.8, marker = 'o')
-        
-        ax.scatter(
-            proj_sigma_mu_s_np[:,0,2],
-            proj_sigma_mu_s_np[:,1,2],
-            color=colors, s=5, alpha=0.8, marker = 's')
-        
-
-        ax.quiver(
-            proj_sigma_mu_s_np[:,0,2],
-            proj_sigma_mu_s_np[:,1,2],
-            obs_sigma_mu_s_np[:,0,2]-proj_sigma_mu_s_np[:,0,2], 
-            obs_sigma_mu_s_np[:,1,2]-proj_sigma_mu_s_np[:,1,2],
-            angles='xy', scale_units='xy', scale=1,
-            color=colors,
-            alpha=0.6,
-            width=0.005
-        )
-
-        empty_lines = [
-            mlines.Line2D([], [], color='black', linestyle='-',  linewidth=2, label='Observed'),
-            mlines.Line2D([], [], color='black', linestyle='--', linewidth=2, label='Projected'),
-        ]
-        ax.legend(handles=empty_lines, loc='upper right')
-
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -175,7 +107,7 @@ class PyposePNEOptimizer(PnEOptimizer):
         primal_quadratics:np.ndarray,
         primal_conicals:np.ndarray,
         intrinsic_cam_mat:np.ndarray,
-        visualize_result:None | np.ndarray = None
+        visualize_result:None | np.ndarray = None,
     ):
         assert assert_homogeneous_mat(initial_cam_t_base, size=4)
 
@@ -190,10 +122,16 @@ class PyposePNEOptimizer(PnEOptimizer):
         self.optimize_pne_tt.add_time_stamp("Model creation")
 
 
-        fig, axes = None, None
         if visualize_result is not None:
-            fig, axes = plt.subplots(1, 3, figsize=(24, 8))
-            model.visualize_errors(visualize_result, ax=axes[0], title="Before Optimisation")
+            self.register_visualisation1(
+                img_rgb=visualize_result, 
+                dual_quadratics=model.dual_quadratics,
+                cam_t_base=model.cam_t_base_se3.matrix(),
+                obs_gaussians_mu_s=model.obs_gaussians_mu_s, 
+                obs_gaussians_sigma_s=model.obs_gaussians_sigma_s,
+                title="Before Optimisation", 
+                intrinsic_mtx=model.intrinsic_mtx
+            )
 
         inp = {}
 
@@ -216,12 +154,12 @@ class PyposePNEOptimizer(PnEOptimizer):
         final_cam_t_base = model.cam_t_base_se3.matrix().detach().cpu().numpy()
 
         if visualize_result is not None:
-            model.visualize_errors(visualize_result, ax=axes[1], title="After Optimisation")
-            axes[2].plot(losses)
-            axes[2].set_title("Loss over iterations")
-            axes[2].set_xlabel("Iteration")
-            axes[2].set_ylabel("Loss")
+            self.register_visualisation2(
+                cam_t_base=model.cam_t_base_se3.matrix()
+            )
+            self.register_visualisation_loss(losses=losses)
             plt.show()
+        
         
         self.optimize_pne_tt.add_time_stamp("Cleanup")
         return final_cam_t_base
