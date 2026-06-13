@@ -149,3 +149,4 @@ pose_estimation/out_data_re
 pose_estimation/*.pt
 pose_estimation/*.ts
 pose_estimation/*.mp4
+pose_estimation/tum

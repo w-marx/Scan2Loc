@@ -124,9 +124,14 @@ def robot_environment_and_headset_data_from_tum(
         time_tolerance:float = 0.1,
         n_robot_images:int = 10,
         xyz_image_generation_config:XYZImageGenerationConfig = XYZImageGenerationConfig(crop_square=False),
-        xyz_image_alginment_config:ICPAlignmentConfig = ICPAlignmentConfig()
+        xyz_image_alginment_config:ICPAlignmentConfig = ICPAlignmentConfig(),
+        intervall: tuple[float, float] | None = None
 )-> tuple[RobotEnvironment, HeadsetData]:
+    
+    assert rgb_camera_name in ["freiburg1", "freiburg2", "freiburg3"]
+    assert time_tolerance > 0
     assert n_robot_images > 0
+    assert intervall is None or (0 <= intervall[0] < intervall[1] <= 1.0)
 
     if not os.path.exists(folder):
         raise FileNotFoundError(f"folder: {folder} doesnt exist")
@@ -144,14 +149,26 @@ def robot_environment_and_headset_data_from_tum(
     sync_depth_images = depth_images[synchronized_timestamps[:,1]]
     sync_world_t_cam_s = world_t_cam_s[synchronized_timestamps[:,2]]
 
+    
+    min_idx, max_idx = 0, n_dp
+    if intervall is not None:
+        min_idx = int(intervall[0]*n_dp)
+        max_idx = int(intervall[1]*n_dp)
+
+
+    robot_mask = np.zeros(n_dp, dtype=bool)
+    robot_mask[np.linspace(min_idx, max_idx - 1, min(n_robot_images, max_idx - min_idx), dtype=int)] = True
+
+    headset_mask = np.zeros(n_dp, dtype=bool)
+    headset_mask[min_idx:max_idx] = True
+    headset_mask[robot_mask] = False
+
 
     # Robot environment generation
-    robot_indices = range(0, n_dp, int(n_dp/n_robot_images))
-
     robot_bgr_images, robot_xyz_images, robot_intrinsics = create_aligned_xyz_images(
-        robot_base_t_robot_camera_s=sync_world_t_cam_s[robot_indices],
-        robot_bgr_images=sync_bgr_images[robot_indices],
-        robot_depth_images=sync_depth_images[robot_indices],
+        robot_base_t_robot_camera_s=sync_world_t_cam_s[robot_mask],
+        robot_bgr_images=sync_bgr_images[robot_mask],
+        robot_depth_images=sync_depth_images[robot_mask],
         intrinsic_camera_matrix=INTRINSIC_FREIBURG_MATRICES[rgb_camera_name],
         image_gen_config=xyz_image_generation_config,
         icp_config=xyz_image_alginment_config
@@ -162,15 +179,15 @@ def robot_environment_and_headset_data_from_tum(
         robot_bgr_images=np.array(robot_bgr_images),
         robot_bgr_intrinsics=robot_intrinsics,
         robot_xyz_images=np.array(robot_xyz_images),
-        robot_base_t_robot_camera_s=sync_world_t_cam_s[robot_indices]
+        robot_base_t_robot_camera_s=sync_world_t_cam_s[robot_mask]
     )
 
     # Headset data generation
     headset_data = HeadsetData(
         name=f"{os.path.basename(folder)}_headset_data",
-        bgr_image_s=sync_bgr_images,
+        bgr_image_s=sync_bgr_images[headset_mask],
         intrinsic_cam_mtx=INTRINSIC_FREIBURG_MATRICES[rgb_camera_name],
-        robot_base_t_headset_s=list(sync_world_t_cam_s)
+        robot_base_t_headset_s=list(sync_world_t_cam_s[headset_mask])
     )
 
     return robot_env, headset_data

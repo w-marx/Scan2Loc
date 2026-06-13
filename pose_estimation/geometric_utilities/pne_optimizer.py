@@ -309,3 +309,4 @@ class PnEOptimizer(ABC):
             mlines.Line2D([], [], color='black', linestyle='--', linewidth=2, label='Projected'),
         ]
         ax.legend(handles=empty_lines, loc='upper right')
+        ax.axis('off')

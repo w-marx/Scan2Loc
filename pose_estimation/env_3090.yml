@@ -44,3 +44,4 @@ dependencies:
       - pyrealsense2
       - rerun-sdk==0.26.2
       - projectaria-tools
+      - seaborn

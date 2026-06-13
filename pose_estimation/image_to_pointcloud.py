@@ -10,6 +10,7 @@ from tqdm import tqdm
 from shared.se3_utilities import compute_pose_pseudo_median
 from shared.assertion_helpers import *
 
+from geometric_utilities.point_utilities import set_outliers_to_nan
 
 def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
     """
@@ -88,7 +89,7 @@ def align_point_clouds_icp(
     o3d_point_clouds = []
     for i, point_cloud in enumerate(point_clouds):
         o3d_point_clouds.append(o3d.geometry.PointCloud())
-        o3d_point_clouds[-1].points = o3d.utility.Vector3dVector(point_cloud)
+        o3d_point_clouds[-1].points = o3d.utility.Vector3dVector(point_cloud[np.isfinite(point_cloud).all(axis=-1)])
         if config.presample_voxel_size > 1e-9:
             o3d_point_clouds[-1] = o3d_point_clouds[-1].voxel_down_sample(voxel_size=config.presample_voxel_size)
 
@@ -139,6 +140,7 @@ class XYZImageGenerationConfig:
     camera_realginment_method:Literal["none", "simple", "kabsch-umeyama"] = "kabsch-umeyama"
     crop_square:bool = True
     use_depth_images_if_provided:bool = False
+    iforest_contamination:float | None = 0.05
 
 
     def __post__init__(self):
@@ -271,6 +273,9 @@ def generate_xyz_images(
         world_xyz_images = transform_points_to_old(world_xyz_images.reshape(-1,3)).reshape(world_xyz_images.shape)
     else:
         print("didnt do camera alignment")
+    
+    if config.iforest_contamination is not None:
+        world_xyz_images = set_outliers_to_nan(world_xyz_images.reshape(-1,3), config.iforest_contamination).reshape(world_xyz_images.shape)
 
     print(f"xyz images shape: {world_xyz_images.shape}")
     assert np.array(bgr_images).shape == np.array(world_xyz_images).shape, f"bgr: {np.array(bgr_images).shape} xyz {np.array(world_xyz_images).shape}"
@@ -321,7 +326,6 @@ def create_aligned_xyz_images(
         robot_bgr_images:np.ndarray,
         robot_depth_images:np.ndarray | None,
         intrinsic_camera_matrix:np.ndarray,
-
         image_gen_config:XYZImageGenerationConfig | None = XYZImageGenerationConfig(),
         icp_config:ICPAlignmentConfig | None = ICPAlignmentConfig(),
     ):
@@ -360,7 +364,7 @@ def create_aligned_xyz_images(
         else:
             robot_base_xyz_imgs = create_point_cloud_depth_reproject(
                 depth_images=robot_depth_images,
-                depth_cam_mtx=robot_data.cam_intrinsic_mtx,
+                depth_cam_mtx=intrinsic_camera_matrix,
                 base_t_camera_s=robot_base_t_robot_camera_s,
                 distance_cutoff=1.0,
                 visualize_point_cloud=True

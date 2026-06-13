@@ -38,6 +38,7 @@ class SAM3Segmenter(Segmenter):
             from transformers import Sam3Processor, Sam3Model
             SAM3Segmenter._device = "cuda" if torch.cuda.is_available() else "cpu"
             SAM3Segmenter._model = Sam3Model.from_pretrained("facebook/sam3").to(SAM3Segmenter._device)
+            SAM3Segmenter._model.eval()
             SAM3Segmenter._processor = Sam3Processor.from_pretrained("facebook/sam3")
 
 
@@ -49,7 +50,7 @@ class SAM3Segmenter(Segmenter):
 
         if bgr_image.dtype in [np.float16, np.float32, np.float64]:
             bgr_image = (bgr_image * 255).astype(np.uint8)
-        pil_rgb_image = Image.fromarray(cv2.cvtColor(bgr_image.astype(np.uint8), cv2.COLOR_BGR2RGB))
+        pil_rgb_image = Image.fromarray(cv2.cvtColor(np.clip(bgr_image, 0, 255).astype(np.uint8), cv2.COLOR_BGR2RGB))
 
         inputs = SAM3Segmenter._processor(
             images=pil_rgb_image,
@@ -57,7 +58,7 @@ class SAM3Segmenter(Segmenter):
             return_tensors="pt"
         ).to(SAM3Segmenter._device)
 
-        with torch.inference_mode():
+        with torch.no_grad():
             outputs = SAM3Segmenter._model(**inputs)
 
             results = SAM3Segmenter._processor.post_process_instance_segmentation(
@@ -67,13 +68,13 @@ class SAM3Segmenter(Segmenter):
                 target_sizes=inputs.get("original_sizes").tolist()
             )[0]
 
-            del inputs
-            del outputs
-
             masks = np.empty((0, pil_rgb_image.height, pil_rgb_image.width), dtype=bool)
             if 'masks' in results and len(results['masks']) > 0:
-                masks = results['masks'].cpu().numpy()
-            del results
+                masks = results['masks'].detach().cpu().numpy()
+
+            if visualize:
+                display_image_masks(bgr_img=bgr_image, masks=masks)
+
             return masks
 
 

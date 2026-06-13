@@ -101,7 +101,7 @@ def visualize_features_2d(
             fd.ax.plot([x1, x2], [y1, y2], color=colors_lines[i], linewidth=1)
 
         for i, (line_3d, obs_line) in enumerate(zip(proj_lines_matched_3d, obs_lines_matched_2d)):
-            projected_points = project_points(
+            projected_points = project_visible_points(
                 base_points=line_3d.reshape(-1, 3),
                 cam_t_base=cam_t_base,
                 intrinsic_mat=intrinsic_mat,

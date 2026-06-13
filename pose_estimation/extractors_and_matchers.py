@@ -91,7 +91,7 @@ class ExtractAndMatch(ABC):
                 linewidth=1,
                 alpha = 0.5
             )
-
+        ax.axis('off')
         plt.show()
 
 class ExtractAndLightGlue(ExtractAndMatch):
@@ -238,6 +238,7 @@ class ExtractAndMatchWrapperConfig:
     crop_augmentations:list[float] | None = None
     ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise
     sheduler:type[Sheduler] = EMASheduler
+    display_matching:bool = False
 
 
 
@@ -269,9 +270,13 @@ class ExtractAndMatchWrapper:
         self.chosen_augmentations = defaultdict(int)
         self.used_number_of_tries = []
 
+        self.display_matching = config.display_matching
+        self.cam1_bgr_images_for_vis = cam1_bgr_images if config.display_matching else None
+
     def get_sheduler(self):
         return self.sheduler
     
+
     def est_base_t_cam2_with_retry(self,cam2_bgr_image: np.ndarray, number_retry:int = 1, fd:FeatureDrawing|None = None) -> np.ndarray | None:
         """
         Will try to match points until a pose is found or number_retry was reached
@@ -323,9 +328,12 @@ class ExtractAndMatchWrapper:
         :return: None or base T_cam, points_image_1, points_image_2, world_obj_points, inliers
         """
 
-        augmentation_options_names = []
-        world_obj_points_options = []
-        image_points_cam2_options = []
+        best_num_of_points = 0
+        best_aug_option_name = ""
+        best_image_points_cam1 = None
+        best_image_points_cam2 = None
+        best_world_obj_points = None
+        augmented_image_point_4_vis = None
 
         for c_aug in self.crop_augmentations:
             for r_aug in self.rotation_augmentations:
@@ -338,23 +346,35 @@ class ExtractAndMatchWrapper:
                     features2=features_cam2
                 )
 
+                if image_points_cam1.shape[0] < max(self.ransac_config.min_number_inlier_afterwards,6):
+                    continue
+
+                if image_points_cam1.shape[0] < best_num_of_points:
+                     continue
+
+
                 world_obj_points = np.array([self.cam1_xyz_images[idx][int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1])
-                if world_obj_points.shape[0] > 5:
-                    augmentation_options_names.append(f"{c_aug} x {r_aug}")
-                    world_obj_points_options.append(world_obj_points)
-                    image_points_cam2_options.append(backward_aug2(backward_aug1(image_points_cam2)))
-        
-        if len(world_obj_points_options) < 1:
+                valid_points_mask = np.isfinite(world_obj_points).all(axis=1)
+
+                if np.sum(valid_points_mask) > best_num_of_points:
+                    best_num_of_points = np.sum(valid_points_mask)
+                    best_aug_option_name = f"{c_aug} x {r_aug}"
+                    best_image_points_cam1 = image_points_cam1[valid_points_mask]
+                    best_image_points_cam2 = backward_aug2(backward_aug1(image_points_cam2))[valid_points_mask]
+                    best_world_obj_points = world_obj_points[valid_points_mask]
+
+                    if self.display_matching:
+                        augmented_image_point_4_vis = (augmented_image, image_points_cam2[valid_points_mask])
+
+
+        if best_num_of_points < max(self.ransac_config.min_number_inlier_afterwards,6):
             return None
-    
-        best_option_idx = np.argmax(np.array([x.shape[0] for x in world_obj_points_options]))
-        world_obj_points = world_obj_points_options[best_option_idx]
-        image_points_cam2 = image_points_cam2_options[best_option_idx]
-        self.chosen_augmentations[augmentation_options_names[best_option_idx]] += 1
+
+        self.chosen_augmentations[best_aug_option_name] += 1
 
         cam2_t_base__inliers = estimate_point_pose_ransac(
-            world_points=world_obj_points,
-            img_points=image_points_cam2,
+            world_points=best_world_obj_points,
+            img_points=best_image_points_cam2,
             intrinsic_matrix=self.cam2_mtx,
             config=self.ransac_config,
             fd = fd
@@ -362,7 +382,17 @@ class ExtractAndMatchWrapper:
 
         if cam2_t_base__inliers is None:
             return None
-        return np.linalg.inv(cam2_t_base__inliers[0]), image_points_cam1, image_points_cam2, world_obj_points, cam2_t_base__inliers[1]
+        
+        if self.display_matching:
+            aug_img, points2 = augmented_image_point_4_vis
+            ExtractAndMatch.plot_matched_points(
+                img1_rgb=cv2.cvtColor(self.cam1_bgr_images_for_vis[idx], code=cv2.COLOR_BGR2RGB),
+                points1=best_image_points_cam1,
+                img2_rgb=aug_img,
+                points2=points2
+            )
+
+        return np.linalg.inv(cam2_t_base__inliers[0]), best_image_points_cam1, best_image_points_cam2, best_world_obj_points, cam2_t_base__inliers[1]
 
 
     def est_base_t_cam2(self,

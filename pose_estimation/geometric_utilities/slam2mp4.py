@@ -4,22 +4,7 @@ import numpy as np
 from dataclasses import dataclass
 import cv2
 
-
-from shared.image_camera_manipulation import extract_params_from_intrinsic_mat
-from shared.assertion_helpers import assert_homogeneous_mat, assert_intrinsic_mat
 from shared.se3_utilities import rotational_difference, translational_difference
-
-
-def project_points(base_points:np.ndarray, cam_t_base:np.ndarray, intrinsic_mat:np.ndarray):
-
-    assert assert_homogeneous_mat(cam_t_base, size = 4)
-    assert assert_intrinsic_mat(intrinsic_mat)
-
-    base_points = np.column_stack([base_points, np.ones(base_points.shape[0])])
-    P = intrinsic_mat @ cam_t_base[:3, :]
-    projected = (P @ base_points.T).T    
-    Zc = projected[:, 2:3]
-    return projected[:, :2] / np.clip(Zc, a_min=1e-10, a_max=None)
 
 
 @dataclass(frozen=True, kw_only=True)

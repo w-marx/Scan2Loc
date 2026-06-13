@@ -175,10 +175,15 @@ class RobotEnvironment:
         """
         Visualizes the robot environment using open3d
         """
+
+        world_points = self.robot_xyz_images.reshape(-1,3)
+        world_colors = self.robot_bgr_images.reshape(-1,3).astype(np.float32)[:, ::-1]/255
+        no_nan_mask = np.isfinite(world_points).all(axis=-1)
+
         import open3d as o3d
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(self.robot_xyz_images.reshape(-1,3))
-        pcd.colors = o3d.utility.Vector3dVector(self.robot_bgr_images.reshape(-1,3).astype(np.float32)[:, ::-1]/255)
+        pcd.points = o3d.utility.Vector3dVector(world_points[no_nan_mask])
+        pcd.colors = o3d.utility.Vector3dVector(world_colors[no_nan_mask])
 
         base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
 

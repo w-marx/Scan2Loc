@@ -109,7 +109,9 @@ def line_seg_2d_to_3d_points(line_seg_2d:np.ndarray, xyz_image:np.ndarray)-> np.
     row_cords, col_cords = line(y1, x1, y2, x2)
     valid_points_mask = (0 <= row_cords) & (row_cords < xyz_image.shape[0]) & (0 <= col_cords) & (col_cords < xyz_image.shape[1])
 
-    return np.empty((0,3)) if len(row_cords) < 1 else xyz_image[row_cords[valid_points_mask], col_cords[valid_points_mask]]
+    points_3d = xyz_image[row_cords[valid_points_mask], col_cords[valid_points_mask]]
+    points_3d = points_3d[~np.isnan(points_3d).any(axis=-1)]
+    return np.empty((0,3)) if len(row_cords) < 1 else points_3d
 
 
 def merge_line_seg_cluster_into_one(line_segs_2d:np.ndarray)->np.ndarray:

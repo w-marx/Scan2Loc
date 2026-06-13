@@ -1,10 +1,11 @@
 import numpy as np
 from dataclasses import dataclass
 import cv2
-from matplotlib.axes import Axes
 
 from shared.se3_utilities import r_t_to_hom
-from .slam2mp4 import FeatureDrawing, project_points
+
+from .slam2mp4 import FeatureDrawing
+from .point_utilities import project_visible_points
 
 @dataclass(frozen=True, kw_only=True)
 class RansacPoseEstimationConfig:
@@ -71,7 +72,6 @@ def estimate_point_pose_ransac(
     assert img_points.ndim == 2 and img_points.shape[-1] == 2, f"wrong 2d pc shape: {img_points.shape}"
     assert world_points.ndim == 2 and world_points.shape[-1] == 3, f"wrong 2d pc shape: {world_points.shape}"
 
-
     if world_points.shape[0] < min(5, config.min_number_inlier_afterwards):
         return None
 
@@ -91,7 +91,7 @@ def estimate_point_pose_ransac(
     if fd is not None:
         fd.draw_point_pairs(
             points_observed=img_points[inliers.flatten()], 
-            points_projected=project_points(world_points[inliers.flatten()], cam_t_base=cam_t_base, intrinsic_mat=intrinsic_matrix)
+            points_projected=project_visible_points(world_points[inliers.flatten()], cam_t_base=cam_t_base, intrinsic_mat=intrinsic_matrix)
         )
 
     return cam_t_base, inliers.flatten()

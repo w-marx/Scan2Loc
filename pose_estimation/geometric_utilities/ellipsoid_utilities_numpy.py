@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from shared.se3_utilities import r_t_to_hom
 from shared.assertion_helpers import *
 
+from .point_utilities import remove_outliers_from_point_cloud
+
 
 ##########################################
 ## Assertions ############################
@@ -142,6 +144,36 @@ def assert_gaussian_ellipse_tuple_batch(mu_s:np.ndarray,sigma_s:np.ndarray, dim:
     assert assert_gaussian_ellipse_mat_batch(gauss_ellipse_batch_tuple_to_mat_batch(mu_s=mu_s, sigma_s=sigma_s))
     return True
 
+def assert_valid_prim_quad_2_conic_projection(primal_quadratic:np.ndarray, primal_conic:np.ndarray, atol:float = 1e-8):
+    """
+    Asserts sanity checks for an projection (e.g. if the primal conic is degenerate)
+    :param primal_quadratic: 4x4 primal quadratic ellipsoid
+    :param primal_conic: The projected 3x3 primal conic
+    """    
+    assert assert_primal_quadratic_hom_ellipsoid(primal_quadratic_hom=primal_quadratic)
+    assert np.allclose(primal_conic, primal_conic.T, atol=atol), f"Matrix must be symmetric \n: {primal_conic} proj from: \n {primal_quadratic}"    
+
+    det_a_33 = np.linalg.det(primal_conic[:2, :2])
+    det_a_q = np.linalg.det(primal_conic)
+    eigvals = np.linalg.eigvalsh(primal_conic[:2,:2])
+    cond = np.linalg.cond(primal_conic)
+
+    diag_info = (
+        f"det(A33)={det_a_33}\n"
+        f"det(Q)={det_a_q}\n"
+        f"eig(A33)={eigvals}\n"
+        f"cond(Q)={cond:.2e}\n"
+        f"conic=\n{primal_conic}\n"
+        f"quadric=\n{primal_quadratic}"
+    )
+    
+    assert cond < 1e12, f"Ellipse cond to big, numerical limit problems \n {diag_info}"
+    assert np.all(eigvals > atol), f"Ellipse quadratic part not positive definite \n {diag_info}"
+    assert abs(det_a_q) > atol, f"Ellipse is nearly singular: \n {diag_info}"
+    assert det_a_33 > 0, f"Primal conical is not an ellipse: 0 !< det(A_33): \n {diag_info}"
+    assert det_a_33 * det_a_q < 0, f"Ellipse is not real: \n {diag_info}"
+
+
 def gauss_ellipse_mat_to_tuple(sigma_mu:np.ndarray)->tuple[np.ndarray, np.ndarray]:
     """
     Turns a matrix of the shape Nx(N+1) with the structure:
@@ -205,7 +237,7 @@ def normalize_gaussians(sigma_mu_s:np.ndarray, w:int, h:int)->np.ndarray:
 def project_primal_quadratics_to_primal_conicals(
         primal_quadratics:np.ndarray,
         cam_t_base:np.ndarray,
-        intrinsic_mtx:np.ndarray
+        intrinsic_mtx:np.ndarray,
 )->np.ndarray:
     """
     Takes a batch of Nx4x4 primal quadratics in the world frame
@@ -229,6 +261,32 @@ def project_primal_quadratics_to_primal_conicals(
     return cam_primal_conic
 
 
+def filter_good_primal_conicals(primal_conicals:np.ndarray, cond:float = 1e10, min_eigenvalue:float = 1e-8, print_reductions = True)->np.ndarray:
+    """
+    Takes a batch of Bx3x3 primal conics and returns those that are numerical good conditioned
+    :param primal_conic_s: A batch of Bx3x3 primal conics
+    :param cond: The maximal cond of the primal conical
+    :param min_eigenvalue: Minimal eigenvalue, small eigenvalues mean near-singular ellipses
+    :param print_reductions: If True will print if ones are removed.
+    :return a Batch of B'x3x3 primal conics with B' <= B
+    """
+    assert primal_conicals.ndim == 3 and primal_conicals.shape[1:] == (3,3), f"wrong shape: {primal_conicals.shape}, should be Bx3x3"
+    if primal_conicals.shape[0] == 0:
+        return np.empty((0,3,3))
+    
+    finite = np.all(np.isfinite(primal_conicals), axis=(1, 2))
+    eigvals = np.linalg.eigvalsh(primal_conicals[:,:2, :2])
+    conds = np.linalg.cond(primal_conicals)
+
+    validmask = finite  & (conds < cond) & (eigvals[:, 0] > min_eigenvalue)
+
+    if print_reductions and np.any(~validmask):
+        print(f"removed {np.sum(~validmask)} / {primal_conicals.shape[0]} primal conicals for bad numerical behaviour")
+    
+    return primal_conicals[validmask]
+
+
+
 def primal_conics_to_gaussian_ellipses(primal_conic_s:np.ndarray)-> tuple[np.ndarray, np.ndarray]:
     """
     Takes a batch of Nx3x3 primal conics and returns normal distribution, with Mahalanobis distance = 1, as the ellipsoids border
@@ -244,6 +302,8 @@ def primal_conics_to_gaussian_ellipses(primal_conic_s:np.ndarray)-> tuple[np.nda
     # normalization
     s = np.einsum('ni,nji,nj->n', mu_s, a_s, mu_s, optimize=True) - c_s
     sigma_s = np.linalg.inv((primal_conic_s / s[:, None, None])[:, 0:2, 0:2])
+    
+    assert assert_gaussian_ellipse_tuple_batch(mu_s=mu_s, sigma_s=sigma_s)
 
     return mu_s, sigma_s
 
@@ -352,50 +412,6 @@ def sample_points_in_primal_quadratic(
     return base_points_hom[:, :3]
 
 
-
-def fuse_ellipsoids(base_t_ellipsoid_s:np.ndarray, primal_quadratic_s:np.ndarray)->tuple[np.ndarray, np.ndarray]:
-    """
-    Fuses multiple ellipsoids into one, by generating a point cloud on its shells and fitting an ellipsoid to this point_cloud.
-    :param base_t_ellipsoid_s: Nx4x4 homogeneous transformation matrix from the base to the ellipsoid frames
-    :param primal_quadratic_s: Nx4x4 primal quadratic of the ellipsoids
-    :return: An 4x4 base_t_ellipsoid and 4x4 primal_quadratic
-    """
-    assert base_t_ellipsoid_s.shape[0] == primal_quadratic_s.shape[0]
-    assert all(assert_homogeneous_mat(m, size = 4) for m in base_t_ellipsoid_s)
-    assert all(assert_primal_quadratic_hom_ellipsoid(m) for m in primal_quadratic_s)
-
-    point_cloud = np.concatenate([
-        sample_points_in_primal_quadratic(b_t_e, p_q, resolution=20) 
-        for b_t_e, p_q in zip(base_t_ellipsoid_s, primal_quadratic_s)
-    ], axis = 0)
-
-    return fit_ellipsoid_to_3d_point_cloud(point_cloud= point_cloud, visualize=False)
-
-
-
-def remove_outliers_from_point_cloud(points:np.ndarray, contamination:float = 0.05)->np.ndarray:
-    """
-    Uses I-Forest to remove points deemed as outliers
-    :param contamination: The percentage of points to remove
-    :param points: A Nx3-float numpy array of x,y,z points
-    :return: A Mx3-float numpy array of x,y,z points with M <= N
-    """
-    assert 0 <= contamination <= 1.0
-    assert points.ndim == 2 and points.shape[1] == 3
-
-    if contamination == 0:
-        return points
-    if contamination == 1.0:
-        return np.empty((0,3))
-
-    from sklearn.ensemble import IsolationForest
-    forest = IsolationForest(contamination=contamination)
-    forest.fit(points)
-    prediction = forest.predict(points)
-    return points[prediction==1]
-
-
-
 def fit_primal_conic_to_2d_point_cloud(point_cloud:np.ndarray)->np.ndarray:
     """
     Creates a primal conic and base_t_ellipsoid matrix from a 2d point cloud.
@@ -424,19 +440,33 @@ def fit_primal_conic_to_2d_point_cloud(point_cloud:np.ndarray)->np.ndarray:
     return primal_conic
 
 
+@dataclass(kw_only=True, frozen=True)
+class EllipsoidFittingConfig:
+    contamination:float = 0.3
+    min_point_cloud_size:int = 10
+    visualize:bool = False
+
 
 def fit_ellipsoid_to_3d_point_cloud(
         point_cloud:np.ndarray,
-        visualize:bool = False
-    )->tuple[np.ndarray, np.ndarray]:
+        config:EllipsoidFittingConfig = EllipsoidFittingConfig(),
+    )->tuple[np.ndarray, np.ndarray] | None:
     """
     :param point_cloud: A Nx3 point cloud in the base_frame
-    :param visualize: If the fitting should be 3d visualized
-    :return: a tuple of the base_t_ellipsoid hom. mtx (4x4) and the primal quadratics (4x4)
+    :param config: How to do it
+    :return: a tuple of the base_t_ellipsoid hom. mtx (4x4) and the primal quadratics (4x4) or None if fitting failed
     """
     assert point_cloud.ndim == 2 and point_cloud.shape[-1] == 3
 
-    point_cloud = remove_outliers_from_point_cloud(point_cloud, contamination=0.1)
+    point_cloud = point_cloud[np.isfinite(point_cloud).all(axis=-1)]
+
+    if point_cloud.shape[0] < config.min_point_cloud_size:
+        return None
+
+    point_cloud = remove_outliers_from_point_cloud(point_cloud, contamination=config.contamination)
+
+    if point_cloud.shape[0] < config.min_point_cloud_size:
+        return None
 
     # Get center
     center = point_cloud.mean(axis=0)  # (3,)
@@ -467,7 +497,7 @@ def fit_ellipsoid_to_3d_point_cloud(
     ellipsoid_t_base = np.linalg.inv(base_t_ellipsoid)
     primal_quadratic = ellipsoid_t_base.T @ q_ellipsoid @ ellipsoid_t_base
 
-    if visualize:
+    if config.visualize:
         base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
         to_vis = [base_frame]
         pc_np = sample_points_in_primal_quadratic(base_t_ellipsoid, primal_quadratic)
@@ -489,6 +519,25 @@ def fit_ellipsoid_to_3d_point_cloud(
 
     return base_t_ellipsoid, primal_quadratic
 
+
+
+def fuse_ellipsoids(base_t_ellipsoid_s:np.ndarray, primal_quadratic_s:np.ndarray, config:EllipsoidFittingConfig)->tuple[np.ndarray, np.ndarray] | None:
+    """
+    Fuses multiple ellipsoids into one, by generating a point cloud on its shells and fitting an ellipsoid to this point_cloud.
+    :param base_t_ellipsoid_s: Nx4x4 homogeneous transformation matrix from the base to the ellipsoid frames
+    :param primal_quadratic_s: Nx4x4 primal quadratic of the ellipsoids
+    :return: An 4x4 base_t_ellipsoid and 4x4 primal_quadratic or None if not successful
+    """
+    assert base_t_ellipsoid_s.shape[0] == primal_quadratic_s.shape[0]
+    assert all(assert_homogeneous_mat(m, size = 4) for m in base_t_ellipsoid_s)
+    assert all(assert_primal_quadratic_hom_ellipsoid(m) for m in primal_quadratic_s)
+
+    point_cloud = np.concatenate([
+        sample_points_in_primal_quadratic(b_t_e, p_q, resolution=20) 
+        for b_t_e, p_q in zip(base_t_ellipsoid_s, primal_quadratic_s)
+    ], axis = 0)
+
+    return fit_ellipsoid_to_3d_point_cloud(point_cloud= point_cloud, config=config)
 
 
 ##########################################
@@ -615,11 +664,10 @@ def plot_matchings(
     :param proj_matched_idx_s: Array of the same length as observed_matched_idx_s
     :return: None
     """
-    ax.imshow(rgb_image, extent=[0, 1, 0, 1], origin="lower")
-    ax.set_ylim(1, 0)
+    ax.imshow(rgb_image)
 
-    elli1_s = gaussian_ellipse_s_to_matplotlib_ellipse_s(observed_sigma_mu_s, line_style="--", line_widths=2, colors='black')
-    elli2_s = gaussian_ellipse_s_to_matplotlib_ellipse_s(proj_sigma_mu_s, line_style="-", line_widths=2, colors='black')
+    elli1_s = gaussian_ellipse_s_to_matplotlib_ellipse_s(observed_sigma_mu_s, line_style="-", line_widths=2, colors='black')
+    elli2_s = gaussian_ellipse_s_to_matplotlib_ellipse_s(proj_sigma_mu_s, line_style="--", line_widths=2, colors='black')
 
     ax.set_title("Matching visualisation")
 
@@ -702,32 +750,32 @@ class GaussianMatchingConfig:
 
 
 def match_gaussians_hungarian_on_wasserstein(
-        sigma_mu1_s:np.ndarray, 
-        sigma_mu2_s:np.ndarray,
+        proj_sigma_mu_s:np.ndarray, 
+        obs_sigma_mu_s:np.ndarray,
         image_size:tuple[int, int],
         config:GaussianMatchingConfig = GaussianMatchingConfig(),
         visualize_matching:None | np.ndarray = None
     )->tuple[np.ndarray, np.ndarray]:
     """
     Uses the hungarian algorithm to match distributions
-    :param sigma_mu1_s: Nx2x3 array of the form [[sigma_1 | mu_1], ... ]
-    :param sigma_mu2_s: Mx2x3 array of the form [[sigma_1 | mu_1], ... ]
+    :param proj_sigma_mu_s: Nx2x3 array of the form [[sigma_1 | mu_1], ... ]
+    :param obs_sigma_mu_s: Mx2x3 array of the form [[sigma_1 | mu_1], ... ]
     :param image_size: A tuple of the image size (h,w) where the gaussians come from (used for normalisation)
     :param dummy_value: The value for the no-match alternative
     :param k: valid matches hav the cost: cost < median-cost + k * mad
     :return: 2 arrays of length n, with the indices for the matching gaussians 
     """
-    n, m = sigma_mu1_s.shape[0], sigma_mu2_s.shape[0]
-    assert assert_gaussian_ellipse_mat_batch(sigma_mu1_s)
-    assert assert_gaussian_ellipse_mat_batch(sigma_mu2_s)
+    n, m = proj_sigma_mu_s.shape[0], obs_sigma_mu_s.shape[0]
+    assert assert_gaussian_ellipse_mat_batch(proj_sigma_mu_s)
+    assert assert_gaussian_ellipse_mat_batch(obs_sigma_mu_s)
 
     h, w = image_size
-    sigma_mu1_s_n = normalize_gaussians(sigma_mu1_s, h, w)
-    sigma_mu2_s_n = normalize_gaussians(sigma_mu2_s, h, w)
+    proj_sigma_mu_s_n = normalize_gaussians(proj_sigma_mu_s, h, w)
+    obs_sigma_mu_s_n = normalize_gaussians(obs_sigma_mu_s, h, w)
 
     adjecency_mat = np.full((m+n, m+n), config.dummy_value, dtype = np.float32)
-    mu1_s, sigma1_s = gauss_ellipse_mat_batch_to_tuple(sigma_mu1_s_n)
-    mu2_s, sigma2_s = gauss_ellipse_mat_batch_to_tuple(sigma_mu2_s_n)
+    mu1_s, sigma1_s = gauss_ellipse_mat_batch_to_tuple(proj_sigma_mu_s_n)
+    mu2_s, sigma2_s = gauss_ellipse_mat_batch_to_tuple(obs_sigma_mu_s_n)
     adjecency_mat[:n, :m] = pairwise_sq_wasserstein_distance(mu1_s, sigma1_s, mu2_s, sigma2_s)
 
     row_ind, col_ind = linear_sum_assignment(adjecency_mat)
@@ -738,17 +786,17 @@ def match_gaussians_hungarian_on_wasserstein(
     mad = np.median(np.abs(adjecency_mat[row_ind, col_ind] - median_cost))
 
     valid_matches = (adjecency_mat[row_ind, col_ind] < median_cost+ config.k * mad)
-    matched_idx_1_s, matched_idx_2_s = row_ind[valid_matches], col_ind[valid_matches]
+    proj_matched_idx_s, obs_matched_idx_s = row_ind[valid_matches], col_ind[valid_matches]
 
     if visualize_matching is not None:
         fig, ax = plt.subplots(1, 1, figsize=(12, 8))
         plot_matchings(
             ax = ax, 
             rgb_image=visualize_matching, 
-            proj_sigma_mu_s=sigma_mu1_s,
-            proj_matched_idx_s=matched_idx_1_s,
-            observed_sigma_mu_s=sigma_mu2_s,
-            observed_matched_idx_s=matched_idx_2_s
+            proj_sigma_mu_s=proj_sigma_mu_s,
+            proj_matched_idx_s=proj_matched_idx_s,
+            observed_sigma_mu_s=obs_sigma_mu_s,
+            observed_matched_idx_s=obs_matched_idx_s
         )
         plt.show()
-    return matched_idx_1_s, matched_idx_2_s
+    return proj_matched_idx_s, obs_matched_idx_s

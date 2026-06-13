@@ -1,10 +1,9 @@
 # robot specific imports
-import pyrealsense2
 from deoxys.franka_interface import FrankaInterface
 from deoxys.experimental.motion_utils import reset_joints_to
 from deoxys import config_root
-
 import pyrealsense2 as rs
+
 import cv2
 import numpy as np
 import json, os, sys, time
@@ -21,7 +20,7 @@ def extract_intrinsics(cam_intrinsics) -> tuple[np.ndarray,list[float],np.ndarra
 
 def gather_robot_imgs_eefs(
         robot_interface,
-        image_pipeline:pyrealsense2.pipeline,
+        image_pipeline:rs.pipeline,
         depth_scale:float,
         robot_positions:list[list[float]],
         stabilisation_timeout:float = 0.0
