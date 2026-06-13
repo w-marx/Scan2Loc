@@ -3,15 +3,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
-from shared.src.shared.proto_robot_data import *
+from shared.proto_robot_data import ProtoRobotData
+from shared.aruco_charuco_detection import MarkerDetector, NoMarkerDetector, DEFAULT_MARKER_CONFIGS
+from shared.gathered_robot_data import GatheredRobotData
+from shared.se3_utilities import compute_pose_pseudo_median, rotational_difference
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared.src.shared.aruco_charuco_detection import MarkerDetector, ArucoDetector, CharucoDetector, NoMarkerDetector, MarkerDetectionConfig, DEFAULT_MARKER_CONFIGS
-from shared.src.shared.gathered_robot_data import GatheredRobotData
-from hom_pose_utilities import compute_pose_pseudo_median
 
-calc_rotational_difference = lambda x, y: np.arccos((np.trace(x[:3, :3] @ y[:3, :3].T) - 1) / 2)
-
+from .depth_filtering import DEPTH_OPTIMIZATION_CONFIGS
 
 
 def optimize_robot_data(
@@ -68,12 +66,12 @@ def optimize_robot_data(
         base_t_marker_median = compute_pose_pseudo_median(b_t_m_s)
 
         t_err_quant = np.quantile([np.linalg.norm(b_t_m[:3,3]-base_t_marker_median[:3,3]) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[0])
-        r_err_quant = np.quantile([calc_rotational_difference(b_t_m, base_t_marker_median) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[1])
+        r_err_quant = np.quantile([rotational_difference(b_t_m, base_t_marker_median) for b_t_m in b_t_m_s], 1-base_t_gripper_outlier_quantiles[1])
 
         for idx, (b_t_g, c_t_m) in enumerate(zip(proto_data.base_t_gripper_s, camera_t_marker_s)):
             not_None:bool = c_t_m is not None
             low_t_err:bool = not_None and np.linalg.norm((b_t_g @ gripper_t_cam @ c_t_m)[:3,3] - base_t_marker_median[:3,3]) <= t_err_quant
-            low_r_err:bool = not_None and calc_rotational_difference(b_t_g @ gripper_t_cam @ c_t_m, base_t_marker_median) <= r_err_quant
+            low_r_err:bool = not_None and rotational_difference(b_t_g @ gripper_t_cam @ c_t_m, base_t_marker_median) <= r_err_quant
 
             if not low_t_err or not low_r_err:
                 camera_t_marker_s[idx] = None
@@ -120,7 +118,7 @@ def check_output_data(
 
 
     translational_errors_mm = [np.linalg.norm(b_t_a[:3,3]-actual_base_t_marker[:3,3])*1000 for b_t_a in base_t_marker_s]
-    rotational_errors_deg = [np.rad2deg(calc_rotational_difference(b_t_a[:3,:3], actual_base_t_marker[:3,:3])) for b_t_a in base_t_marker_s]
+    rotational_errors_deg = [np.rad2deg(rotational_difference(b_t_a[:3,:3], actual_base_t_marker[:3,:3])) for b_t_a in base_t_marker_s]
 
     # plot results:
     fig = plt.figure(figsize = (12, 6))
@@ -206,6 +204,11 @@ if __name__ == "__main__":
         help = f"The marker type/configuration", choices=list(DEFAULT_MARKER_CONFIGS.keys()),
     )
 
+    parser.add_argument(
+        "--depth-filter", type = str, default="standard", 
+        help = f"How to post-process the depth frame", choices=list(DEPTH_OPTIMIZATION_CONFIGS.keys()),
+    )
+
     parser.add_argument("--pose-outlier-quants", type=float, default=[0.2,0.2], nargs=2, help="The quantiles of base_t_marker estimates to remove 1st arg: translation, 2nd arg: rotation")
 
     parser.add_argument("--no-result-analysation", action = "store_false", help = "If used there wont by any result analysation (pose deviation analysis)", dest = "analyze_results")
@@ -231,7 +234,8 @@ if __name__ == "__main__":
         proto_data = gather_robot_data(
             number_of_positions = args.max_number_positions,
             stabilisation_timeout=args.stabilisation_timeout,
-            position_file = args.robot_positions_path
+            position_file = args.robot_positions_path,
+            depth_filter_config=DEPTH_OPTIMIZATION_CONFIGS[args.depth_filter]
         )
     else:
         proto_data = ProtoRobotData.from_folder(args.output_folder)

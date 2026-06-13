@@ -2,12 +2,15 @@
 from deoxys.franka_interface import FrankaInterface
 from deoxys.experimental.motion_utils import reset_joints_to
 from deoxys import config_root
-import pyrealsense2 as rs
 
-import cv2
+import pyrealsense2 as rs
 import numpy as np
-import json, os, sys, time
+import os, time
+
 from shared.src.shared.proto_robot_data import *
+
+from .depth_filtering import *
+
 
 def extract_intrinsics(cam_intrinsics) -> tuple[np.ndarray,list[float],np.ndarray, list[float]]:
     """
@@ -18,12 +21,14 @@ def extract_intrinsics(cam_intrinsics) -> tuple[np.ndarray,list[float],np.ndarra
     camera_mat = np.array([[cam_intrinsics.fx, 0, cam_intrinsics.ppx], [0, cam_intrinsics.fy, cam_intrinsics.ppy], [0,0,1]])
     return camera_mat, cam_intrinsics.coeffs
 
+
 def gather_robot_imgs_eefs(
         robot_interface,
         image_pipeline:rs.pipeline,
         depth_scale:float,
-        robot_positions:list[list[float]],
-        stabilisation_timeout:float = 0.0
+        robot_positions:np.ndarray,
+        depth_filter_pipeline,
+        stabilisation_timeout:float = 0.0,
     ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     """
     Takes an robot and image interface and moves the robot to the positions.
@@ -58,8 +63,10 @@ def gather_robot_imgs_eefs(
         aligned_frames = align.process(frames)
 
         bgr_frame = np.ascontiguousarray(aligned_frames.get_color_frame().get_data())
-        depth_frame = np.asanyarray(aligned_frames.get_depth_frame().get_data())
-        depth_frame_scaled = depth_frame * depth_scale
+
+        raw_depth_frame = aligned_frames.get_depth_frame()
+        processed_depth_frame = depth_filter_pipeline.optimize_depth_image(raw_depth_frame)
+        depth_frame_scaled = np.asanyarray(processed_depth_frame.get_data()) * depth_scale
 
         depth_images.append(depth_frame_scaled.copy())
         bgr_images.append(bgr_frame.copy())
@@ -68,8 +75,10 @@ def gather_robot_imgs_eefs(
 
     return depth_images, bgr_images, base_t_gripper_s
 
+
 def gather_robot_data(
         number_of_positions:None|int = None,
+        depth_filter_config:DepthOptimisationConfig = DepthOptimisationConfig(),
         stabilisation_timeout:float = 0.0,
         position_file:str = "positions_panda_personpov_19.csv"
     ) -> ProtoRobotData:
@@ -105,11 +114,14 @@ def gather_robot_data(
     rgb_cam_mat, rgb_cam_dist_coef = extract_intrinsics(rgb_intrinsics)
     depth_scale = pipeline.get_active_profile().get_device().first_depth_sensor().get_depth_scale()
 
+    depth_filter_pipeline = DepthFilterPipeline(depth_filter_config)
+
     depth_images, bgr_images, base_t_gripper_s = gather_robot_imgs_eefs(robot_interface=robot_interface,
                                                                         image_pipeline=pipeline,
                                                                         depth_scale=depth_scale,
                                                                         robot_positions=robot_positions,
-                                                                        stabilisation_timeout=stabilisation_timeout
+                                                                        stabilisation_timeout=stabilisation_timeout,
+                                                                        depth_filter_pipeline = depth_filter_pipeline
                                                                         )
     pipeline.stop()
     robot_interface.close()
