@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, kw_only=True)
 class DepthOptimisationConfig:
-    decimation_magnitude: int = 2
+    decimation_magnitude: int = 1
 
     # Spatial filter
     spatial_alpha: float = 0.35

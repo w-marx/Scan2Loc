@@ -1,6 +1,6 @@
 import numpy as np
 import os, sys, json, cv2, shutil
-from assertion_helpers import assert_intrinsic_mat, assert_homogeneous_mat
+from .assertion_helpers import assert_intrinsic_mat, assert_homogeneous_mat
 
 class ProtoRobotData:
     def __init__(
@@ -11,8 +11,8 @@ class ProtoRobotData:
             bgr_images:np.ndarray,
             base_t_gripper_s:np.ndarray,
     ):
-        assert depth_images.shape[:3] == bgr_images.shape[:3]
-        assert depth_images.ndim == 3
+        assert depth_images.shape[:3] == bgr_images.shape[:3], f"depth images shape: {depth_images.shape}, bgr images: {bgr_images.shape}"
+        assert depth_images.ndim == 3, f"depth images shape: {depth_images.shape} != BxHxW"
         self._depth_images = depth_images
 
         assert assert_intrinsic_mat(cam_intrinsic_mtx, hxw_img=depth_images[0])
@@ -35,7 +35,7 @@ class ProtoRobotData:
         │   └── multiple folders (000000 - min(999999, number_of_positions)) with the contents:
         │       ├──  rgb.png
         │       ├──  poses.json
-        │       └──  depth.npy
+        │       └──  depth.npz
         └── robot_cam_calibration.json
 
         robot_cam_calibration.json has the following attributes:
@@ -59,8 +59,12 @@ class ProtoRobotData:
         for i, (depth_image, bgr_image, base_t_gripper) in enumerate(zip(self.depth_images, self.bgr_images, self.base_t_gripper_s)):
             # save robot images
             os.makedirs(f"{output_folder}/robot/{i:06d}", exist_ok=True)
-            cv2.imwrite(f"{output_folder}/robot/{i:06d}/rgb.png",bgr_image)
-            np.save(f"{output_folder}/robot/{i:06d}/depth.npy", depth_image)
+            cv2.imwrite(
+                f"{output_folder}/robot/{i:06d}/rgb.png",
+                bgr_image,
+                [cv2.IMWRITE_PNG_COMPRESSION, 9]
+            )
+            np.savez_compressed(f"{output_folder}/robot/{i:06d}/depth.npz", depth = depth_image.astype(np.float32))
 
             pose_dict = {
                 "base_t_gripper": base_t_gripper.tolist(),
@@ -107,7 +111,7 @@ class ProtoRobotData:
             cam_dist_coef = json_file["camera_distortion_coefficients"]
 
         folders = sorted(os.listdir(f"{location}/robot"))
-        depth_images = np.array([np.load(f"{location}/robot/{folder}/depth.npy") for folder in folders])
+        depth_images = np.array([np.load(f"{location}/robot/{folder}/depth.npz")["depth"] for folder in folders])
 
         return cls(
             depth_images=depth_images,

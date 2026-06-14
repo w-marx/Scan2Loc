@@ -65,7 +65,7 @@ class GatheredRobotData:
         ├── robot
         │   └── multiple folders
         │       ├──  rgb.png
-        │       ├──  depth.npy
+        │       ├──  depth.npz
         │       └──  poses.json
         ├── gripper_t_cam.npy
         ├── marker_detector_config.json
@@ -91,7 +91,7 @@ class GatheredRobotData:
             location = f"{folder_path}/robot/{folder}"
 
             robot_bgr_images.append(cv2.imread(f"{location}/rgb.png"))
-            robot_depth_images.append(np.load(f"{location}/depth.npy"))
+            robot_depth_images.append(np.load(f"{location}/depth.npz")['depth'])
 
             poses_dict = json.load(open(f"{location}/poses.json"))
 
@@ -132,8 +132,12 @@ class GatheredRobotData:
             robot_folder = f"{location}/robot/{str(i).zfill(padding)}"
             os.makedirs(robot_folder, exist_ok=True)
 
-            cv2.imwrite(f"{robot_folder}/rgb.png", self.bgr_images[i])
-            np.save(f"{robot_folder}/depth.npy", self.depth_images[i])
+            cv2.imwrite(
+                f"{robot_folder}/rgb.png", 
+                self.bgr_images[i],
+                [cv2.IMWRITE_PNG_COMPRESSION, 9]
+            )
+            np.savez_compressed(f"{robot_folder}/depth.npz", depth = self.depth_images[i].astype(np.float32))
 
             poses_dict = {
                 "base_t_gripper": self.base_t_gripper_s[i].tolist(),

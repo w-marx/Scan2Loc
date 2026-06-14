@@ -9,7 +9,7 @@ from shared.gathered_robot_data import GatheredRobotData
 from shared.se3_utilities import compute_pose_pseudo_median, rotational_difference
 
 
-from .depth_filtering import DEPTH_OPTIMIZATION_CONFIGS
+from depth_filtering import DEPTH_OPTIMIZATION_CONFIGS
 
 
 def optimize_robot_data(
@@ -17,7 +17,7 @@ def optimize_robot_data(
         name: str = "rob_data1",
         marker_detector: MarkerDetector = None,
         gripper_t_cam: np.ndarray|None = None,
-        base_t_gripper_outlier_quantiles:tuple[float, float] = (0.2, 0.2)
+        base_t_gripper_outlier_quantiles:tuple[float, float] = (0.0, 0.0)
     )->GatheredRobotData:
     """
     Processed Raw gathered robot data to get a GatheredRobotData instance
@@ -118,7 +118,7 @@ def check_output_data(
 
 
     translational_errors_mm = [np.linalg.norm(b_t_a[:3,3]-actual_base_t_marker[:3,3])*1000 for b_t_a in base_t_marker_s]
-    rotational_errors_deg = [np.rad2deg(rotational_difference(b_t_a[:3,:3], actual_base_t_marker[:3,:3])) for b_t_a in base_t_marker_s]
+    rotational_errors_deg = [np.rad2deg(rotational_difference(b_t_a, actual_base_t_marker)) for b_t_a in base_t_marker_s]
 
     # plot results:
     fig = plt.figure(figsize = (12, 6))
@@ -183,6 +183,8 @@ Translation in mm cov & corr matrix:
     pos_3d_plot.set_ylabel("y-pos mm")
     pos_3d_plot.set_zlabel("z-pos mm")
 
+    if not os.path.exists(output_folder):
+        print(f"could not find folder {output_folder} for analysis storage")
     if save_result:
         fig.savefig(f"{output_folder}/error_analysis.pdf")
     plt.show()
@@ -209,7 +211,7 @@ if __name__ == "__main__":
         help = f"How to post-process the depth frame", choices=list(DEPTH_OPTIMIZATION_CONFIGS.keys()),
     )
 
-    parser.add_argument("--pose-outlier-quants", type=float, default=[0.2,0.2], nargs=2, help="The quantiles of base_t_marker estimates to remove 1st arg: translation, 2nd arg: rotation")
+    parser.add_argument("--pose-outlier-quants", type=float, default=[0.0,0.0], nargs=2, help="The quantiles of base_t_marker estimates to remove 1st arg: translation, 2nd arg: rotation")
 
     parser.add_argument("--no-result-analysation", action = "store_false", help = "If used there wont by any result analysation (pose deviation analysis)", dest = "analyze_results")
     parser.add_argument("--no-pdf-store", action = "store_false", help = "If used the analysis wont be stored into the dataset", dest = "save_analysis_results")

@@ -7,9 +7,9 @@ import pyrealsense2 as rs
 import numpy as np
 import os, time
 
-from shared.src.shared.proto_robot_data import *
+from shared.proto_robot_data import *
 
-from .depth_filtering import *
+from depth_filtering import *
 
 
 def extract_intrinsics(cam_intrinsics) -> tuple[np.ndarray,list[float],np.ndarray, list[float]]:

@@ -1,8 +1,4 @@
 *.ipynb filter=nbstripout
 *.ipynb diff=ipynb
 
-*.png filter=lfs
-*.jpg filter=lfs
-*.jpeg filter=lfs
-*.npz filter=lfs
-*.npy filter=lfs
+*.vrs filter=lfs
