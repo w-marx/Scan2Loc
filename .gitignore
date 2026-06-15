@@ -96,31 +96,11 @@ __pypackages__/
 
 
 # Environments
+data_gathering/data_gather_env
 .env
 env/
-.venv
-venv/
-data_preprocessing/conda_env
-data_gathering/data_gather_env
-data_preprocessing/data_prep_env
-datasets
 
-
-# PyCharm
-#   JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#   be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#   and can be added to the global gitignore or merged into this file.  For a more nuclear
-#   option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
-
-# Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#   you could uncomment the following to ignore the entire vscode folder
-# .vscode/
-
-# Ruff stuff:
 .ruff_cache/
 
 # PyPI configuration file
@@ -135,18 +115,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Custom additions
-datasets/
+external/
+notebooks/*.pt
+notebooks/*.ts
+notebooks/*.mp4
+
 processed_datasets/
-
-pose_estimation/LightGlue
-pose_estimation/LoMa
-pose_estimation/map-anything
-pose_estimation/env
-
-pose_estimation/out_data_he
-pose_estimation/out_data_re
-
-pose_estimation/*.pt
-pose_estimation/*.ts
-pose_estimation/*.mp4
-pose_estimation/tum

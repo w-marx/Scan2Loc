@@ -9,10 +9,10 @@ import torch
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_mxnx3_np_uint8_image_batch, assert_mxnx3_np_uint8_image
 
-from predictor_handling import *
-from extractors_and_matchers import *
-from geometric_utilities.pnpl_optimizer import *
-from geometric_utilities.line_utilities import * 
+from .predictor_handling import *
+from .extractors_and_matchers import *
+from .geometric_utilities.pnpl_optimizer import *
+from .geometric_utilities.line_utilities import * 
 
 
 @dataclass(frozen=True, kw_only=True)

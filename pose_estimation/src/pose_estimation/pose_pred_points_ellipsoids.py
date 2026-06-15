@@ -7,17 +7,17 @@ from dataclasses import dataclass
 
 from shared.assertion_helpers import *
 
-from geometric_utilities.union_find import UnionFind
-from geometric_utilities.pypose_pne_optimizer import *
-from geometric_utilities.ellipsoid_utilities_numpy import *
-from geometric_utilities.pne_delta_pose_otimizer import *
+from .geometric_utilities.union_find import UnionFind
+from .geometric_utilities.pypose_pne_optimizer import *
+from .geometric_utilities.ellipsoid_utilities_numpy import *
+from .geometric_utilities.pne_delta_pose_otimizer import *
 
-from geometric_utilities.foreground_segmentation import Segmenter, display_image_masks, YOLOv26Segmenter, Sam3Prompt, SAM3Segmenter
-from small_utilities.image_augmentation import *
-from small_utilities.sheduler import *
-from predictor_handling import *
-from extractors_and_matchers import *
-from geometric_utilities.packed_bool_mask_storage import ImageMaskStorage
+from .geometric_utilities.foreground_segmentation import Segmenter, display_image_masks, YOLOv26Segmenter, Sam3Prompt, SAM3Segmenter
+from .small_utilities.image_augmentation import *
+from .small_utilities.sheduler import *
+from .predictor_handling import *
+from .extractors_and_matchers import *
+from .geometric_utilities.packed_bool_mask_storage import ImageMaskStorage
 
 
 

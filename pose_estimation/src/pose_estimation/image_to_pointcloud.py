@@ -10,7 +10,7 @@ from tqdm import tqdm
 from shared.se3_utilities import compute_pose_pseudo_median
 from shared.assertion_helpers import *
 
-from geometric_utilities.point_utilities import set_outliers_to_nan
+from .geometric_utilities.point_utilities import set_outliers_to_nan
 
 def kabsch_umeyama(A:np.ndarray, B:np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
     """

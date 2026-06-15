@@ -1,12 +1,12 @@
 import cv2
 import numpy as np
-from predictor_handling import *
-from extractors_and_matchers import *
-from shared.assertion_helpers import assert_intrinsic_mat
 
+from shared.assertion_helpers import assert_intrinsic_mat
 from shared.assertion_helpers import assert_mxn_np_float_image_batch, assert_mxnx3_np_uint8_image_batch
 
-from robot_environment import RobotEnvironment
+from .predictor_handling import *
+from .extractors_and_matchers import *
+from .robot_environment import RobotEnvironment
 
 class OnlyPointsPredictor(PosePredictor):
     def __init__(

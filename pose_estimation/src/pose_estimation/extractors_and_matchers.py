@@ -8,11 +8,11 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 
-
 from shared.assertion_helpers import *
-from geometric_utilities.ransac_pose_estimation import * 
-from small_utilities.image_augmentation import * 
-from small_utilities.sheduler import *
+
+from .geometric_utilities.ransac_pose_estimation import * 
+from .small_utilities.image_augmentation import * 
+from .small_utilities.sheduler import *
 
 class ExtractAndMatch(ABC):
 

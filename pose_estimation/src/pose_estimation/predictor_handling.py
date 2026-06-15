@@ -7,8 +7,8 @@ from shared.se3_utilities import *
 from shared.assertion_helpers import *
 
 
-from geometric_utilities.slam2mp4 import FeatureDrawing
-from geometric_utilities.time_tracker import TimeTracker
+from .geometric_utilities.slam2mp4 import FeatureDrawing
+from .geometric_utilities.time_tracker import TimeTracker
 
 
 class PosePredictor(ABC):

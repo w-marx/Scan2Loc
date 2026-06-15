@@ -8,13 +8,13 @@ from shared.assertion_helpers import assert_homogeneous_mat, assert_intrinsic_ma
 from shared.se3_utilities import translational_difference, rotational_difference, ate_rmse, rte_rotational_errors_rmse, rte_translational_errors_rmse
 from shared.image_camera_manipulation import create_3d_camera
 
-from robot_environment import RobotEnvironment
-from headset_data import HeadsetData
-from geometric_utilities.time_tracker import TimeTracker
-from geometric_utilities.slam2mp4 import VideoGenerator, FeatureDrawing, InfoCard
+from .robot_environment import RobotEnvironment
+from .headset_data import HeadsetData
+from .geometric_utilities.time_tracker import TimeTracker
+from .geometric_utilities.slam2mp4 import VideoGenerator, FeatureDrawing, InfoCard
 
 
-from predictor_handling import PosePredictor
+from .predictor_handling import PosePredictor
 
 
 def calculate_reprojection_metrics(
@@ -208,12 +208,12 @@ class PredictionOnDataset:
         print(f"est_base_t_cam subcomponent times:\n")
         self._est_base_t_cam_time_tracker.print_report()
 
-        print(f"\n\nAvg. error: {self.avg_translational_error*1000:.1f}mm and {np.rad2deg(self.avg_rotational_error):.1f}°")
-        print(f"Median. error: {self.median_translational_error*1000:.1f}mm and {np.rad2deg(self.median_rotational_error):.1f}°")
-        print(f"ATE RMSE: {self.ate_translation_rmse * 1000:.1f}mm and {np.rad2deg(self.ate_rot_rmse):.1f}°")
-        print(f"RTE RMSE: {self.rte_translation_rmse * 1000:.1f}mm and {np.rad2deg(self.rte_rotational_rmse):.1f}°")
-        print(f"avg reprojection error: {format_optional(self.avg_reprojection_error, fmt=".1f")}px")
-        print(f"median reprojection error: {format_optional(self.median_reprojection_error, fmt=".1f")}px")
+        print(f"\n\nAvg. error: {self.avg_translational_error*1000:.1f} mm and {np.rad2deg(self.avg_rotational_error):.1f}°")
+        print(f"Median. error: {self.median_translational_error*1000:.1f} mm and {np.rad2deg(self.median_rotational_error):.1f}°")
+        print(f"ATE RMSE: {self.ate_translation_rmse * 1000:.1f} mm and {np.rad2deg(self.ate_rot_rmse):.1f}°")
+        print(f"RTE RMSE: {self.rte_translation_rmse * 1000:.1f} mm and {np.rad2deg(self.rte_rotational_rmse):.1f}°")
+        print(f"avg reprojection error: {format_optional(self.avg_reprojection_error, fmt=".1f")} px")
+        print(f"median reprojection error: {format_optional(self.median_reprojection_error, fmt=".1f")} px")
 
 
     def get_subcomponent_times_est_base_t_cam_call(self)-> list[tuple[str, float]]:

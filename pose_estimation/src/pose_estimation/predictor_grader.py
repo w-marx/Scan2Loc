@@ -6,12 +6,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from robot_environment import RobotEnvironment
-from headset_data import HeadsetData
-from geometric_utilities.time_tracker import TimeTracker
-from geometric_utilities.slam2mp4 import VideoGenerator, FeatureDrawing, InfoCard
-from prediction_on_dataset import *
-from predictor_handling import PosePredictor
+from .robot_environment import RobotEnvironment
+from .headset_data import HeadsetData
+from .geometric_utilities.time_tracker import TimeTracker
+from .geometric_utilities.slam2mp4 import VideoGenerator, FeatureDrawing, InfoCard
+from .prediction_on_dataset import *
+from .predictor_handling import PosePredictor
 
 
 @dataclass(frozen=True, kw_only=True)
