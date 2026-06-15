@@ -4,6 +4,7 @@ import open3d as o3d
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 from dataclasses import dataclass
+import logging
 
 from shared.assertion_helpers import *
 
@@ -58,7 +59,7 @@ def match_point_clouds(
         if point_cloud_matching_config.max_centroid_dist is not None:
             object_avg_centers.append(np.mean(pc_3d, axis = 0))
 
-        if point_cloud_matching_config.max_color_dist is not None:
+        if point_cloud_matching_config.max_color_dist is not None and bgr_images is not None:
             pc_color = bgr_images[imgidx][mask > 0]
             object_avg_colors.append(np.mean(pc_color, axis = 0))
 
@@ -527,7 +528,7 @@ class EllipsoidPredictor(PosePredictor):
         time_tracker.add_time_stamp("Matching the 2d gaussians")
 
         if proj_match_idx_s.shape[0] < self.min_number_matched_ellipsoids_for_opt:
-            print(f"to few ellipsoids for optimisation: {proj_match_idx_s.shape[0]}")
+            logging.debug(f"to few ellipsoids for optimisation: {proj_match_idx_s.shape[0]}")
             return None
 
         cam2_t_base_opt = self.pne_optimizer.optimize_pne(

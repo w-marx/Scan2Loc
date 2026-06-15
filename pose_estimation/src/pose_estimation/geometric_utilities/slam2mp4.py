@@ -17,10 +17,13 @@ class FeatureStyleConfig:
     point_alpha:float = 0.8
     arrow_alpha:float = 0.6
 
-    unmatched_alpha:float = 1.0
+    unmatched_alpha:float = 0.1
     unmatched_line_with = 1
     unmatched_point_size = 5
     unmatched_color = 'grey'
+
+    overlay_font_size:int = 20
+
 
 class InfoCard():
     def __init__(
@@ -115,7 +118,7 @@ class FeatureDrawing:
         if text:
             self.ax.text(
                 10, 30, text,
-                fontsize=10,
+                fontsize=self.sc.overlay_font_size,
                 color='white',
                 fontweight='bold',
                 family='monospace',

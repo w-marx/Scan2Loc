@@ -6,6 +6,7 @@ import torch
 import open3d as o3d
 import sys, os
 from tqdm import tqdm
+import logging
 
 from shared.se3_utilities import compute_pose_pseudo_median
 from shared.assertion_helpers import *
@@ -97,7 +98,7 @@ def align_point_clouds_icp(
 
     ref_t_pci_s = [np.eye(4)]
 
-    print("aligning pointclouds using ICP")
+    logging.debug("aligning pointclouds using ICP")
     for pci in tqdm(o3d_point_clouds[1:]):
         reg_p2p = o3d.pipelines.registration.registration_icp(
             pci, 
@@ -112,6 +113,10 @@ def align_point_clouds_icp(
         ref_t_pci_s.append(np.linalg.inv(reg_p2p.transformation))
     
     ref_t_median_pci = compute_pose_pseudo_median(ref_t_pci_s)
+
+    if ref_t_median_pci is None:
+        logging.info("Alignment failed")
+        return point_clouds
 
     pci_t_median_pci_s = [np.linalg.inv(ref_t_pci) @ ref_t_median_pci for ref_t_pci in ref_t_pci_s]
 
@@ -156,10 +161,10 @@ XYZImageGenerationConfigs = {
 def generate_xyz_images(
         bgr_images:np.ndarray,
         base_t_cam_s: np.ndarray,
+        camera_intrinsics:np.ndarray,
         depth_images:np.ndarray | None = None,
-        camera_intrinsics:np.ndarray = None,
         config:XYZImageGenerationConfig = XYZImageGenerationConfig()
-)-> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+)-> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     :param bgr_images: A NxHxWx3-uint8/uint16/uint32/uint64/float32 numpy array of BGR images
     :param base_t_cam_s: A Nx4x4-float numpy array of base_t_cam homogeneous transformation matrices
@@ -200,12 +205,12 @@ def generate_xyz_images(
         if w_orig > h_orig+2:
             crop_amount = int((w_orig-h_orig)/2)
             bgr_images = bgr_images[:,:,crop_amount:-crop_amount,:]
-            depth_images = depth_images[:,:,crop_amount:-crop_amount]
+            depth_images = depth_images[:,:,crop_amount:-crop_amount] if depth_images is not None else depth_images
             camera_intrinsics[0,2] -= crop_amount
         elif h_orig > w_orig+2:
             crop_amount = int((h_orig-w_orig)/2)
             bgr_images = bgr_images[:,crop_amount:-crop_amount,:,:]
-            depth_images = depth_images[:, crop_amount:-crop_amount,:]
+            depth_images = depth_images[:, crop_amount:-crop_amount,:] if depth_images is not None else depth_images
             camera_intrinsics[1,2] -= crop_amount
 
 
@@ -213,7 +218,7 @@ def generate_xyz_images(
         bgr_images = bgr_images.astype(np.float32)/255.0 # wrong in the documentation :( needs 0-1
 
     views = []
-    print(f"image shape before processing: {bgr_images.shape}")
+    logging.debug(f"image shape before processing: {bgr_images.shape}")
     for image, base_t_cam in zip(bgr_images, base_t_cam_s):
         views.append({
             "img":image,
@@ -231,8 +236,8 @@ def generate_xyz_images(
     processed_views = generate_xyz_images.preprocess_inputs(views)
 
 
-    bgr_images = [generate_xyz_images.rgb(view['img'], view['data_norm_type'][0])[0] for view in processed_views]
-    bgr_images = [((img*255).astype(np.uint8) if img.dtype in [np.float16, np.float32, np.float64] else img) for img in bgr_images]
+    bgr_images_for_return = [generate_xyz_images.rgb(view['img'], view['data_norm_type'][0])[0] for view in processed_views]
+    bgr_images_for_return = np.array([((img*255).astype(np.uint8) if img.dtype in [np.float16, np.float32, np.float64] else img) for img in bgr_images_for_return])
 
     camera_intrinsics = [view['intrinsics'][0].cpu().numpy() for view in processed_views][0]
 
@@ -272,14 +277,14 @@ def generate_xyz_images(
         transform_points_to_old = kabsch_umeyama(camera_true_positions, camera_new_positions)
         world_xyz_images = transform_points_to_old(world_xyz_images.reshape(-1,3)).reshape(world_xyz_images.shape)
     else:
-        print("didnt do camera alignment")
+        logging.info("didnt do camera alignment")
     
     if config.iforest_contamination is not None:
         world_xyz_images = set_outliers_to_nan(world_xyz_images.reshape(-1,3), config.iforest_contamination).reshape(world_xyz_images.shape)
 
-    print(f"xyz images shape: {world_xyz_images.shape}")
-    assert np.array(bgr_images).shape == np.array(world_xyz_images).shape, f"bgr: {np.array(bgr_images).shape} xyz {np.array(world_xyz_images).shape}"
-    return bgr_images, world_xyz_images, camera_intrinsics
+    logging.debug(f"xyz images shape: {world_xyz_images.shape}")
+    assert np.array(bgr_images_for_return).shape == np.array(world_xyz_images).shape, f"bgr: {np.array(bgr_images_for_return).shape} xyz {np.array(world_xyz_images).shape}"
+    return bgr_images_for_return, world_xyz_images, camera_intrinsics
 
 
 def create_point_cloud_depth_reproject(
@@ -287,7 +292,7 @@ def create_point_cloud_depth_reproject(
         depth_cam_mtx:np.ndarray,
         base_t_camera_s:np.ndarray,
         distance_cutoff:float = 1.0,
-):
+)->np.ndarray:
     """
     Uses the depth images to create xyz-images and a point cloud
     !!! If color cam and depth cam are not Aligned the xyz-imgs cant really be used !!!
@@ -301,7 +306,7 @@ def create_point_cloud_depth_reproject(
     assert base_t_camera_s.shape == (depth_images.shape[0],4,4)
     assert 0 <= distance_cutoff
     assert depth_cam_mtx.shape == (3,3)
-    print(f"Creating simple point cloud with {depth_images.shape[0]}, {get_image_type_hxw(depth_images[0])} depth images")
+    logging.debug(f"Creating simple point cloud with {depth_images.shape[0]}, {get_image_type_hxw(depth_images[0])} depth images")
 
 
     fx, fy, cx, cy = depth_cam_mtx[0,0], depth_cam_mtx[1,1], depth_cam_mtx[0,2], depth_cam_mtx[1,2]
@@ -318,7 +323,7 @@ def create_point_cloud_depth_reproject(
         base_xyz1_points = (base_t_cam @ cam_xyz1_points.T).T
         base_xyz_images.append(base_xyz1_points[:, :3].reshape((h,w,3)))
 
-    return base_xyz_images
+    return np.array(base_xyz_images)
 
 
 def create_aligned_xyz_images(
@@ -344,7 +349,7 @@ def create_aligned_xyz_images(
 
         assert assert_mxnx3_np_uint8_image_batch(robot_bgr_images)
         assert robot_depth_images is None or assert_mxn_np_float_image_batch(robot_depth_images)
-        assert robot_depth_images.shape[:3] == robot_bgr_images.shape[:3]
+        assert robot_depth_images is None or robot_depth_images.shape[:3] == robot_bgr_images.shape[:3]
 
         assert assert_intrinsic_mat(intrinsic_camera_matrix)
 
@@ -367,7 +372,6 @@ def create_aligned_xyz_images(
                 depth_cam_mtx=intrinsic_camera_matrix,
                 base_t_camera_s=robot_base_t_robot_camera_s,
                 distance_cutoff=1.0,
-                visualize_point_cloud=True
             )
         
         if icp_config is not None:

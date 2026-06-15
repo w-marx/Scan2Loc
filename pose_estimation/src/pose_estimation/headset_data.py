@@ -1,4 +1,4 @@
-import json, os, shutil
+import json, os, shutil, logging
 import open3d as o3d
 import cv2
 import numpy as np
@@ -143,7 +143,7 @@ class HeadsetData:
         location = f"{folder_path}/{new_name if new_name is not None else self.name}"
 
         if os.path.exists(location):
-            print(f"Output folder already exists, deleting it ...")
+            logging.info(f"Output folder already exists, deleting it ...")
             shutil.rmtree(location)
 
         os.makedirs(name=location, exist_ok=True)
@@ -215,7 +215,7 @@ class HeadsetData:
 def create_robot_bound_headset_data(
         headset_data:HeadsetData,
         robot_data:GatheredRobotData,
-    )->HeadsetData | None:
+    )->HeadsetData:
     """
     Uses the robot_data to add labels to an HeadsetData object
     :param headset_data: A HeadsetData instance that will be the blueprint for the new object
@@ -224,6 +224,9 @@ def create_robot_bound_headset_data(
     """
 
     robot_base_t_marker_s = [m for m in robot_data.base_t_marker_s if m is not None]
+
+    if robot_data.marker_detector is None:
+        return headset_data
 
     headset_t_markers = robot_data.marker_detector.get_camera_t_marker(
         images=list(headset_data.bgr_image_s),
@@ -237,7 +240,7 @@ def create_robot_bound_headset_data(
     robot_base_t_marker = compute_pose_pseudo_median(robot_base_t_marker_s)
 
     base_t_headsets = [
-        ((robot_base_t_marker @ np.linalg.inv(h_t_m)) if h_t_m is not None else None)
+        ((robot_base_t_marker @ np.linalg.inv(h_t_m)) if (h_t_m is not None and robot_base_t_marker is not None) else None)
         for h_t_m in headset_t_markers
     ]
 

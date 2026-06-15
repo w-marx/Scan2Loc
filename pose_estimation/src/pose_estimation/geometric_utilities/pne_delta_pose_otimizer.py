@@ -58,8 +58,55 @@ def exp_se3(s:torch.Tensor, eps = 1e-8):
     T[:3, 3] = t
     return T
 
-def compute_pose(x_i, cam_t_base):
+
+def euler_to_matrix(angles):
+    """
+    angles: (3,) tensor with requires_grad=True
+    return: (3,3) rotation matrix, fully differentiable w.r.t. angles
+    """
+    rx, ry, rz = angles
+    cx, sx = torch.cos(rx), torch.sin(rx)
+    cy, sy = torch.cos(ry), torch.sin(ry)
+    cz, sz = torch.cos(rz), torch.sin(rz)
+
+    one = torch.ones((), device=angles.device)
+    zero = torch.zeros((), device=angles.device)
+
+    Rx = torch.stack([
+        torch.stack([one,  zero,  zero]),
+        torch.stack([zero,  cx,  -sx]),
+        torch.stack([zero,  sx,   cx])
+    ])
+    Ry = torch.stack([
+        torch.stack([ cy,  zero,  sy]),
+        torch.stack([zero,  one,  zero]),
+        torch.stack([-sy,  zero,  cy])
+    ])
+    Rz = torch.stack([
+        torch.stack([ cz, -sz, zero]),
+        torch.stack([ sz,  cz, zero]),
+        torch.stack([zero, zero, one])
+    ])
+
+    return Rz @ Ry @ Rx
+
+
+def compute_pose_exp_se3(x_i:torch.Tensor, cam_t_base:torch.Tensor)->torch.Tensor:
     return exp_se3(x_i) @ cam_t_base
+
+
+def compute_pose_euler(x_i:torch.Tensor, cam_t_base:torch.Tensor)->torch.Tensor:
+    angles = x_i[:3]
+    t = x_i[3:]
+
+    r_delta = euler_to_matrix(angles)
+
+    delta_pose = torch.eye(4, dtype=x_i.dtype, device=x_i.device)
+    delta_pose[:3, :3] = r_delta
+    delta_pose[:3, 3] = t
+
+    return delta_pose @ cam_t_base
+
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -121,7 +168,7 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
         def get_loss():
             proj_primal_conicals = project_dual_quadratics_to_primal_conicals_torch(
                 dual_quadratics=dual_quadratics,
-                cam_t_base=compute_pose(x_i, init_cam_t_base_torch),
+                cam_t_base=compute_pose_exp_se3(x_i, init_cam_t_base_torch),
                 intrinsic_mtx=torch_intrinsic
             )
             proj_mu_s, proj_sigma_s = primal_conics_to_gaussian_ellipses_torch(primal_conic_s=proj_primal_conicals)
@@ -144,11 +191,11 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
         self.time_tracker.add_time_stamp("Optimisation")
 
         if visualize_result is not None:
-            self.register_visualisation2(cam_t_base=compute_pose(x_i, init_cam_t_base_torch))
+            self.register_visualisation2(cam_t_base=compute_pose_exp_se3(x_i, init_cam_t_base_torch))
             self.register_visualisation_loss(losses)
             plt.show()
         
-        return compute_pose(x_i, init_cam_t_base_torch).detach().cpu().numpy()
+        return compute_pose_exp_se3(x_i, init_cam_t_base_torch).detach().cpu().numpy()
     
 
 
@@ -163,6 +210,7 @@ class PnEDeltaPoseAdamOptimizerConfig:
     max_itterations:int = 100
     convergence_threshold:float = 1e-6
     eps:float = 1e-8
+    delta_pose_mapping:Literal["euler", "se3_exp"] = "se3_exp"
     
     def __post_init__(self):
         pass
@@ -176,6 +224,12 @@ class PnEDeltaPoseAdamOptimizer(PnEOptimizer):
         super().__init__()
         self.time_tracker = time_tracker
         self.config = config
+
+        if config.delta_pose_mapping == "se3_exp":
+            self.apply_delta_pose = compute_pose_exp_se3
+        else:
+            self.apply_delta_pose = compute_pose_euler
+
 
     def optimize_pne(
         self,
@@ -202,7 +256,7 @@ class PnEDeltaPoseAdamOptimizer(PnEOptimizer):
         def get_loss():
             proj_primal_conicals = project_dual_quadratics_to_primal_conicals_torch(
                 dual_quadratics=dual_quadratics,
-                cam_t_base=compute_pose(x_i, init_cam_t_base_torch),
+                cam_t_base=self.apply_delta_pose(x_i, init_cam_t_base_torch),
                 intrinsic_mtx=torch_intrinsic
             )
             proj_mu_s, proj_sigma_s = primal_conics_to_gaussian_ellipses_torch(primal_conic_s=proj_primal_conicals)
@@ -235,8 +289,8 @@ class PnEDeltaPoseAdamOptimizer(PnEOptimizer):
         self.time_tracker.add_time_stamp("Optimisation")
 
         if visualize_result is not None:
-            self.register_visualisation2(cam_t_base=compute_pose(x_i, init_cam_t_base_torch))
+            self.register_visualisation2(cam_t_base=compute_pose_exp_se3(x_i, init_cam_t_base_torch))
             self.register_visualisation_loss(losses)
             plt.show()
         
-        return compute_pose(x_i, init_cam_t_base_torch).detach().cpu().numpy()
+        return compute_pose_exp_se3(x_i, init_cam_t_base_torch).detach().cpu().numpy()

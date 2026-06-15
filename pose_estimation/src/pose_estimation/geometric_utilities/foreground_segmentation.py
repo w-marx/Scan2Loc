@@ -11,7 +11,7 @@ class Segmenter(ABC):
         super().__init__()
     
     @abstractmethod
-    def get_object_masks(self, bgr_image:np.ndarray, visualize:bool = True)->np.ndarray | None:
+    def get_object_masks(self, bgr_image:np.ndarray, visualize:bool = True)->np.ndarray:
         """
         :param rgb_image: HxWx3-uint8 rgb image
         :param visualize: If yes the segmented objects will be visualized

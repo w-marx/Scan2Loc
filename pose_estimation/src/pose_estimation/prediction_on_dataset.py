@@ -2,7 +2,7 @@ import open3d as o3d
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from numbers import Number
+from numbers import Number, Real
 
 from shared.assertion_helpers import assert_homogeneous_mat, assert_intrinsic_mat
 from shared.se3_utilities import translational_difference, rotational_difference, ate_rmse, rte_rotational_errors_rmse, rte_translational_errors_rmse
@@ -54,10 +54,11 @@ def calculate_reprojection_metrics(
     return avg_error, median_error
 
 
-def format_optional(value:None | Number, fmt=".1f", default = "N/A"):
+def format_optional(value:Real | float | int | np.floating | None, fmt=".1f", default = "N/A", factor:float = 1.0):
     if value is None:
         return default
-    return f"{value:{fmt}}"
+    return f"{(value*factor):{fmt}}"
+
 
 class PredictionOnDataset:
     def __init__(self,
@@ -148,13 +149,14 @@ class PredictionOnDataset:
         self.timed_reprojection_errors_avg_med = []
         if point_cloud is not None:
             for i, m1, m2 in comparable_poses:
-                avg, med = calculate_reprojection_metrics(
+                avg__med = calculate_reprojection_metrics(
                     cam_t_base1=m1, 
                     cam_t_base2=m2, 
                     shared_intrinsic_mat=headset_data.intrinsic_cam_mtx,
                     points_3d=point_cloud
                 )
-            self.timed_reprojection_errors_avg_med.append((i, avg, med))
+                if avg__med is not None:
+                    self.timed_reprojection_errors_avg_med.append((i, avg__med[0], avg__med[0]))
 
         self.avg_reprojection_error = None
         self.median_reprojection_error = None
@@ -204,7 +206,7 @@ class PredictionOnDataset:
     def print_summary(self)->None:
         print(f"Success rate: {self.success_ratio} for {self.number_attempted_predictions} predictions")
 
-        print(f"Avg. time per prediction: {self.time_per_successful_prediction*1000:.1f}ms")
+        print(f"Avg. time per successful prediction: {format_optional(self.time_per_successful_prediction, fmt=".1f", factor=1000)}ms")
         print(f"est_base_t_cam subcomponent times:\n")
         self._est_base_t_cam_time_tracker.print_report()
 
@@ -216,23 +218,15 @@ class PredictionOnDataset:
         print(f"median reprojection error: {format_optional(self.median_reprojection_error, fmt=".1f")} px")
 
 
-    def get_subcomponent_times_est_base_t_cam_call(self)-> list[tuple[str, float]]:
-        """
-        Returns the avg. times and their subcomponents per est_base_t_cam call
-        :return: The time per call and a list of [subcomponent_name, avg time in seconds] tuples (sorted by time descending)
-        """
-        complete_time = self._predictions_whole_time_tracker.get_timestamp_name_avg_time("1 est_base_t_cam call")
-        sub_times = self._est_base_t_cam_time_tracker.return_averaged_times()
-        return complete_time, sub_times
-
-    def get_subcomponent_times_update_pose_call(self)->list[tuple[str, float]]:
-        """
-        Returns the avg. times and their subcomponents per update_pose call
-        :return: The time per call and a list of [subcomponent_name, avg time in seconds] tuples (sorted by time descending)
-        """
-        complete_time = self._predictions_whole_time_tracker.get_timestamp_name_avg_time("1 update_pose call")
-        sub_times = self._update_pose_time_tracker.return_averaged_times()
-        return complete_time, sub_times
+    #def get_subcomponent_times_est_base_t_cam_call(self)-> list[tuple[str, float]]:
+    #    """
+    #    Returns the avg. times and their subcomponents per est_base_t_cam call
+    #    :return: The time per call and a list of [subcomponent_name, avg time in seconds] tuples (sorted by time descending)
+    #    """
+    #    complete_time = self._predictions_whole_time_tracker.get_timestamp_name_avg_time("1 est_base_t_cam call")
+    #    sub_times = self._est_base_t_cam_time_tracker.return_averaged_times()
+    #    return complete_time, sub_times
+    
 
     def visualize_predictions(self, robot_env:RobotEnvironment|None = None, show_label:bool = False)->None:
         """

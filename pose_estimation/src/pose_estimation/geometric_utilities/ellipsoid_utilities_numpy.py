@@ -8,6 +8,7 @@ import scipy
 from scipy.optimize import linear_sum_assignment
 import numpy as np
 from dataclasses import dataclass
+import logging
 
 from shared.se3_utilities import r_t_to_hom
 from shared.assertion_helpers import *
@@ -261,13 +262,12 @@ def project_primal_quadratics_to_primal_conicals(
     return cam_primal_conic
 
 
-def filter_good_primal_conicals(primal_conicals:np.ndarray, cond:float = 1e10, min_eigenvalue:float = 1e-8, print_reductions = True)->np.ndarray:
+def filter_good_primal_conicals(primal_conicals:np.ndarray, cond:float = 1e10, min_eigenvalue:float = 1e-8)->np.ndarray:
     """
     Takes a batch of Bx3x3 primal conics and returns those that are numerical good conditioned
     :param primal_conic_s: A batch of Bx3x3 primal conics
     :param cond: The maximal cond of the primal conical
     :param min_eigenvalue: Minimal eigenvalue, small eigenvalues mean near-singular ellipses
-    :param print_reductions: If True will print if ones are removed.
     :return a Batch of B'x3x3 primal conics with B' <= B
     """
     assert primal_conicals.ndim == 3 and primal_conicals.shape[1:] == (3,3), f"wrong shape: {primal_conicals.shape}, should be Bx3x3"
@@ -280,8 +280,8 @@ def filter_good_primal_conicals(primal_conicals:np.ndarray, cond:float = 1e10, m
 
     validmask = finite  & (conds < cond) & (eigvals[:, 0] > min_eigenvalue)
 
-    if print_reductions and np.any(~validmask):
-        print(f"removed {np.sum(~validmask)} / {primal_conicals.shape[0]} primal conicals for bad numerical behaviour")
+    if np.any(~validmask):
+        logging.debug(f"removed {np.sum(~validmask)} / {primal_conicals.shape[0]} primal conicals for bad numerical behaviour")
     
     return primal_conicals[validmask]
 

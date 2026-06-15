@@ -189,6 +189,9 @@ class ExtractAndMatchLoMa(ExtractAndMatch):
         return kpts1, kpts2
 
 class ExtractAndMatchEffLoFTR(ExtractAndMatch):
+    _processor = None
+    _model = None
+
     def __init__(self, matching_threshhold:float = 0.3):
         """
         Extract and match based on efficient LoFTR
@@ -196,10 +199,11 @@ class ExtractAndMatchEffLoFTR(ExtractAndMatch):
         """
         assert 0 <= matching_threshhold <= 1, f"invalid threshhold: {matching_threshhold} not in [0,1]"
 
-        import transformers
-        from transformers import AutoImageProcessor, AutoModelForKeypointMatching
-        self.processor = AutoImageProcessor.from_pretrained("zju-community/efficientloftr") 
-        self.model = AutoModelForKeypointMatching.from_pretrained("zju-community/efficientloftr")
+        if ExtractAndMatchEffLoFTR._processor is None:
+            import transformers
+            from transformers import AutoImageProcessor, AutoModelForKeypointMatching
+            ExtractAndMatchEffLoFTR._processor = AutoImageProcessor.from_pretrained("zju-community/efficientloftr") 
+            ExtractAndMatchEffLoFTR._model = AutoModelForKeypointMatching.from_pretrained("zju-community/efficientloftr")
         self.matching_threshhold = matching_threshhold
 
     def get_features(self, img_rgb:np.ndarray):
@@ -216,12 +220,12 @@ class ExtractAndMatchEffLoFTR(ExtractAndMatch):
         :param features2: Another PIL Image
         :return: a tuple of image Points as 2 Nx2 numpy arrays (in the x-y format)
         """
-        inputs = self.processor([features1, features2], return_tensors="pt")
+        inputs = ExtractAndMatchEffLoFTR._processor([features1, features2], return_tensors="pt")
         with torch.no_grad():
-            outputs = self.model(**inputs)
+            outputs = ExtractAndMatchEffLoFTR._model(**inputs)
 
         image_sizes = [[(features1.height, features1.width),(features2.height, features2.width)]]
-        output = self.processor.post_process_keypoint_matching(outputs, image_sizes, threshold=self.matching_threshhold)[0]
+        output = ExtractAndMatchEffLoFTR._processor.post_process_keypoint_matching(outputs, image_sizes, threshold=self.matching_threshhold)[0]
 
         kpts1 = output["keypoints0"].cpu().numpy().astype(np.float32)
         kpts2 = output["keypoints1"].cpu().numpy().astype(np.float32)
@@ -239,6 +243,9 @@ class ExtractAndMatchWrapperConfig:
     ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise
     sheduler:type[Sheduler] = EMASheduler
     display_matching:bool = False
+
+    def __post_init__(self):
+        assert self.crop_augmentations is None or all([0 <= c < 1.0 for c in self.crop_augmentations]), f"Invalid: {self.crop_augmentations}"
 
 
 
@@ -259,7 +266,7 @@ class ExtractAndMatchWrapper:
         
         self.crop_augmentations = [Augmentation()]
         if config.crop_augmentations is not None:
-            self.crop_augmentations += [CropImage(x) for x in config.crop_augmentations if 0 <= x < 1.0]  
+            self.crop_augmentations = [CropImage(x) for x in config.crop_augmentations]  
 
         self.cam1_features = [self.extract_and_match.get_features(img) for img in cam1_bgr_images]
         self.cam1_xyz_images = cam1_xyz_images
@@ -296,7 +303,7 @@ class ExtractAndMatchWrapper:
             cam2_bgr_image: np.ndarray, 
             number_retry:int = 1,
             fd:FeatureDrawing | None = None
-        ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int]] | None:
         """
         Will try to match points until a pose is found or number_retry was reached
         :return None or base T_cam, points_image_1, points_image_2, world_obj_points, inliers

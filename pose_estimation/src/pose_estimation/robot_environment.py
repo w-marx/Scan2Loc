@@ -1,5 +1,6 @@
-import argparse, time
+import argparse, time, logging
 from shared.assertion_helpers import *
+from shared.se3_utilities import compute_pose_pseudo_median, translational_difference
 
 from .headset_data import *
 from .image_to_pointcloud import *
@@ -75,6 +76,7 @@ class RobotEnvironment:
         cls,
         robot_data:GatheredRobotData,
         number_of_sampled_datapoints: int = 10,
+        sample_datapoints_based_on_aruco_corectness:bool = False,
         only_sample_robot_datapoints_w_marker_estimates: bool = False,
         markers_use_advanced_removal: bool = False,
         est3d_xyz_image_gen_config:XYZImageGenerationConfig | None = XYZImageGenerationConfig(),
@@ -108,12 +110,21 @@ class RobotEnvironment:
         chosen_indices = [idx for idx, _ in enumerate(robot_bgr_images)]
 
         if number_of_sampled_datapoints <= len(robot_image_indices_w_base_t_marker) or only_sample_robot_datapoints_w_marker_estimates:
-            chosen_indices = robot_image_indices_w_base_t_marker[:number_of_sampled_datapoints]
+            if sample_datapoints_based_on_aruco_corectness:
+                base_t_marker_median = compute_pose_pseudo_median([c_t_m for c_t_m in robot_camera_t_marker_s if c_t_m is not None])
+                chosen_indices = sorted(
+                    robot_image_indices_w_base_t_marker, 
+                    key = lambda i: translational_difference(base_t_marker_median, robot_camera_t_marker_s[i])
+                )[:number_of_sampled_datapoints]
+            else:
+                chosen_indices = robot_image_indices_w_base_t_marker[:number_of_sampled_datapoints]
+
+
         else:
             indices_no_marker_pose = set(chosen_indices) - set(robot_image_indices_w_base_t_marker)
             chosen_indices = robot_image_indices_w_base_t_marker + list(indices_no_marker_pose)[:number_of_sampled_datapoints-len(robot_image_indices_w_base_t_marker)]
 
-        print(f"length of chosen indices {len(chosen_indices)}")
+        logging.debug(f"length of chosen indices {len(chosen_indices)}")
 
         robot_bgr_images = [robot_bgr_images[i] for i in chosen_indices]
         robot_depth_images = [robot_depth_images[i] for i in chosen_indices]
@@ -124,7 +135,7 @@ class RobotEnvironment:
             robot_bgr_images = robot_data.marker_detector.remove_markers(robot_bgr_images)
 
         # Generate 3D Point cloud
-        print("Generating point cloud...")
+        logging.debug("Generating point cloud...")
         robot_bgr_images, robot_base_xyz_imgs, robot_cam_intrinsic_mtx = create_aligned_xyz_images(
             robot_base_t_robot_camera_s = robot_base_t_robot_camera_s,
             robot_bgr_images = np.array(robot_bgr_images),
@@ -154,7 +165,7 @@ class RobotEnvironment:
         location = f"{folder_path}/{new_name if new_name is not None else self.name}"
 
         if os.path.exists(location):
-            print(f"Output folder already exists, deleting it ...")
+            logging.info(f"Output folder already exists, deleting it ...")
             shutil.rmtree(location)
         os.makedirs(name=location, exist_ok=True)
         
@@ -233,48 +244,3 @@ def visualize_robot_camera_environment_combo(robot_env:RobotEnvironment, headset
         to_vis_robot+to_vis_headset, 
         f"Robot: {robot_env.name} x Headset: {headset_data.name} visualization"
     )
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--robot-input-folder", type=str, default="./in_folder", help="Robot input Folder Location")
-    parser.add_argument("--headset-vrs-file", type=str, default="", help=".vrs file location")
-    parser.add_argument("--robot-output-folder", type=str, default="./out_data_r", help="Output Folder Location for the Robot environment")
-    parser.add_argument("--headset-output-folder", type=str, default="./out_data_h", help="Output Folder Location for the headset recording")
-
-
-    parser.add_argument("--number-of-sampled-datapoints", type=int, default=9999, help="Max number of input points to be sampled")
-    parser.add_argument("--dont-limit-to-only-aruco", action="store_false", dest="sample_only_w_aruco")
-    parser.add_argument("--dont-use-ai-marker-removal", action="store_false", dest="use_advanced_marker_removal")
-
-    parser.add_argument(
-        "--icp-alignment", type = str, default="no alginment", 
-        help = f"How to do the icp alignment", choices=list(ICPAlignmentConfigs.keys()),
-    )
-
-    args = parser.parse_args()
-
-    start_time = time.perf_counter()
-    
-    robot_data = GatheredRobotData.from_folder(args.robot_input_folder)
-    robot_env = RobotEnvironment.from_gathered_robot_data(
-        robot_data = robot_data,
-        number_of_sampled_datapoints=args.number_of_sampled_datapoints,
-        only_sample_robot_datapoints_w_marker_estimates = args.sample_only_w_aruco,
-        markers_use_advanced_removal=args.use_advanced_marker_removal,
-        est3d_xyz_image_gen_config = XYZImageGenerationConfig(), #TODO add args
-        est3d_xyz_icp_config=ICPAlignmentConfigs[args.icp_alignment]
-
-    )
-    robot_env.save(os.path.dirname(args.robot_output_folder), new_name=os.path.basename(args.robot_output_folder))
-
-
-    headset_data = HeadsetData.from_vrs_file(args.headset_vrs_file)
-    headset_data = create_robot_bound_headset_data(headset_data, robot_data)
-    headset_data.save(os.path.dirname(args.headset_output_folder), new_name=os.path.basename(args.headset_output_folder))
-
-    rob_load = RobotEnvironment.from_folder(args.robot_output_folder)
-    head_load = HeadsetData.from_folder(args.headset_output_folder)
-
-    visualize_robot_camera_environment_combo(robot_env=rob_load, headset_data=head_load)
-    print(f"Data processing took {(time.perf_counter() - start_time):.6f} seconds")

@@ -5,6 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from adjustText import adjust_text
+
 
 from .robot_environment import RobotEnvironment
 from .headset_data import HeadsetData
@@ -26,11 +28,16 @@ class GradablePosePredictor:
     creator:Callable[[RobotEnvironment, TimeTracker], PosePredictor]
     name: str
     number_retries: int = 1
-    category: None | str = None
+    category: str = ""
 
-    def __post__init__(self):
+    def __post_init__(self):
         assert isinstance(self.name, str)
         assert self.number_retries > 0
+
+    @property
+    def c_name(self):
+        return f"{self.category}-{self.name}"
+
 
 class NPredictors1DatasetGrader:
     def __init__(
@@ -59,7 +66,7 @@ class NPredictors1DatasetGrader:
             creation_subcomponent_time_tracker = TimeTracker()
             predictor = gradable_pose_predictor.creator(robot_env, creation_subcomponent_time_tracker)
             self.creation_subcomponent_time_trackers.append(creation_subcomponent_time_tracker)
-            self.creation_time_tracker.add_time_stamp(gradable_pose_predictor.name)
+            self.creation_time_tracker.add_time_stamp(gradable_pose_predictor.c_name)
 
             grader = PredictionOnDataset(
                 predictor=predictor,
@@ -75,27 +82,48 @@ class NPredictors1DatasetGrader:
         """
         times = {}
         for gpp, subc_tt in zip(self.gradable_pose_predictors, self.creation_subcomponent_time_trackers):
-            times[gpp.name] = (
-                self.creation_time_tracker.get_timestamp_name_avg_time(gpp.name),
+            times[gpp.c_name] = (
+                self.creation_time_tracker.get_timestamp_name_avg_time(gpp.c_name),
                 subc_tt.return_averaged_times()
             )
         return times
 
     def print_summary(self):
         """
-        Print the summary of the PosePredictors performances
+        Print a summary of the PosePredictor performances.
         """
-        print(f"{'name':<30} {'success ratio %':<20} {'T/frame [ms]':<15} {'avg t_err [mm]':<15} {'avg r_err [deg]':<15} {'med t_err [mm]':<15} {'med r_err [deg]':<15}\n")
+        rows = []
+
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
-            print(
-                f"{gpp.name:<30} "
-                f"{grader.success_ratio * 100:<20.2f} "
-                f"{grader.time_per_successful_prediction * 1000:<15.0f} "
-                f"{grader.avg_translational_error * 1000:<15.1f} "
-                f"{np.rad2deg(grader.avg_rotational_error):<15.1f}"
-                f"{grader.median_translational_error * 1000:<15.1f} "
-                f"{np.rad2deg(grader.median_rotational_error):<15.1f}"
+            rows.append({
+                "Name": gpp.c_name,
+                "Success [%]": grader.success_ratio * 100,
+                "T/frame [ms]": (
+                    grader.time_per_successful_prediction * 1000
+                    if grader.time_per_successful_prediction is not None
+                    else np.nan
+                ),
+                "Avg t_err [mm]": grader.avg_translational_error * 1000,
+                "Avg r_err [deg]": np.rad2deg(grader.avg_rotational_error),
+                "Med t_err [mm]": grader.median_translational_error * 1000,
+                "Med r_err [deg]": np.rad2deg(grader.median_rotational_error),
+            })
+
+        df = pd.DataFrame(rows)
+
+        print(
+            df.to_string(
+                index=False,
+                formatters={
+                    "Success [%]": "{:.2f}".format,
+                    "T/frame [ms]": "{:.0f}".format,
+                    "Avg t_err [mm]": "{:.1f}".format,
+                    "Avg r_err [deg]": "{:.1f}".format,
+                    "Med t_err [mm]": "{:.1f}".format,
+                    "Med r_err [deg]": "{:.1f}".format,
+                },
             )
+        )
 
 
     def plot_creation_times(self, ax):
@@ -145,7 +173,7 @@ class NPredictors1DatasetGrader:
             time = grader.time_per_successful_prediction
             if time is not None:
                 data.append({
-                    'Predictor': gpp.name,
+                    'Predictor': gpp.c_name,
                     'Time [ms]':time * 1000
                 })
         
@@ -156,18 +184,172 @@ class NPredictors1DatasetGrader:
         ax.set_xlabel("Avg time per successful prediction [ms]")
         ax.margins(y=0.15)
 
-        
-    def plot_hz_vs_rotational_error_deg(self, ax):
-        pass
 
-    def plot_hz_vs_translational_error_mm(self, ax):
-        pass
+    @staticmethod
+    def compute_pareto_frontier(
+            df, 
+            key1:str = "Hz [1/s]", 
+            smaller_better_1:bool = False,
+            key2:str = "Error [deg]", 
+            smaller_better_2:bool = True, 
+        ):
+        df_sorted = df.sort_values(by=key1, ascending=smaller_better_1)
 
-    def plot_translational_errors(self, ax):
+        pareto = []
+        best_error = float("inf") if smaller_better_2 else -float("inf")
+        for _, row in df_sorted.iterrows():
+            if (smaller_better_2 and row[key2] < best_error) or (not smaller_better_2 and row[key2] > best_error):
+                pareto.append(row)
+                best_error = row[key2]
+
+        return pd.DataFrame(pareto)
+
+
+    def plot_hz_vs_rotational_error_deg(self, ax, plot_frontier = False):
+        data = []
+
+        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
+            time = grader.time_per_successful_prediction
+            if time is not None:
+                data.append({
+                    "Predictor": gpp.c_name,
+                    "Error [deg]": np.rad2deg(grader.avg_rotational_error),
+                    "Hz [1/s]": 1 / time
+                })
+
+        df = pd.DataFrame(data)
+
+        sns.scatterplot(data=df,
+            x="Hz [1/s]",
+            y="Error [deg]",
+            hue="Predictor",
+            ax=ax,
+            s=80,
+            alpha=0.7
+        )
+
+        if plot_frontier:
+            pareto_df = self.compute_pareto_frontier(df)
+            pareto_df = pareto_df.sort_values("Hz [1/s]")
+
+            ax.plot(
+                pareto_df["Hz [1/s]"],
+                pareto_df["Error [deg]"],
+                color="black",
+                linewidth=1,
+                alpha=0.4,
+                label="Frontier"
+            )
+
+        texts = []
+
+        for _, row in df.iterrows():
+            texts.append(
+                ax.text(
+                    row["Hz [1/s]"],
+                    row["Error [deg]"],
+                    row["Predictor"],
+                    fontsize=8
+                )
+            )
+
+        adjust_text(
+            texts,
+            ax=ax,
+            arrowprops=dict(arrowstyle="-", lw=0.5, alpha=0.5)
+        )
+        ax.margins(x=0.15, y=0.2)
+        ax.invert_yaxis()
+        ax.set_title("FPS vs Rotational Error")
+        ax.legend()
+
+
+    def plot_hz_vs_translational_error_mm(self, ax, plot_frontier:bool = False, use_category:bool = False):
+        data = []
+
+        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
+            time = grader.time_per_successful_prediction
+            if time is not None:
+                data.append({
+                    "Predictor": gpp.c_name,
+                    "Name": gpp.name,
+                    "Translational error [mm]": grader.avg_translational_error*1000,
+                    "Hz [1/s]": 1 / time,
+                    "Category":gpp.category
+                })
+
+        df = pd.DataFrame(data)
+
+        hue_key = "Category" if use_category else "Predictor"
+        import seaborn as sns
+        palette = sns.color_palette("tab10", n_colors=df[hue_key].nunique())
+        color_map = dict(zip(sorted(df[hue_key].unique()), palette))
+
+
+        sns.scatterplot(data=df,
+            x="Hz [1/s]",
+            y="Translational error [mm]",
+            hue=hue_key,
+            palette=color_map,
+            ax=ax,
+            s=80,
+            alpha=0.7
+        )
+
+        if plot_frontier:
+            pareto_df = self.compute_pareto_frontier(df, key2="Translational error [mm]")
+            pareto_df = pareto_df.sort_values("Hz [1/s]")
+
+            ax.plot(
+                pareto_df["Hz [1/s]"],
+                pareto_df["Translational error [mm]"],
+                color="black",
+                linewidth=1,
+                alpha=0.4,
+                label="Frontier"
+            )
+
+        if use_category:
+            for category, cat_df in df.groupby("Category"):
+                cat_df = cat_df.sort_values("Hz [1/s]")
+
+                ax.plot(
+                    cat_df["Hz [1/s]"],
+                    cat_df["Translational error [mm]"],
+                    linewidth=1,
+                    alpha=0.5,
+                    color = color_map[category],
+                )
+
+        texts = []
+        for _, row in df.iterrows():
+            texts.append(
+                ax.text(
+                    row["Hz [1/s]"],
+                    row["Translational error [mm]"],
+                    (row["Name"] if use_category else row["Predictor"]),
+                    fontsize=8
+                )
+            )
+
+        adjust_text(
+            texts,
+            ax=ax,
+            arrowprops=dict(arrowstyle="-", lw=0.5, alpha=0.5)
+        )
+
+
+        ax.margins(x=0.15, y=0.2)
+        ax.invert_yaxis()
+        ax.set_title("FPS vs translational MAE")
+        ax.legend()
+
+
+    def plot_translational_errors(self, ax, use_log_scale:bool = False):
         data = []
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
             avg_error = np.round(grader.avg_translational_error * 1000, 1)
-            predictor_name = f"{gpp.name} (avg: {avg_error})"
+            predictor_name = f"{gpp.c_name} (avg: {avg_error})"
 
             error_dict = {frame: error for frame, error in grader.timed_translational_errors}
 
@@ -192,18 +374,20 @@ class NPredictors1DatasetGrader:
                 linewidth=2
             )
 
-        ax.legend()
+        if use_log_scale:
+            ax.set_yscale("log")
 
+        ax.legend()
         ax.set_title("Translational errors over time")
         ax.set_xlabel("Frame")
         ax.set_ylabel("Translational error [mm]")
 
 
-    def plot_rotational_errors(self, ax):
+    def plot_rotational_errors(self, ax, use_log_scale:bool = False):
         data = []
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
             avg_error = np.round(np.rad2deg(grader.avg_rotational_error), 1)
-            predictor_name = f"{gpp.name} (avg: {avg_error})"
+            predictor_name = f"{gpp.c_name} (avg: {avg_error})"
 
             error_dict = {frame: error for frame, error in grader.timed_rotational_errors}
 
@@ -230,20 +414,13 @@ class NPredictors1DatasetGrader:
 
         ax.legend()
 
+        if use_log_scale:
+            ax.set_yscale("log")
+
         ax.set_title("Rotational errors over time")
         ax.set_xlabel("Frame")
         ax.set_ylabel("Rotational error [deg]")
         
-
-
-
-    def _plot_hz_vs_metric(self,
-                           ax,
-                           hz:list[float],
-                           metric:list[float],
-                           names:list[str]
-                           )->None:
-        pass
 
     def visualize_predictions_3d(self):
         """
