@@ -183,7 +183,7 @@ class RobotEnvironment:
             with open(f"{robot_folder}/robot_base_t_robot_camera.json", 'w') as f:
                 json.dump(self.robot_base_t_robot_camera_s[i].tolist(), f, indent=4)
 
-    def visualize_3d_data(self, visualize:bool = True):
+    def visualize_3d_data(self, visualize:bool = True, visualize_robot_cameras:bool = True):
         """
         Visualizes the robot environment using open3d
         """
@@ -211,7 +211,9 @@ class RobotEnvironment:
                 scale=0.1
             ))
 
-        to_vis = [pcd, base_frame]+robot_camera_s
+        to_vis = [pcd, base_frame]
+        if visualize_robot_cameras:
+            to_vis += robot_camera_s
         if visualize:
             o3d.visualization.draw_geometries(to_vis, f"Robot environment: {self.name} visualization")
         return to_vis

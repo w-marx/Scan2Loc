@@ -228,7 +228,7 @@ class PredictionOnDataset:
     #    return complete_time, sub_times
     
 
-    def visualize_predictions(self, robot_env:RobotEnvironment|None = None, show_label:bool = False)->None:
+    def visualize_predictions(self, robot_env:RobotEnvironment|None = None, show_label:bool = False, vis_robot_cams:bool = False)->None:
         """
         Visualizes the predictions made by the predictor using open3d
         :param robot_env: RobotEnvironment or None, if not None will be added to the plot
@@ -241,7 +241,7 @@ class PredictionOnDataset:
             base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
             to_vis.append(base_frame)
         else:
-            to_vis = robot_env.visualize_3d_data(visualize=False)
+            to_vis = robot_env.visualize_3d_data(visualize=False, visualize_robot_cameras=vis_robot_cams)
 
         for i, (predicted_b_t_h, b_t_h) in enumerate(zip(self.predicted_base_t_headset_s, self._headset_data.robot_base_t_headset_s)):
             if b_t_h is not None and show_label:

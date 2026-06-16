@@ -19,6 +19,7 @@ from .small_utilities.sheduler import *
 from .predictor_handling import *
 from .extractors_and_matchers import *
 from .geometric_utilities.packed_bool_mask_storage import ImageMaskStorage
+from .geometric_utilities.ellipsoid_fitting import *
 
 
 
@@ -104,7 +105,7 @@ def images_to_primal_quadratics(
         xyz_images:np.ndarray,
         segmenter:Segmenter,
         matching_config:PointCloudMatchingConfig = PointCloudMatchingConfig(),
-        fitting_config:EllipsoidFittingConfig = EllipsoidFittingConfig(),
+        ellipsoid_fitter:EllipsoidFitter = SimpleEllipsoidFitter(),
         debug_vis_masks:bool = False,
 )-> tuple[np.ndarray, np.ndarray]:
     """
@@ -148,12 +149,11 @@ def images_to_primal_quadratics(
     fused_base_t_ellipsoid_s = []
     fused_primal_quaddratic_s = []
     for i,cluster in enumerate(clusters):
-        b_t_e__p_q = fit_ellipsoid_to_3d_point_cloud(
+        b_t_e__p_q = ellipsoid_fitter.fit_ellipsoid(
             np.concatenate(
                 [xyz_images[object_image_idxs[i]][mask_storage.see_mask(i)] for i in cluster],
                 axis = 0
-            ),
-            config=fitting_config
+            )
         )
         if b_t_e__p_q is None:
             continue
@@ -304,7 +304,7 @@ class EllipsoidPredictor(PosePredictor):
             ellipsoid_refinement_at_res: None | tuple[int, int] = None,
             matching_config:GaussianMatchingConfig = GaussianMatchingConfig(),
             ellipsoid_matching_config:PointCloudMatchingConfig = PointCloudMatchingConfig(),
-            ellipsoid_fitting_config:EllipsoidFittingConfig = EllipsoidFittingConfig(),
+            ellipsoid_fitter:EllipsoidFitter = SimpleEllipsoidFitter(),
             visualize_pne_optimisation:bool = False,
             visualize_matching:bool = False,
             visualize_environment_generation:bool = False,
@@ -361,7 +361,7 @@ class EllipsoidPredictor(PosePredictor):
             xyz_images=cam1_xyz_images,
             segmenter=cam1_segmenter,
             matching_config=ellipsoid_matching_config,
-            fitting_config=ellipsoid_fitting_config,
+            ellipsoid_fitter=ellipsoid_fitter,
             debug_vis_masks=self.visualize_segmentation_masks,
         )
         self.base_t_ellipsoid_s = b_t_e_s
@@ -376,7 +376,6 @@ class EllipsoidPredictor(PosePredictor):
             )
 
         time_tracker_init.add_time_stamp("Primal quadratics creation")
-
 
 
         self.extract_and_match_wrapper = ExtractAndMatchWrapper(
@@ -405,7 +404,7 @@ class EllipsoidPredictor(PosePredictor):
             ellipsoid_refinement_at_res: None | tuple[int, int] = None,
             matching_config:GaussianMatchingConfig = GaussianMatchingConfig(),
             ellipsoid_matching_config:PointCloudMatchingConfig = PointCloudMatchingConfig(),
-            ellipsoid_fitting_config:EllipsoidFittingConfig = EllipsoidFittingConfig(),
+            ellipsoid_fitter:EllipsoidFitter = SimpleEllipsoidFitter(),
             visualize_pne_optimisation:bool = False,
             visualize_matching:bool = False,
             visualize_environment_generation:bool = False,
@@ -429,7 +428,7 @@ class EllipsoidPredictor(PosePredictor):
             ellipsoid_refinement_at_res = ellipsoid_refinement_at_res,
             matching_config = matching_config,
             ellipsoid_matching_config = ellipsoid_matching_config,
-            ellipsoid_fitting_config = ellipsoid_fitting_config,
+            ellipsoid_fitter = ellipsoid_fitter,
             visualize_pne_optimisation = visualize_pne_optimisation,
             visualize_matching = visualize_matching,
             visualize_environment_generation = visualize_environment_generation,

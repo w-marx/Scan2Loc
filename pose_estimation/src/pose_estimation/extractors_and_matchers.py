@@ -241,7 +241,7 @@ class ExtractAndMatchWrapperConfig:
     )
     crop_augmentations:list[float] | None = None
     ransac_config:RansacPoseEstimationConfig = pose_estimation_ransaac_config_precise
-    sheduler:type[Sheduler] = EMASheduler
+    scheduler:type[Scheduler] = BlockingEMAScheduler
     display_matching:bool = False
 
     def __post_init__(self):
@@ -271,7 +271,7 @@ class ExtractAndMatchWrapper:
         self.cam1_features = [self.extract_and_match.get_features(img) for img in cam1_bgr_images]
         self.cam1_xyz_images = cam1_xyz_images
 
-        self.sheduler = config.sheduler(cam1_bgr_images.shape[0])
+        self.sheduler = config.scheduler(cam1_bgr_images.shape[0])
 
         # For debugging/additional information
         self.chosen_augmentations = defaultdict(int)

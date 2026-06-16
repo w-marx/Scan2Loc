@@ -440,104 +440,23 @@ def fit_primal_conic_to_2d_point_cloud(point_cloud:np.ndarray)->np.ndarray:
     return primal_conic
 
 
-@dataclass(kw_only=True, frozen=True)
-class EllipsoidFittingConfig:
-    contamination:float = 0.3
-    min_point_cloud_size:int = 10
-    visualize:bool = False
-
-
-def fit_ellipsoid_to_3d_point_cloud(
-        point_cloud:np.ndarray,
-        config:EllipsoidFittingConfig = EllipsoidFittingConfig(),
-    )->tuple[np.ndarray, np.ndarray] | None:
-    """
-    :param point_cloud: A Nx3 point cloud in the base_frame
-    :param config: How to do it
-    :return: a tuple of the base_t_ellipsoid hom. mtx (4x4) and the primal quadratics (4x4) or None if fitting failed
-    """
-    assert point_cloud.ndim == 2 and point_cloud.shape[-1] == 3
-
-    point_cloud = point_cloud[np.isfinite(point_cloud).all(axis=-1)]
-
-    if point_cloud.shape[0] < config.min_point_cloud_size:
-        return None
-
-    point_cloud = remove_outliers_from_point_cloud(point_cloud, contamination=config.contamination)
-
-    if point_cloud.shape[0] < config.min_point_cloud_size:
-        return None
-
-    # Get center
-    center = point_cloud.mean(axis=0)  # (3,)
-    pts_centered = point_cloud - center
-
-    cov_matrix = np.cov(pts_centered, rowvar=False)
-
-    eigvals, eigvecs = np.linalg.eigh(cov_matrix)
-    idx = np.argsort(eigvals)[::-1]
-    eigvecs = eigvecs[:, idx]
-
-    if np.linalg.det(eigvecs) < 0:
-        eigvecs[:, -1] *= -1
-
-    base_t_ellipsoid = r_t_to_hom(eigvecs, center)
-
-    # to local orientation
-    pts_local = (base_t_ellipsoid[:3, :3].T @ pts_centered.T).T  # (N,3)
-
-    # a b theta in local coordinate
-    a = np.max(np.abs(pts_local[:, 0]))
-    b = np.max(np.abs(pts_local[:, 1]))
-    c = np.max(np.abs(pts_local[:, 2]))
-
-    # quadric in world coordinate
-    q_ellipsoid = np.diag([1/a**2, 1/b**2, 1/c**2, -1.0])
-
-    ellipsoid_t_base = np.linalg.inv(base_t_ellipsoid)
-    primal_quadratic = ellipsoid_t_base.T @ q_ellipsoid @ ellipsoid_t_base
-
-    if config.visualize:
-        base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
-        to_vis = [base_frame]
-        pc_np = sample_points_in_primal_quadratic(base_t_ellipsoid, primal_quadratic)
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(pc_np)
-        pcd.paint_uniform_color([0,1,0])
-
-        pcd1 = o3d.geometry.PointCloud()
-        pcd1.points = o3d.utility.Vector3dVector(point_cloud)
-        pcd1.paint_uniform_color([1,0,0])
-
-        frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05)
-        frame.transform(base_t_ellipsoid)
-
-        to_vis += [pcd, pcd1, frame]
-        o3d.visualization.draw_geometries(to_vis, f"Ellipsoid fit visualization")    
-    
-    assert assert_primal_quadratic_hom_ellipsoid(primal_quadratic)
-
-    return base_t_ellipsoid, primal_quadratic
-
-
-
-def fuse_ellipsoids(base_t_ellipsoid_s:np.ndarray, primal_quadratic_s:np.ndarray, config:EllipsoidFittingConfig)->tuple[np.ndarray, np.ndarray] | None:
-    """
-    Fuses multiple ellipsoids into one, by generating a point cloud on its shells and fitting an ellipsoid to this point_cloud.
-    :param base_t_ellipsoid_s: Nx4x4 homogeneous transformation matrix from the base to the ellipsoid frames
-    :param primal_quadratic_s: Nx4x4 primal quadratic of the ellipsoids
-    :return: An 4x4 base_t_ellipsoid and 4x4 primal_quadratic or None if not successful
-    """
-    assert base_t_ellipsoid_s.shape[0] == primal_quadratic_s.shape[0]
-    assert all(assert_homogeneous_mat(m, size = 4) for m in base_t_ellipsoid_s)
-    assert all(assert_primal_quadratic_hom_ellipsoid(m) for m in primal_quadratic_s)
-
-    point_cloud = np.concatenate([
-        sample_points_in_primal_quadratic(b_t_e, p_q, resolution=20) 
-        for b_t_e, p_q in zip(base_t_ellipsoid_s, primal_quadratic_s)
-    ], axis = 0)
-
-    return fit_ellipsoid_to_3d_point_cloud(point_cloud= point_cloud, config=config)
+#def fuse_ellipsoids(base_t_ellipsoid_s:np.ndarray, primal_quadratic_s:np.ndarray, config:EllipsoidFittingConfig)->tuple[np.ndarray, np.ndarray] | None:
+#    """
+#    Fuses multiple ellipsoids into one, by generating a point cloud on its shells and fitting an ellipsoid to this point_cloud.
+#    :param base_t_ellipsoid_s: Nx4x4 homogeneous transformation matrix from the base to the ellipsoid frames
+#    :param primal_quadratic_s: Nx4x4 primal quadratic of the ellipsoids
+#    :return: An 4x4 base_t_ellipsoid and 4x4 primal_quadratic or None if not successful
+#    """
+#    assert base_t_ellipsoid_s.shape[0] == primal_quadratic_s.shape[0]
+#    assert all(assert_homogeneous_mat(m, size = 4) for m in base_t_ellipsoid_s)
+#    assert all(assert_primal_quadratic_hom_ellipsoid(m) for m in primal_quadratic_s)
+#
+#    point_cloud = np.concatenate([
+#        sample_points_in_primal_quadratic(b_t_e, p_q, resolution=20) 
+#        for b_t_e, p_q in zip(base_t_ellipsoid_s, primal_quadratic_s)
+#    ], axis = 0)
+#
+#    return fit_ellipsoid_to_3d_point_cloud(point_cloud= point_cloud, config=config)
 
 
 ##########################################

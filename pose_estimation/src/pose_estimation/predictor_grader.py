@@ -1,11 +1,13 @@
-from typing import Callable
+from typing import Callable, Literal, Tuple
 import open3d as o3d
 from dataclasses import dataclass
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 import pandas as pd
 import seaborn as sns
 from adjustText import adjust_text
+from enum import Enum
 
 
 from .robot_environment import RobotEnvironment
@@ -36,7 +38,120 @@ class GradablePosePredictor:
 
     @property
     def c_name(self):
-        return f"{self.category}-{self.name}"
+        return f"{self.category}-{self.name}" if self.category != "" else self.name
+
+
+
+class SingleValueErrorType(Enum):
+    AVG_TRANSLATIONAL = "Average Translational error [mm]"
+    MED_TRANSLATIONAL = "Median Translational error [mm]"
+    AVG_ROTATIONAL = "Average Rotational error [deg]"
+    MED_ROTATIONAL = "Median Rotational error [deg]"
+    ATE_RMSE_TRANSLATIONAL = "ATE RMSE [mm]"
+    ATE_RMSE_ROTATIONAL = "ATE RMSE [deg]"
+    RTE_RMSE_TRANSLATIONAL = "RTE RMSE [mm]"
+    RTE_RMSE_ROTATIONAL = "RTE RMSE [deg]"
+    AVG_REPROJECTION = "Average Reprojection error [px]"
+    MED_REPROJECTION = "Median Reprojection error [px]"
+    SUCCESS_RATE = "Success Rate [%]"
+    
+    @property
+    def calculator(self) -> Callable[["PredictionOnDataset"], float | None]:
+        return SINGLE_VALUE_ERROR_CALCULATORS[self]
+    
+    @property
+    def ylabel(self) -> str:
+        return SINGLE_VALUE_ERROR_LABELS[self]
+
+
+SINGLE_VALUE_ERROR_CALCULATORS = {
+    SingleValueErrorType.AVG_TRANSLATIONAL: lambda grader: (
+        None if grader.avg_translational_error is None 
+        else grader.avg_translational_error * 1000
+    ),
+    SingleValueErrorType.MED_TRANSLATIONAL: lambda grader: (
+        None if grader.median_translational_error is None 
+        else grader.median_translational_error * 1000
+    ),
+    SingleValueErrorType.AVG_ROTATIONAL: lambda grader: (
+        None if grader.avg_rotational_error is None 
+        else np.rad2deg(grader.avg_rotational_error)
+    ),
+    SingleValueErrorType.MED_ROTATIONAL: lambda grader: (
+        None if grader.median_rotational_error is None 
+        else np.rad2deg(grader.median_rotational_error)
+    ),
+    SingleValueErrorType.ATE_RMSE_TRANSLATIONAL: lambda grader: (
+        None if grader.ate_translation_rmse is None 
+        else grader.ate_translation_rmse * 1000
+    ),
+    SingleValueErrorType.ATE_RMSE_ROTATIONAL: lambda grader: (
+        None if grader.ate_rot_rmse is None 
+        else np.rad2deg(grader.ate_rot_rmse)
+    ),
+    SingleValueErrorType.RTE_RMSE_TRANSLATIONAL: lambda grader: (
+        None if grader.rte_translation_rmse is None 
+        else grader.rte_translation_rmse * 1000
+    ),
+    SingleValueErrorType.RTE_RMSE_ROTATIONAL: lambda grader: (
+        None if grader.rte_rotational_rmse is None 
+        else np.rad2deg(grader.rte_rotational_rmse)
+    ),
+    SingleValueErrorType.AVG_REPROJECTION: lambda grader: (
+        None if grader.avg_reprojection_error is None 
+        else grader.avg_reprojection_error
+    ),
+    SingleValueErrorType.MED_REPROJECTION: lambda grader: (
+        None if grader.median_reprojection_error is None 
+        else grader.median_reprojection_error
+    ),
+    SingleValueErrorType.SUCCESS_RATE: lambda grader: (
+        None if grader.success_ratio is None 
+        else grader.success_ratio * 100
+    ),
+}
+
+SINGLE_VALUE_ERROR_LABELS = {
+    SingleValueErrorType.AVG_TRANSLATIONAL: "Error [mm]",
+    SingleValueErrorType.MED_TRANSLATIONAL: "Error [mm]",
+    SingleValueErrorType.AVG_ROTATIONAL: "Error [deg]",
+    SingleValueErrorType.MED_ROTATIONAL: "Error [deg]",
+    SingleValueErrorType.ATE_RMSE_TRANSLATIONAL: "Error [mm]",
+    SingleValueErrorType.ATE_RMSE_ROTATIONAL: "Error [deg]",
+    SingleValueErrorType.RTE_RMSE_TRANSLATIONAL: "Error [mm]",
+    SingleValueErrorType.RTE_RMSE_ROTATIONAL: "Error [deg]",
+    SingleValueErrorType.AVG_REPROJECTION: "Error [px]",
+    SingleValueErrorType.MED_REPROJECTION: "Error [px]",
+    SingleValueErrorType.SUCCESS_RATE: "Rate [%]",
+}
+
+
+class TimeSeriesErrorType(Enum):
+    ABS_TRANSLATIONAL = "Absolute Translational error [mm]"
+    ABS_ROTATIONAL = "Absolute Rotational error [mm]"
+    
+    @property
+    def calculator(self) -> Callable[["PredictionOnDataset"], list[tuple[int, float]]]:
+        return TIME_SERIES_ERROR_CALCULATORS[self]
+    
+    @property
+    def ylabel(self) -> str:
+        return TIME_SERIES_ERROR_LABELS[self]
+
+
+TIME_SERIES_ERROR_CALCULATORS = {
+    TimeSeriesErrorType.ABS_TRANSLATIONAL: lambda grader: (
+        [(idx, error*1000) for idx,error in grader.timed_translational_errors]
+    ),
+    TimeSeriesErrorType.ABS_ROTATIONAL: lambda grader: (
+        [(idx, np.rad2deg(error)) for idx,error in grader.timed_rotational_errors]
+    )
+}
+
+TIME_SERIES_ERROR_LABELS = {
+    TimeSeriesErrorType.ABS_TRANSLATIONAL: "Error [mm]",
+    TimeSeriesErrorType.ABS_ROTATIONAL: "Error [deg]",
+}
 
 
 class NPredictors1DatasetGrader:
@@ -203,92 +318,29 @@ class NPredictors1DatasetGrader:
                 best_error = row[key2]
 
         return pd.DataFrame(pareto)
+    
 
-
-    def plot_hz_vs_rotational_error_deg(self, ax, plot_frontier = False):
-        data = []
-
-        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
-            time = grader.time_per_successful_prediction
-            if time is not None:
-                data.append({
-                    "Predictor": gpp.c_name,
-                    "Error [deg]": np.rad2deg(grader.avg_rotational_error),
-                    "Hz [1/s]": 1 / time
-                })
-
-        df = pd.DataFrame(data)
-
-        sns.scatterplot(data=df,
-            x="Hz [1/s]",
-            y="Error [deg]",
-            hue="Predictor",
-            ax=ax,
-            s=80,
-            alpha=0.7
-        )
-
-        if plot_frontier:
-            pareto_df = self.compute_pareto_frontier(df)
-            pareto_df = pareto_df.sort_values("Hz [1/s]")
-
-            ax.plot(
-                pareto_df["Hz [1/s]"],
-                pareto_df["Error [deg]"],
-                color="black",
-                linewidth=1,
-                alpha=0.4,
-                label="Frontier"
-            )
-
-        texts = []
-
-        for _, row in df.iterrows():
-            texts.append(
-                ax.text(
-                    row["Hz [1/s]"],
-                    row["Error [deg]"],
-                    row["Predictor"],
-                    fontsize=8
-                )
-            )
-
-        adjust_text(
-            texts,
-            ax=ax,
-            arrowprops=dict(arrowstyle="-", lw=0.5, alpha=0.5)
-        )
-        ax.margins(x=0.15, y=0.2)
-        ax.invert_yaxis()
-        ax.set_title("FPS vs Rotational Error")
-        ax.legend()
-
-
-    def plot_hz_vs_translational_error_mm(self, ax, plot_frontier:bool = False, use_category:bool = False):
-        data = []
-
-        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
-            time = grader.time_per_successful_prediction
-            if time is not None:
-                data.append({
-                    "Predictor": gpp.c_name,
-                    "Name": gpp.name,
-                    "Translational error [mm]": grader.avg_translational_error*1000,
-                    "Hz [1/s]": 1 / time,
-                    "Category":gpp.category
-                })
-
-        df = pd.DataFrame(data)
-
-        hue_key = "Category" if use_category else "Predictor"
-        import seaborn as sns
+    @staticmethod
+    def _plot_frontier_plot(
+        ax:Axes,
+        df: pd.DataFrame,
+        xkey:str = "Hz [1/s]",
+        ykey:str = "Translational error [mm]",
+        title:str = "FPS vs translational MAE",
+        plot_frontier:bool = False, 
+        use_category:bool = False,
+        invert_y:bool = True,
+        category_key:str = "Category",
+        name_key:str = "Name",
+        full_name_key:str = "Predictor"
+    ):
+        hue_key = category_key if use_category else full_name_key
         palette = sns.color_palette("tab10", n_colors=df[hue_key].nunique())
         color_map = dict(zip(sorted(df[hue_key].unique()), palette))
 
-
         sns.scatterplot(data=df,
-            x="Hz [1/s]",
-            y="Translational error [mm]",
+            x=xkey,
+            y=ykey,
             hue=hue_key,
             palette=color_map,
             ax=ax,
@@ -297,25 +349,26 @@ class NPredictors1DatasetGrader:
         )
 
         if plot_frontier:
-            pareto_df = self.compute_pareto_frontier(df, key2="Translational error [mm]")
-            pareto_df = pareto_df.sort_values("Hz [1/s]")
+            pareto_df = NPredictors1DatasetGrader.compute_pareto_frontier(df, key1=xkey, key2=ykey,  smaller_better_2=invert_y)
+            pareto_df = pareto_df.sort_values(xkey)
 
             ax.plot(
-                pareto_df["Hz [1/s]"],
-                pareto_df["Translational error [mm]"],
+                pareto_df[xkey],
+                pareto_df[ykey],
                 color="black",
                 linewidth=1,
+                linestyle = "--",
                 alpha=0.4,
                 label="Frontier"
             )
 
         if use_category:
             for category, cat_df in df.groupby("Category"):
-                cat_df = cat_df.sort_values("Hz [1/s]")
+                cat_df = cat_df.sort_values(xkey)
 
                 ax.plot(
-                    cat_df["Hz [1/s]"],
-                    cat_df["Translational error [mm]"],
+                    cat_df[xkey],
+                    cat_df[ykey],
                     linewidth=1,
                     alpha=0.5,
                     color = color_map[category],
@@ -325,9 +378,9 @@ class NPredictors1DatasetGrader:
         for _, row in df.iterrows():
             texts.append(
                 ax.text(
-                    row["Hz [1/s]"],
-                    row["Translational error [mm]"],
-                    (row["Name"] if use_category else row["Predictor"]),
+                    row[xkey],
+                    row[ykey],
+                    (row[name_key] if use_category else row[full_name_key]),
                     fontsize=8
                 )
             )
@@ -338,26 +391,74 @@ class NPredictors1DatasetGrader:
             arrowprops=dict(arrowstyle="-", lw=0.5, alpha=0.5)
         )
 
-
         ax.margins(x=0.15, y=0.2)
-        ax.invert_yaxis()
-        ax.set_title("FPS vs translational MAE")
+
+        if invert_y:
+            ax.invert_yaxis()
+
+        ax.set_title(title)
         ax.legend()
 
 
-    def plot_translational_errors(self, ax, use_log_scale:bool = False):
+    def plot_hz_vs_error(
+            self, 
+            ax:Axes, 
+            error_type:SingleValueErrorType,
+            plot_frontier:bool = False, 
+            use_category:bool = False,
+            invert_y:bool = True
+        ):
+        data = []
+
+        error_access = error_type.calculator
+        error_ylabel = error_type.ylabel
+
+        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
+            time = grader.time_per_successful_prediction
+            if time is not None:
+                metric = error_access(grader)
+                if metric is not None:
+                    data.append({
+                        "Predictor": gpp.c_name,
+                        "Category": gpp.category,
+                        "Name":gpp.name,
+                        error_ylabel: metric,
+                        "Hz [1/s]": 1 / time
+                    })
+
+        df = pd.DataFrame(data)
+
+        self._plot_frontier_plot(
+            ax = ax,
+            df = df,
+            xkey = "Hz [1/s]",
+            ykey = error_ylabel,
+            title = f"FPS vs {error_type.value}",
+            plot_frontier = plot_frontier, 
+            use_category = use_category,
+            invert_y = invert_y,
+            category_key = "Category",
+            name_key = "Name",
+            full_name_key = "Predictor"
+        )
+    
+
+    def plot_time_series_error(self, ax:Axes, error_type:TimeSeriesErrorType, use_log_scale:bool = False, fmt = ".1f"):
         data = []
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
-            avg_error = np.round(grader.avg_translational_error * 1000, 1)
+            error_dict = {frame: error for frame, error in error_type.calculator(grader)}
+            
+            only_error_s = [error for _, error in error_type.calculator(grader)]
+            avg_error = format_optional(np.mean(only_error_s), fmt=fmt)
+
             predictor_name = f"{gpp.c_name} (avg: {avg_error})"
 
-            error_dict = {frame: error for frame, error in grader.timed_translational_errors}
 
             for frame in range(self.headset_data.n_frames):
                 error = error_dict.get(frame, np.nan)
                 data.append({
                     'Frame': frame,
-                    'Error [mm]': error * 1000 if not np.isnan(error) else np.nan,
+                    error_type.ylabel: error,
                     'Predictor': predictor_name
                 })
         
@@ -369,45 +470,7 @@ class NPredictors1DatasetGrader:
 
             ax.plot(
                 group['Frame'],
-                group['Error [mm]'],
-                label=predictor,
-                linewidth=2
-            )
-
-        if use_log_scale:
-            ax.set_yscale("log")
-
-        ax.legend()
-        ax.set_title("Translational errors over time")
-        ax.set_xlabel("Frame")
-        ax.set_ylabel("Translational error [mm]")
-
-
-    def plot_rotational_errors(self, ax, use_log_scale:bool = False):
-        data = []
-        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
-            avg_error = np.round(np.rad2deg(grader.avg_rotational_error), 1)
-            predictor_name = f"{gpp.c_name} (avg: {avg_error})"
-
-            error_dict = {frame: error for frame, error in grader.timed_rotational_errors}
-
-            for frame in range(self.headset_data.n_frames):
-                error = error_dict.get(frame, np.nan)
-                data.append({
-                    'Frame': frame,
-                    'Error [deg]': np.rad2deg(error) if not np.isnan(error) else np.nan,
-                    'Predictor': predictor_name
-                })
-        
-        df = pd.DataFrame(data)
-        df = df.sort_values(['Predictor','Frame'])
-        
-        for predictor, group in df.groupby('Predictor'):
-            group = group.sort_values('Frame')
-
-            ax.plot(
-                group['Frame'],
-                group['Error [deg]'],
+                group[error_type.ylabel],
                 label=predictor,
                 linewidth=2
             )
@@ -417,9 +480,9 @@ class NPredictors1DatasetGrader:
         if use_log_scale:
             ax.set_yscale("log")
 
-        ax.set_title("Rotational errors over time")
+        ax.set_title(f"{error_type.value} over time")
         ax.set_xlabel("Frame")
-        ax.set_ylabel("Rotational error [deg]")
+        ax.set_ylabel(error_type.ylabel)
         
 
     def visualize_predictions_3d(self):
