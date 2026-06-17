@@ -9,12 +9,27 @@ from dataclasses import dataclass
 import open3d as o3d
 import logging
 from abc import ABC, abstractmethod
+import torch
 
 from shared.se3_utilities import r_t_to_hom
+from shared.assertion_helpers import assert_homogeneous_mat
 
 from .point_utilities import remove_outliers_from_point_cloud
 from .ellipsoid_utilities_numpy import sample_points_in_primal_quadratic, assert_primal_quadratic_hom_ellipsoid
+from .pose_optimisation import *
 
+
+def abc_and_base_t_ellipsoid_2_primal_quadratic(abc:np.ndarray, base_t_ellipsoid:np.ndarray)->np.ndarray:
+    assert abc.ndim == 1 and abc.shape[0] == 3, f"abc has wrong shape: {abc}"
+    assert assert_homogeneous_mat(base_t_ellipsoid, size=4)
+
+    a, b, c = abc
+    q_ellipsoid = np.diag([1/a**2, 1/b**2, 1/c**2, -1.0])
+
+    ellipsoid_t_base = np.linalg.inv(base_t_ellipsoid)
+    primal_quadratic = ellipsoid_t_base.T @ q_ellipsoid @ ellipsoid_t_base
+
+    return primal_quadratic
 
 
 class EllipsoidFitter(ABC):
@@ -67,7 +82,7 @@ class EllipsoidFitter(ABC):
         o3d.visualization.draw_geometries(to_vis, f"Ellipsoid fit visualization")   
 
 
-class SimpleEllipsoidFitter(EllipsoidFitter):
+class SimpleEllipsoidFitterGD(EllipsoidFitter):
     def __init__(self, min_num_points:int = 10, contamination:float = 0.05, visualize:bool = False):
         super().__init__(
             min_num_points=min_num_points,
@@ -75,8 +90,7 @@ class SimpleEllipsoidFitter(EllipsoidFitter):
             visualize=visualize
         )
 
-    def fit_ellipsoid(self, points:np.ndarray)->tuple[np.ndarray, np.ndarray] | None:
-
+    def calculate_initial_params(self, points:np.ndarray)->tuple[np.ndarray, np.ndarray] | None:
         pc_red = self.prep_point_cloud(points=points)
 
         if pc_red is None:
@@ -103,21 +117,48 @@ class SimpleEllipsoidFitter(EllipsoidFitter):
         b = np.max(np.abs(pts_local[:, 1]))
         c = np.max(np.abs(pts_local[:, 2]))
 
-        q_ellipsoid = np.diag([1/a**2, 1/b**2, 1/c**2, -1.0])
+        return np.array([a,b,c]), base_t_ellipsoid
 
-        ellipsoid_t_base = np.linalg.inv(base_t_ellipsoid)
-        primal_quadratic = ellipsoid_t_base.T @ q_ellipsoid @ ellipsoid_t_base
+
+    def fit_ellipsoid(self, points:np.ndarray)->tuple[np.ndarray, np.ndarray] | None:
+        
+        abc__base_t_ellipsoid = self.calculate_initial_params(points)
+        if abc__base_t_ellipsoid is None:
+            return None
+        
+        abc_init, base_t_ellipsoid_init = abc__base_t_ellipsoid
+
+        abc_init_torch = torch.tensor(abc_init)
+        base_t_ellipsoid_init_torch = torch.tensor(base_t_ellipsoid_init)
+
+        params = torch.zeros(9, dtype=torch.float32)
+        params[6:9] = abc_init_torch
+
+        def error(params:torch.Tensor):
+            base_t_ellipsoid = compute_pose_exp_se3(x_i = params[:6], cam_t_base=base_t_ellipsoid_init_torch)
+            abc = params[6:]
+
+            # TODO
+        
+
+
+        final_abc = params[6:9].detach().cpu().numpy()
+        final_base_t_ellipsoid = compute_pose_exp_se3(x_i = params[:6], cam_t_base=base_t_ellipsoid_init_torch).detach().cpu().numpy()
+
+        primal_quadratic = abc_and_base_t_ellipsoid_2_primal_quadratic(abc=final_abc, base_t_ellipsoid=final_base_t_ellipsoid)
 
         assert assert_primal_quadratic_hom_ellipsoid(primal_quadratic)
 
         if self.visualize:
             self.visualize_ellipsoid_fit(
-                point_cloud=point_cloud,
-                base_t_ellipsoid = base_t_ellipsoid,
+                point_cloud=points,
+                base_t_ellipsoid = final_base_t_ellipsoid,
                 primal_quadratic=primal_quadratic
             )
         
-        return base_t_ellipsoid, primal_quadratic
+        return final_base_t_ellipsoid, primal_quadratic
+
+
     
 class MVEEEllipsoidFitter(EllipsoidFitter):
     def __init__(
