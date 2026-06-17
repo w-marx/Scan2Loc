@@ -1,5 +1,15 @@
 import time
 import numpy as np
+from enum import Enum
+from  typing import Union
+
+class TimeLabels(Enum):
+    EXTRACT_AND_MATCH_WRAPPER_INIT = "Point based pred. init"
+    EXTRACT_AND_MATCH_WRAPPER_CALL = "point based pred."
+    PNP_RANSAC = "PnP-Ransac"
+
+    # Line based:
+    LSD_AND_CLEANUP = "Generation and cleanup of 2d lines"
 
 class TimeTracker:
     def __init__(self):
@@ -16,16 +26,21 @@ class TimeTracker:
         """
         self.last_time = time.perf_counter()
 
-    def add_time_stamp(self, name:str):
+    def add_time_stamp(self, name: Union[str, TimeLabels]):
         """
         Adds a time stamp under that name to the tracked times.
+        :param name: The name of the timestamp
         """
+        if isinstance(name, TimeLabels):
+            name = name.value
+
         time_elapsed = self._get_elapsed_time()
         if name in self.tracked_times:
             self.tracked_times[name].append(time_elapsed)
         else:
             self.tracked_times[name] = [time_elapsed]
         self.reset_elapsed_time()
+
     
     def return_averaged_times(self)->list[tuple[str, float]]:
         """
@@ -39,6 +54,7 @@ class TimeTracker:
             )
         return sorted(avg_times, key=lambda x: x[1], reverse=True)
 
+
     def get_timestamp_name_times(self, name:str)->None | list[float]:
         """
         Returns the list of times corresponding to the given timestamp name
@@ -49,6 +65,7 @@ class TimeTracker:
             return self.tracked_times[name]
         else:
             return None
+
 
     def get_timestamp_name_avg_time(self, name:str)->None | float:
         """

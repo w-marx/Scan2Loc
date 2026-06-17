@@ -10,6 +10,7 @@ import open3d as o3d
 import logging
 from abc import ABC, abstractmethod
 import torch
+from torch.optim import Adam
 
 from shared.se3_utilities import r_t_to_hom
 from shared.assertion_helpers import assert_homogeneous_mat
@@ -62,42 +63,15 @@ class EllipsoidFitter(ABC):
         
         return points
 
-    @staticmethod
-    def visualize_ellipsoid_fit(point_cloud:np.ndarray, base_t_ellipsoid:np.ndarray, primal_quadratic:np.ndarray):
-        base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
-        to_vis = [base_frame]
-        pc_np = sample_points_in_primal_quadratic(base_t_ellipsoid, primal_quadratic)
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(pc_np)
-        pcd.paint_uniform_color([0,1,0])
 
-        pcd1 = o3d.geometry.PointCloud()
-        pcd1.points = o3d.utility.Vector3dVector(point_cloud)
-        pcd1.paint_uniform_color([1,0,0])
-
-        frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05)
-        frame.transform(base_t_ellipsoid)
-
-        to_vis += [pcd, pcd1, frame]
-        o3d.visualization.draw_geometries(to_vis, f"Ellipsoid fit visualization")   
-
-
-class SimpleEllipsoidFitterGD(EllipsoidFitter):
-    def __init__(self, min_num_points:int = 10, contamination:float = 0.05, visualize:bool = False):
-        super().__init__(
-            min_num_points=min_num_points,
-            contamination=contamination, 
-            visualize=visualize
-        )
-
-    def calculate_initial_params(self, points:np.ndarray)->tuple[np.ndarray, np.ndarray] | None:
+    def calculate_initial_params(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         pc_red = self.prep_point_cloud(points=points)
 
         if pc_red is None:
             return None
         else:
             point_cloud = pc_red
-        
+
         center = point_cloud.mean(axis=0)
         pts_centered = point_cloud - center
 
@@ -117,7 +91,88 @@ class SimpleEllipsoidFitterGD(EllipsoidFitter):
         b = np.max(np.abs(pts_local[:, 1]))
         c = np.max(np.abs(pts_local[:, 2]))
 
-        return np.array([a,b,c]), base_t_ellipsoid
+        return np.array([a, b, c]), base_t_ellipsoid, point_cloud
+
+
+    @staticmethod
+    def visualize_ellipsoid_fit(point_cloud:np.ndarray, base_t_ellipsoid:np.ndarray, primal_quadratic:np.ndarray):
+        base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
+        to_vis = [base_frame]
+        pc_np = sample_points_in_primal_quadratic(base_t_ellipsoid, primal_quadratic)
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(pc_np)
+        pcd.paint_uniform_color([0,1,0])
+
+        pcd1 = o3d.geometry.PointCloud()
+        pcd1.points = o3d.utility.Vector3dVector(point_cloud)
+        pcd1.paint_uniform_color([1,0,0])
+
+        frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05)
+        frame.transform(base_t_ellipsoid)
+
+        to_vis += [pcd, pcd1, frame]
+        o3d.visualization.draw_geometries(to_vis, f"Ellipsoid fit visualization")
+
+
+class SimpleEllipsoidFitter(EllipsoidFitter):
+    def __init__(self, min_num_points: int = 10, contamination: float = 0.05, visualize: bool = False):
+        super().__init__(
+            min_num_points=min_num_points,
+            contamination=contamination,
+            visualize=visualize
+        )
+
+    def fit_ellipsoid(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+
+        abc__base_t_ellipsoid = self.calculate_initial_params(points)
+        if abc__base_t_ellipsoid is None:
+            return None
+
+        abc, base_t_ellipsoid, _ = abc__base_t_ellipsoid
+
+        primal_quadratic = abc_and_base_t_ellipsoid_2_primal_quadratic(abc=abc, base_t_ellipsoid=base_t_ellipsoid)
+
+        assert assert_primal_quadratic_hom_ellipsoid(primal_quadratic)
+
+        if self.visualize:
+            self.visualize_ellipsoid_fit(
+                point_cloud=points,
+                base_t_ellipsoid=base_t_ellipsoid,
+                primal_quadratic=primal_quadratic
+            )
+
+        return base_t_ellipsoid, primal_quadratic
+
+
+class SimpleEllipsoidFitterGD(EllipsoidFitter):
+    def __init__(self, min_num_points:int = 10, contamination:float = 0.05, visualize:bool = False):
+        super().__init__(
+            min_num_points=min_num_points,
+            contamination=contamination, 
+            visualize=visualize
+        )
+
+    @staticmethod
+    def compute_algebraic_distance(
+            points: torch.Tensor,
+            base_t_ellipsoid: torch.Tensor,
+            abc: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute the geometric distance from each point to the ellipsoid surface.
+        Uses a Newton method to find the closest point on the ellipsoid.
+        """
+        R = base_t_ellipsoid[:3, :3]
+        t = base_t_ellipsoid[:3, 3]
+
+        # Transform to local coordinates: p_local = R^T * (p_global - t)
+        pts_local = (R.T @ (points - t.unsqueeze(0)).T).T
+
+        # Compute algebraic error: F = x^2/a^2 + y^2/b^2 + z^2/c^2 - 1
+        abc_clamped = torch.clamp(abc, min=1e-8)
+        error = torch.sum((pts_local / abc_clamped.unsqueeze(0)) ** 2, dim=1) - 1.0
+
+        return error
 
 
     def fit_ellipsoid(self, points:np.ndarray)->tuple[np.ndarray, np.ndarray] | None:
@@ -126,23 +181,43 @@ class SimpleEllipsoidFitterGD(EllipsoidFitter):
         if abc__base_t_ellipsoid is None:
             return None
         
-        abc_init, base_t_ellipsoid_init = abc__base_t_ellipsoid
+        abc_init, base_t_ellipsoid_init, points_np = abc__base_t_ellipsoid
 
         abc_init_torch = torch.tensor(abc_init)
-        base_t_ellipsoid_init_torch = torch.tensor(base_t_ellipsoid_init)
+        base_t_ellipsoid_init_torch = torch.tensor(base_t_ellipsoid_init, dtype=torch.float32)
+        points_torch = torch.Tensor(points_np)
 
-        params = torch.zeros(9, dtype=torch.float32)
-        params[6:9] = abc_init_torch
+        params = torch.nn.Parameter(torch.zeros(9, dtype=torch.float32))
+        params.data[6:9] = abc_init_torch
+    
+        lmbda = 0.95
 
-        def error(params:torch.Tensor):
+        def get_loss():
             base_t_ellipsoid = compute_pose_exp_se3(x_i = params[:6], cam_t_base=base_t_ellipsoid_init_torch)
-            abc = params[6:]
+            distances = SimpleEllipsoidFitterGD.compute_algebraic_distance(
+                points=points_torch,
+                base_t_ellipsoid=base_t_ellipsoid,
+                abc=params[6:]
+            )
+            return (1-lmbda)* torch.mean(torch.abs(distances)) + lmbda * torch.mean(torch.abs(params[6:]))
 
-            # TODO
-        
+        optimizer = torch.optim.Adam(
+            [params],
+            lr=0.001,
+            betas=(0.9 , 0.99),
+            eps=1e-6
+        )
 
+        losses = []
+        for _ in range(1000):
+            optimizer.zero_grad()
+            loss = get_loss()
+            loss.backward()
+            optimizer.step()
+            losses.append(loss.item())
 
         final_abc = params[6:9].detach().cpu().numpy()
+
         final_base_t_ellipsoid = compute_pose_exp_se3(x_i = params[:6], cam_t_base=base_t_ellipsoid_init_torch).detach().cpu().numpy()
 
         primal_quadratic = abc_and_base_t_ellipsoid_2_primal_quadratic(abc=final_abc, base_t_ellipsoid=final_base_t_ellipsoid)

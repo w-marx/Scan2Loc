@@ -122,6 +122,15 @@ def assert_mxn_np_float_image_batch(imgs:np.ndarray)->bool:
     all([assert_mxn_np_float_image(img) for img in imgs])
     return True
 
+def assert_bgr_xyz_image_pair_batch(bgr_images:np.ndarray, xyz_images:np.ndarray)->bool:
+    """
+    Asserts that both batches has shape BxHxWx3 and that bgr_images is uint8 and xyz_images flot
+    """
+    assert bgr_images.shape == xyz_images.shape, f"bgr_images and xyz_images must have the same shape: {bgr_images.shape}, {xyz_images.shape}"
+    assert assert_mxnx3_np_uint8_image_batch(bgr_images)
+    assert assert_mxnx3_np_float_image_batch(xyz_images)
+    return True
+
 def get_image_type_hxw(img:np.ndarray) -> str:
     """
     Takes an numpy image array and returns its image type (mostly for debugging)

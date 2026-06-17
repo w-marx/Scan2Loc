@@ -2,12 +2,23 @@ import numpy as np
 import torch
 from skimage.draw import line
 from dataclasses import dataclass
-from numbers import Number
+from numbers import Number, Real
+import cv2
+import matplotlib.pyplot as plt
+from  matplotlib.axes import Axes
+from matplotlib.collections import LineCollection
 
 from .union_find import UnionFind
 
 
 torch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def assert_nd_line_batch(lines:np.ndarray, dim:int = 2):
+    """
+    Asserts that something is a line batch:
+    [[x0, y0, ...], ... ]
+    """
+    assert lines.ndim == 2 and lines.shape[-1] == dim, f"Shape: {lines.shape} != (B, {dim})"
 
 
 def remove_short_2d_line_segments(line_segs_2d:np.ndarray, min_line_length_px:float = 5) -> np.ndarray:
