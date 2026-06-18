@@ -14,6 +14,7 @@ from .extractors_and_matchers import *
 from .geometric_utilities.pnpl_optimizer import *
 from .geometric_utilities.line_utilities import *
 from .geometric_utilities.time_tracker import *
+from .geometric_utilities.line_generator import *
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -100,10 +101,11 @@ class LinePredictor(PosePredictor):
             cam1_xyz_images:np.ndarray,
             time_tracker_init: TimeTracker = TimeTracker(),
             extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig = ExtractAndMatchWrapperConfig(),
+            cam1_line_generator:LineGenerator = LineGenerator(),
+            cam2_line_generator:LineGenerator | None = None,
             line_matching_config:LineMatchingConfig = LineMatchingConfig(),
             line_fitting_3d_config:LineFitting3dConfig = LineFitting3dConfig(),
             pnpl_optimisation_conf:PnPLOptimizerConfig = PnPLOptimizerConfig(),
-            debug_visualize_line_cleanup:bool = False,
             debug_visualize_pnpl:bool = False,
         ):
         """
@@ -113,10 +115,11 @@ class LinePredictor(PosePredictor):
         :param cam1_xyz_images: BxHxWx3-float array of xyz-point images for camera 1 in the base ref. frame.
         :param time_tracker_init: A timetracker where important steps during the initialization will be registered.
         :param extract_and_match_wrapper_config: The configuration for how to extract and match the points.
+        :param cam1_line_generator: Line generator to extract lines from the cam1 images
+        :param cam2_line_generator: A line generator for the cam2 images or None (if none will use the cam1_line_generator for cam 2)
         :param line_matching_config: How to match lines from 2 different images.
         :param line_fitting_3d_config: How to fit the 3d lines to the 3d point clouds from cam1_xyz_images.
         :param pnpl_optimisation_conf: How to do the PnPL-optimization.
-        :param debug_visualize_line_cleanup: If True the line features will be visualized.
         :param debug_visualize_pnpl: If True the optimization by the pnpl-optimization will be visualized.
         """
         super().__init__()
@@ -126,6 +129,11 @@ class LinePredictor(PosePredictor):
         assert assert_bgr_xyz_image_pair_batch(bgr_images=cam1_bgr_images, xyz_images=cam1_xyz_images)
         self.cam1_xyz_images = cam1_xyz_images
         self.cam1_bgr_images = cam1_bgr_images
+
+        self.cam2_line_generator = None
+        if cam2_line_generator is None:
+            self.cam2_line_generator = cam1_line_generator
+        
 
         time_tracker_init.reset_elapsed_time()
         self.extract_and_match_wrapper = ExtractAndMatchWrapper(
@@ -147,13 +155,12 @@ class LinePredictor(PosePredictor):
         )) if line_fitting_3d_config.use_ransac else lambda points3d: robust_pca_2d_3d_points_lineseg_regression(points=points3d)
 
         self.pnpl_optimisation_conf = pnpl_optimisation_conf
-        self.debug_visualize_line_cleanup = debug_visualize_line_cleanup
         self.debug_visualize_pnpl = debug_visualize_pnpl
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         time_tracker_init.reset_elapsed_time()
         self.lines_4_images_cam1 = [
-            self._lsd_and_cleanup_on_image(img) for img in cam1_bgr_images
+            cam1_line_generator.get_lines(img) for img in cam1_bgr_images
         ]
         time_tracker_init.add_time_stamp(TimeLabels.LSD_AND_CLEANUP)
 
@@ -163,13 +170,12 @@ class LinePredictor(PosePredictor):
     def get_creation_function(
             cam2_intrinsic_mtx: np.ndarray,
             extract_and_match_wrapper_config: ExtractAndMatchWrapperConfig = ExtractAndMatchWrapperConfig(),
-            lsd_cleanup_passes_configs: MultiPassLineMergingConfig = MultiPassLineMergingConfig(),
-            line_matching_config: LineMatchingConfig = LineMatchingConfig(),
-            line_fitting_3d_config: LineFitting3dConfig = LineFitting3dConfig(),
-            pnpl_optimisation_conf: PnPLOptimizerConfig = PnPLOptimizerConfig(),
-            cam2_lsd_diagonal_size: None | float = None,
-            debug_visualize_line_cleanup: bool = False,
-            debug_visualize_pnpl: bool = False
+            cam1_line_generator:LineGenerator = LineGenerator(),
+            cam2_line_generator:LineGenerator | None = None,
+            line_matching_config:LineMatchingConfig = LineMatchingConfig(),
+            line_fitting_3d_config:LineFitting3dConfig = LineFitting3dConfig(),
+            pnpl_optimisation_conf:PnPLOptimizerConfig = PnPLOptimizerConfig(),
+            debug_visualize_pnpl:bool = False,
     ):
         """
         Returns a function with which a new LinePredictor may be created.
@@ -181,12 +187,11 @@ class LinePredictor(PosePredictor):
             cam1_bgr_images=robot_env.robot_bgr_images,
             cam1_xyz_images=robot_env.robot_xyz_images,
             extract_and_match_wrapper_config=extract_and_match_wrapper_config,
-            lsd_cleanup_passes_configs = lsd_cleanup_passes_configs,
+            cam1_line_generator=cam1_line_generator,
+            cam2_line_generator=cam2_line_generator,
             line_matching_config = line_matching_config,
             line_fitting_3d_config = line_fitting_3d_config,
             pnpl_optimisation_conf = pnpl_optimisation_conf,
-            cam2_lsd_diagonal_size = cam2_lsd_diagonal_size,
-            debug_visualize_line_cleanup = debug_visualize_line_cleanup,
             debug_visualize_pnpl = debug_visualize_pnpl,
             time_tracker_init=init_tt
         )
@@ -299,7 +304,7 @@ class LinePredictor(PosePredictor):
 
 
         time_tracker.reset_elapsed_time()
-        lines_img2 = self._lsd_and_cleanup_on_image(cam2_bgr_image, lsd_at_diag_size=self.cam2_lsd_diagonal_size)
+        lines_img2 = self.cam2_line_generator.get_lines(cam2_bgr_image)
         time_tracker.add_time_stamp("Image 2 LSD + cleanup")
 
         while est_base_t_cam is None and number_tries < number_retry:

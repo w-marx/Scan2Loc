@@ -189,7 +189,7 @@ class PnPLOptimizerConfig:
     lm_strat_down = 0.5
     solver = PINV
     convergence_threshold:float = 1e-6
-    line_relevance:float = 0.5
+    line_relevance:float = 0.2
     
 
     def __post_init__(self):
@@ -205,7 +205,7 @@ def optimize_pnpl(
         lines_3d:np.ndarray,
         intrinsic_cam_mat:np.ndarray,
         config:PnPLOptimizerConfig = PnPLOptimizerConfig(),
-        visualize_result:None | np.ndarray = False
+        visualize_result:None | np.ndarray = None
 )->np.ndarray:
     """
     :param initial_cam_t_base: 4x4 homogeneous matrix of the initial camera position

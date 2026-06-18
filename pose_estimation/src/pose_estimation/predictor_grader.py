@@ -1,4 +1,4 @@
-from typing import Callable, Literal, Tuple
+from typing import Callable, Literal, Tuple, Any
 import open3d as o3d
 from dataclasses import dataclass
 import numpy as np
@@ -442,6 +442,100 @@ class NPredictors1DatasetGrader:
             full_name_key = "Predictor"
         )
     
+    
+    def plot_error_vs_error(
+            self, 
+            ax:Axes, 
+            error_type_1:SingleValueErrorType,
+            error_type_2:SingleValueErrorType,
+            plot_frontier:bool = False, 
+            use_category:bool = False,
+        ):
+        data = []
+
+        error1_access = error_type_1.calculator
+        error1_label = error_type_1.ylabel
+
+        error2_access = error_type_2.calculator
+        error2_label = error_type_1.ylabel
+
+        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
+            time = grader.time_per_successful_prediction
+            if time is not None:
+                metric1 = error1_access(grader)
+                metric2 = error2_access(grader)
+                if metric1 is not None and metric2 is not None:
+                    data.append({
+                        "Predictor": gpp.c_name,
+                        "Category": gpp.category,
+                        "Name":gpp.name,
+                        error1_label: metric1,
+                        error2_label: metric2
+                    })
+
+        df = pd.DataFrame(data)
+
+        self._plot_frontier_plot(
+            ax = ax,
+            df = df,
+            xkey = error1_label,
+            ykey = error2_label,
+            title = f"{error_type_1.value} vs {error_type_1.value}",
+            plot_frontier = plot_frontier, 
+            use_category = use_category,
+            invert_y = False,
+            category_key = "Category",
+            name_key = "Name",
+            full_name_key = "Predictor"
+        )
+
+
+    def plot_dict_vs_error(
+            self,
+            ax:Axes,
+            x_axis_label:str,
+            x_axis_title_name:str,
+            get_x_index:Callable[[GradablePosePredictor], float],
+            error_type:SingleValueErrorType,
+            plot_frontier:bool = False,
+            use_category:bool = False,
+        ):
+        data = []
+
+        error_access = error_type.calculator
+        error_label = error_type.ylabel
+
+        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
+            time = grader.time_per_successful_prediction
+            if time is not None:
+                x_index = get_x_index(gpp)
+                metric = error_access(grader)
+
+                if metric is not None:
+                    data.append({
+                        "Predictor": gpp.c_name,
+                        "Category": gpp.category,
+                        "Name":gpp.name,
+                        x_axis_label: x_index,
+                        error_label: metric
+                    })
+
+        df = pd.DataFrame(data)
+
+        self._plot_frontier_plot(
+            ax = ax,
+            df = df,
+            xkey = x_axis_label,
+            ykey = error_label,
+            title = f"{x_axis_title_name} vs {error_type.value}",
+            plot_frontier = plot_frontier,
+            use_category = use_category,
+            invert_y = False,
+            category_key = "Category",
+            name_key = "Name",
+            full_name_key = "Predictor"
+        )
+
 
     def plot_time_series_error(self, ax:Axes, error_type:TimeSeriesErrorType, use_log_scale:bool = False, fmt = ".1f"):
         data = []

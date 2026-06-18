@@ -24,7 +24,7 @@ def visualize_line_cleanup(
     Visualizes how the lines change through cleanup
     :param lines_before: Nx4 array of line segments of the style [[x0, y0, x1, y1], ...]
     :param lines_after: Mx4 array of line segments of the style [[x0, y0, x1, y1], ...]
-    :param background_image: HxWx3 BGR image as numpy array or HxW Greyscale image
+    :param background_image: a HxW greyscale image
     :param ax_before: An matplotlib axis on which before will be plotted (if None it will be created and the plot shown)
     :param ax_after: Same as ax_before for after
     """
@@ -33,10 +33,13 @@ def visualize_line_cleanup(
         fig, axes = plt.subplots(1, 2, figsize=(12, 10))
         ax_before = axes[0]
         ax_after = axes[1]
-    if background_image.ndim == 3:
-        background_image = cv2.cvtColor(background_image, cv2.COLOR_BGR2RGB)
-    ax_before.imshow(background_image)
-    ax_after.imshow(background_image)
+
+    ax_before.imshow(background_image, cmap='gray')
+    ax_after.imshow(background_image, cmap='gray')
+    
+    ax_before.grid(False)
+    ax_after.grid(False)
+
     lines_xy_raw = [((line[0], line[1]), (line[2], line[3])) for line in lines_before]
     lc1_raw = LineCollection(lines_xy_raw, linewidths=2, alpha=0.8, color = plt.cm.jet(np.linspace(0, 1, lines_before.shape[0])))
     ax_before.add_collection(lc1_raw)
@@ -46,6 +49,7 @@ def visualize_line_cleanup(
     lc1_processed = LineCollection(lines_xy_processed, linewidths=2, alpha=0.8, color = line_colors_processed)
     ax_after.add_collection(lc1_processed)
     ax_after.set_title("Lines after cleanup")
+
     if has_to_plot:
         plt.show()
 
@@ -113,7 +117,7 @@ class LineGenerator:
     def __init__(
             self,
             line_cleanup_config:MultiPassLineMergingConfig = MultiPassLineMergingConfig(),
-            cam2_lsd_diagonal_size: None | float = None,
+            lsd_diagonal_size: None | float = None,
             visualize_cleanup:bool = False
     ):
         """
@@ -125,6 +129,7 @@ class LineGenerator:
         self.lsd_diagonal_size = lsd_diagonal_size
         self.line_seg_detector = cv2.createLineSegmentDetector(cv2.LSD_REFINE_NONE)
         self.visualize_cleanup = visualize_cleanup
+
 
     def get_lines(self, bgr_image:np.ndarray)->np.ndarray:
         """
