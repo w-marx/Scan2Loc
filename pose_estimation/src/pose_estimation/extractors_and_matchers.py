@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, SupportsFloat
 from PIL import Image
 import numpy as np
 import cv2, sys, os, torch
@@ -274,15 +274,13 @@ class ExtractAndMatchWrapper:
         self.sheduler = config.scheduler(cam1_bgr_images.shape[0])
 
         # For debugging/additional information
-        self.chosen_augmentations = defaultdict(int)
-        self.used_number_of_tries = []
+        self.debug_chosen_augmentations = defaultdict(int)
+        self.debug_used_number_of_tries = []
+        self.debug_number_inliers = []
 
         self.display_matching = config.display_matching
         self.cam1_bgr_images_for_vis = cam1_bgr_images if config.display_matching else None
 
-    def get_sheduler(self):
-        return self.sheduler
-    
 
     def est_base_t_cam2_with_retry(self,cam2_bgr_image: np.ndarray, number_retry:int = 1, fd:FeatureDrawing|None = None) -> np.ndarray | None:
         """
@@ -321,7 +319,7 @@ class ExtractAndMatchWrapper:
             )
             self.sheduler.adjust(idx, est_base_t_cam_and_points is not None)
             number_tries += 1
-        self.used_number_of_tries.append(number_tries)
+        self.debug_used_number_of_tries.append(number_tries)
         return est_base_t_cam_and_points
 
 
@@ -377,7 +375,7 @@ class ExtractAndMatchWrapper:
         if best_num_of_points < max(self.ransac_config.min_number_inlier_afterwards,6):
             return None
 
-        self.chosen_augmentations[best_aug_option_name] += 1
+        self.debug_chosen_augmentations[best_aug_option_name] += 1
 
         cam2_t_base__inliers = estimate_point_pose_ransac(
             world_points=best_world_obj_points,
@@ -412,10 +410,25 @@ class ExtractAndMatchWrapper:
         )
         return None if base_t_cam_w_points is None else base_t_cam_w_points[0]
     
-    def print_used_augmentations(self):
+
+    # Plotting / debugging
+
+    def get_sheduler(self)->Scheduler:
+        return self.sheduler
+    
+    def get_number_chosen_augmenations(self)->dict[str, int]:
+        return self.debug_chosen_augmentations
+    
+    def get_avg_number_of_tries(self)->SupportsFloat | None:
+        return np.mean(self.debug_used_number_of_tries) if len(self.debug_used_number_of_tries) > 0 else None
+    
+    def get_avg_number_of_inliers(self)->SupportsFloat | None:
+        return np.mean(self.debug_used_number_of_tries) if len(self.debug_used_number_of_tries) > 0 else None
+
+    def print_used_augmentations(self)->None:
         print(f"Chosen augmentations:")
-        for name, count in sorted(self.chosen_augmentations.items(), key=lambda x: -x[1]):
+        for name, count in sorted(self.debug_chosen_augmentations.items(), key=lambda x: -x[1]):
             print(f" {name:<40}  {count}")
     
-    def avg_number_of_tries(self)->float:
-        return np.mean(self.used_number_of_tries)
+    def avg_number_of_tries(self)->SupportsFloat | None:
+        return np.mean(self.debug_used_number_of_tries) if len(self.debug_used_number_of_tries) > 0 else None

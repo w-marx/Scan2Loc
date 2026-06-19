@@ -266,6 +266,7 @@ def line_segment_regression_3d_ransaac(xyz_points:np.ndarray|torch.Tensor, inlie
 
     return torch.cat([start_p, end_p]).cpu().numpy()
 
+
 def project_point_onto_line_slow(px, py, x1, y1, x2, y2):
     """
     Project point (px, py) onto line defined by (x1,y1)-(x2,y2).

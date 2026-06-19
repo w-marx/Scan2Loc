@@ -1,4 +1,4 @@
-from typing import Callable, Literal, Tuple, Any
+from typing import Callable, Literal, Tuple, Any, SupportsFloat
 import open3d as o3d
 from dataclasses import dataclass
 import numpy as np
@@ -25,12 +25,14 @@ class GradablePosePredictor:
     :param creator: A function that takes an Robot environment and a TimeTracker for the init and returns the PosePredictor
     :param name: The identifying name of the PosePredictor (may appear on plots)
     :param number_retries: The number of times to retries passed to est_base_t_cam
-    :param max_number_consecutive_update_pose_calls: how often update_pose will be called after each successful est_base_t_cam
+    :param category: A category for the predictor (for most plots Category-Name can be used if wanted)
+    :param index: An optional value for plotting different predictors on an axis
     """
     creator:Callable[[RobotEnvironment, TimeTracker], PosePredictor]
     name: str
     number_retries: int = 1
     category: str = ""
+    value:None | SupportsFloat = None
 
     def __post_init__(self):
         assert isinstance(self.name, str)
@@ -54,9 +56,15 @@ class SingleValueErrorType(Enum):
     AVG_REPROJECTION = "Average Reprojection error [px]"
     MED_REPROJECTION = "Median Reprojection error [px]"
     SUCCESS_RATE = "Success Rate [%]"
+    AVG_NUMBER_POINTS_INLIERS = "Average number of PnP inliers"
+    AVG_NUMBER_OF_TRIES = "Average number of Point extract & match tries"
+    AVG_GRIPPING_ERROR = "Average translational error for point grip"
+    MEDIAN_GRIPPING_ERROR = "Median translational error for point grip"
+
+
     
     @property
-    def calculator(self) -> Callable[["PredictionOnDataset"], float | None]:
+    def calculator(self) -> Callable[["PredictionOnDataset"], SupportsFloat | None]:
         return SINGLE_VALUE_ERROR_CALCULATORS[self]
     
     @property
@@ -64,7 +72,7 @@ class SingleValueErrorType(Enum):
         return SINGLE_VALUE_ERROR_LABELS[self]
 
 
-SINGLE_VALUE_ERROR_CALCULATORS = {
+SINGLE_VALUE_ERROR_CALCULATORS:dict[SingleValueErrorType, Callable[[PredictionOnDataset], SupportsFloat | None]] = {
     SingleValueErrorType.AVG_TRANSLATIONAL: lambda grader: (
         None if grader.avg_translational_error is None 
         else grader.avg_translational_error * 1000
@@ -109,6 +117,23 @@ SINGLE_VALUE_ERROR_CALCULATORS = {
         None if grader.success_ratio is None 
         else grader.success_ratio * 100
     ),
+    SingleValueErrorType.AVG_NUMBER_POINTS_INLIERS: lambda grader: (
+        None if grader.avg_number_of_inliers is None 
+        else grader.avg_number_of_inliers
+    ),
+    SingleValueErrorType.AVG_NUMBER_OF_TRIES: lambda grader: (
+        None if grader.avg_number_of_tries is None 
+        else grader.avg_number_of_tries
+    ),
+    SingleValueErrorType.AVG_GRIPPING_ERROR: lambda grader: (
+        None if grader.avg_gripping_error is None 
+        else grader.avg_gripping_error * 1000
+    ),
+    SingleValueErrorType.MEDIAN_GRIPPING_ERROR: lambda grader: (
+        None if grader.median_gripping_error is None 
+        else grader.median_gripping_error * 1000
+    ),
+    
 }
 
 SINGLE_VALUE_ERROR_LABELS = {
@@ -123,15 +148,20 @@ SINGLE_VALUE_ERROR_LABELS = {
     SingleValueErrorType.AVG_REPROJECTION: "Error [px]",
     SingleValueErrorType.MED_REPROJECTION: "Error [px]",
     SingleValueErrorType.SUCCESS_RATE: "Rate [%]",
+    SingleValueErrorType.AVG_NUMBER_POINTS_INLIERS: "Number point inliers [1]",
+    SingleValueErrorType.AVG_NUMBER_OF_TRIES: "Number of tries [1]",
+    SingleValueErrorType.AVG_GRIPPING_ERROR: "Error [mm]",
+    SingleValueErrorType.MEDIAN_GRIPPING_ERROR: "Error [mm]"
 }
 
 
 class TimeSeriesErrorType(Enum):
     ABS_TRANSLATIONAL = "Absolute Translational error [mm]"
     ABS_ROTATIONAL = "Absolute Rotational error [mm]"
+    ABS_GRIPPING = "Absolute point gripping error [mm]"
     
     @property
-    def calculator(self) -> Callable[["PredictionOnDataset"], list[tuple[int, float]]]:
+    def calculator(self) -> Callable[[PredictionOnDataset], list[tuple[int, float]]]:
         return TIME_SERIES_ERROR_CALCULATORS[self]
     
     @property
@@ -139,18 +169,22 @@ class TimeSeriesErrorType(Enum):
         return TIME_SERIES_ERROR_LABELS[self]
 
 
-TIME_SERIES_ERROR_CALCULATORS = {
+TIME_SERIES_ERROR_CALCULATORS:dict[TimeSeriesErrorType, Callable[[PredictionOnDataset], list[tuple[int, float]]]] = {
     TimeSeriesErrorType.ABS_TRANSLATIONAL: lambda grader: (
         [(idx, error*1000) for idx,error in grader.timed_translational_errors]
     ),
     TimeSeriesErrorType.ABS_ROTATIONAL: lambda grader: (
         [(idx, np.rad2deg(error)) for idx,error in grader.timed_rotational_errors]
-    )
+    ),
+    TimeSeriesErrorType.ABS_GRIPPING: lambda grader: (
+        [(idx, error*1000) for idx,error in grader.timed_gripping_errors]
+    ),
 }
 
 TIME_SERIES_ERROR_LABELS = {
     TimeSeriesErrorType.ABS_TRANSLATIONAL: "Error [mm]",
     TimeSeriesErrorType.ABS_ROTATIONAL: "Error [deg]",
+    TimeSeriesErrorType.ABS_GRIPPING: "Error [mm]",
 }
 
 
@@ -332,7 +366,9 @@ class NPredictors1DatasetGrader:
         invert_y:bool = True,
         category_key:str = "Category",
         name_key:str = "Name",
-        full_name_key:str = "Predictor"
+        full_name_key:str = "Predictor",
+        plot_legend:bool = True,
+        plot_names:bool = True
     ):
         hue_key = category_key if use_category else full_name_key
         palette = sns.color_palette("tab10", n_colors=df[hue_key].nunique())
@@ -373,23 +409,23 @@ class NPredictors1DatasetGrader:
                     alpha=0.5,
                     color = color_map[category],
                 )
-
-        texts = []
-        for _, row in df.iterrows():
-            texts.append(
-                ax.text(
-                    row[xkey],
-                    row[ykey],
-                    (row[name_key] if use_category else row[full_name_key]),
-                    fontsize=8
+        if plot_names:
+            texts = []
+            for _, row in df.iterrows():
+                texts.append(
+                    ax.text(
+                        row[xkey],
+                        row[ykey],
+                        (row[name_key] if use_category else row[full_name_key]),
+                        fontsize=8
+                    )
                 )
-            )
 
-        adjust_text(
-            texts,
-            ax=ax,
-            arrowprops=dict(arrowstyle="-", lw=0.5, alpha=0.5)
-        )
+            adjust_text(
+                texts,
+                ax=ax,
+                arrowprops=dict(arrowstyle="-", lw=0.5, alpha=0.5)
+            )
 
         ax.margins(x=0.15, y=0.2)
 
@@ -397,7 +433,8 @@ class NPredictors1DatasetGrader:
             ax.invert_yaxis()
 
         ax.set_title(title)
-        ax.legend()
+        if plot_legend:
+            ax.legend()
 
 
     def plot_hz_vs_error(
@@ -490,15 +527,16 @@ class NPredictors1DatasetGrader:
         )
 
 
-    def plot_dict_vs_error(
+    def plot_value_vs_error(
             self,
             ax:Axes,
             x_axis_label:str,
             x_axis_title_name:str,
-            get_x_index:Callable[[GradablePosePredictor], float],
             error_type:SingleValueErrorType,
             plot_frontier:bool = False,
             use_category:bool = False,
+            plot_legend:bool = False,
+            plot_names:bool = False
         ):
         data = []
 
@@ -508,10 +546,10 @@ class NPredictors1DatasetGrader:
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
             time = grader.time_per_successful_prediction
             if time is not None:
-                x_index = get_x_index(gpp)
+                x_index = gpp.value
                 metric = error_access(grader)
 
-                if metric is not None:
+                if metric is not None and x_index is not None:
                     data.append({
                         "Predictor": gpp.c_name,
                         "Category": gpp.category,
@@ -533,7 +571,9 @@ class NPredictors1DatasetGrader:
             invert_y = False,
             category_key = "Category",
             name_key = "Name",
-            full_name_key = "Predictor"
+            full_name_key = "Predictor",
+            plot_legend=plot_legend,
+            plot_names = plot_names
         )
 
 

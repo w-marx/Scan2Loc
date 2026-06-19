@@ -123,6 +123,7 @@ class LinePredictor(PosePredictor):
         :param debug_visualize_pnpl: If True the optimization by the pnpl-optimization will be visualized.
         """
         super().__init__()
+        time_tracker_init.reset_elapsed_time()
         assert assert_intrinsic_mat(cam2_intrinsic_mtx)
         self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
 
@@ -133,16 +134,7 @@ class LinePredictor(PosePredictor):
         self.cam2_line_generator = None
         if cam2_line_generator is None:
             self.cam2_line_generator = cam1_line_generator
-        
 
-        time_tracker_init.reset_elapsed_time()
-        self.extract_and_match_wrapper = ExtractAndMatchWrapper(
-            cam2_mtx=cam2_intrinsic_mtx,
-            cam1_bgr_images=cam1_bgr_images,
-            cam1_xyz_images=cam1_xyz_images,
-            config=extract_and_match_wrapper_config
-        )
-        time_tracker_init.add_time_stamp(TimeLabels.EXTRACT_AND_MATCH_WRAPPER_INIT)
 
         self.line_matching_config = line_matching_config
 
@@ -157,8 +149,17 @@ class LinePredictor(PosePredictor):
         self.pnpl_optimisation_conf = pnpl_optimisation_conf
         self.debug_visualize_pnpl = debug_visualize_pnpl
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        time_tracker_init.add_time_stamp(TimeLabels.SIMPLE_ATTRIBUTE_INIT)
 
-        time_tracker_init.reset_elapsed_time()
+
+        self._extract_and_match_wrapper = ExtractAndMatchWrapper(
+            cam2_mtx=cam2_intrinsic_mtx,
+            cam1_bgr_images=cam1_bgr_images,
+            cam1_xyz_images=cam1_xyz_images,
+            config=extract_and_match_wrapper_config
+        )
+        time_tracker_init.add_time_stamp(TimeLabels.EXTRACT_AND_MATCH_WRAPPER_INIT)
+
         self.lines_4_images_cam1 = [
             cam1_line_generator.get_lines(img) for img in cam1_bgr_images
         ]
@@ -214,10 +215,10 @@ class LinePredictor(PosePredictor):
         :param time_tracker: a time tracker where subcomponent times will be tracked
         """
         time_tracker.reset_elapsed_time()
-        base_t_cam_and_points = self.extract_and_match_wrapper.est_base_t_cam2_and_points(
+        base_t_cam_and_points = self._extract_and_match_wrapper.est_base_t_cam2_and_points(
             idx=idx, cam2_rgb_image=cam2_rgb_image, fd=fd
         )
-        time_tracker.add_time_stamp("point feature pose pred")
+        time_tracker.add_time_stamp(TimeLabels.EXTRACT_AND_MATCH_WRAPPER_CALL)
 
         if base_t_cam_and_points is None:
             return None
@@ -233,7 +234,7 @@ class LinePredictor(PosePredictor):
             points_img2=image_points_cam2,
             line_matching_config=self.line_matching_config
         )
-        time_tracker.add_time_stamp("Match 2d line segments")
+        time_tracker.add_time_stamp(TimeLabels.LINE_MATCHING)
 
         if line_pairs.shape[0] < 1:
             return base_t_cam_pnp
@@ -252,9 +253,7 @@ class LinePredictor(PosePredictor):
         matched_lines_2d = np.array(matched_lines_2d) if len(matched_lines_2d) > 0 else np.empty((0,4))
         matched_lines_3d = np.array(matched_lines_3d) if len(matched_lines_3d) > 0 else np.empty((0,6))
 
-        time_tracker.add_time_stamp("Line 2d -> 3d transformation")
-        
-        time_tracker.reset_elapsed_time()
+        time_tracker.add_time_stamp(TimeLabels.LINE_2D_2_3D)
 
         cam2_t_base_bundle_adjustment = optimize_pnpl(
             initial_cam_t_base=np.linalg.inv(base_t_cam_pnp).copy(),
@@ -267,7 +266,7 @@ class LinePredictor(PosePredictor):
             visualize_result= cam2_rgb_image if self.debug_visualize_pnpl else None
         )
 
-        time_tracker.add_time_stamp("PnL Optimisation")
+        time_tracker.add_time_stamp(TimeLabels.PNL_OPTIMIZATION)
 
         if fd is not None:
             visualize_features_2d(
@@ -296,25 +295,28 @@ class LinePredictor(PosePredictor):
         :return: The 4x4 Pose in SE3 if prediction was successful else None
         """
         assert assert_mxnx3_np_uint8_image(cam2_bgr_image)
-        assert number_retry > 0
+        assert number_retry > 0, f"Number retry cant be smaller then 1, is: {number_retry}"
 
         number_tries = 0
         est_base_t_cam = None
         cam2_rgb_image = cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB)
-
 
         time_tracker.reset_elapsed_time()
         lines_img2 = self.cam2_line_generator.get_lines(cam2_bgr_image)
         time_tracker.add_time_stamp("Image 2 LSD + cleanup")
 
         while est_base_t_cam is None and number_tries < number_retry:
-            idx = self.extract_and_match_wrapper.sheduler.get_best()
+            idx = self._extract_and_match_wrapper.sheduler.get_best()
             est_base_t_cam = self._est_base_t_cam2_4_idx(
                 idx=idx,
                 lines_img2 = lines_img2,
                 cam2_rgb_image = cam2_rgb_image,
                 fd = fd
             )
-            self.extract_and_match_wrapper.sheduler.adjust(idx, est_base_t_cam is not None)
+            self._extract_and_match_wrapper.sheduler.adjust(idx, est_base_t_cam is not None)
             number_tries += 1
         return est_base_t_cam
+    
+    @property
+    def extract_and_match_wrapper(self)->ExtractAndMatchWrapper | None:
+        return self._extract_and_match_wrapper

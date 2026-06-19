@@ -7,9 +7,23 @@ class TimeLabels(Enum):
     EXTRACT_AND_MATCH_WRAPPER_INIT = "Point based pred. init"
     EXTRACT_AND_MATCH_WRAPPER_CALL = "point based pred."
     PNP_RANSAC = "PnP-Ransac"
+    SIMPLE_ATTRIBUTE_INIT = "Attribute Initialisation"
 
     # Line based:
     LSD_AND_CLEANUP = "Generation and cleanup of 2d lines"
+    LINE_MATCHING = "Matching the 2d lines"
+    LINE_2D_2_3D = "3D lines from 2D"
+    PNL_OPTIMIZATION = "Perspective n Points & Lines optimisation"
+
+    # Ellipsoid based
+    CREATE_PRIMAL_QUADRATICS = "Primal quadratics creation"
+    CREATE_PRIMAL_CONICALS = "Create primal conicals"
+    GAUSSIAN_MATCHING_2D = "Matching the 2d gaussians"
+    PNE_OPTIMIZATION = "Perspective n Ellipsoids optimisation"
+    PRIMAL_QUAD_2_CONICAL = "Projecting 3d primal quad. to 2d. primal conicals"
+    PRIMAL_CONICALS_2_GAUSSIANS = "Primal conicals to gaussians"
+
+
 
 class TimeTracker:
     def __init__(self):

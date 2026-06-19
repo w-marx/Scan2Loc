@@ -90,7 +90,7 @@ class BlockingEMAScheduler(Scheduler):
             self.blocked[i] = True
             self.probabilities[i] = 0.0
         
-        self.probabilities /= np.sum(self.probabilities)        
+        self.probabilities /= (np.sum(self.probabilities) + 1e-6)       
         super().adjust(i, success)
     
     def get_best(self) -> int:

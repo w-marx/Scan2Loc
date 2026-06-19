@@ -12,46 +12,10 @@ from .robot_environment import RobotEnvironment
 from .headset_data import HeadsetData
 from .geometric_utilities.time_tracker import TimeTracker
 from .geometric_utilities.slam2mp4 import VideoGenerator, FeatureDrawing, InfoCard
+from .geometric_utilities.gripping_error import calculate_gripping_difference_4_pixels, sample_pixel_neighborhood
 
 
 from .predictor_handling import PosePredictor
-
-
-def calculate_reprojection_metrics(
-        cam_t_base1:np.ndarray, 
-        cam_t_base2:np.ndarray, 
-        shared_intrinsic_mat:np.ndarray, 
-        points_3d:np.ndarray
-    )->tuple[float, float] | None:
-
-    assert assert_homogeneous_mat(cam_t_base1, size = 4) and assert_homogeneous_mat(cam_t_base2, size = 4)
-    assert assert_intrinsic_mat(shared_intrinsic_mat)
-    assert points_3d.ndim == 2 and points_3d.shape[-1] == 3
-
-    if points_3d.shape[0] == 0:
-        return None
-
-    points_hom = np.column_stack([points_3d, np.ones(points_3d.shape[0])])
-
-    P1 = shared_intrinsic_mat @ cam_t_base1[:3, :]
-    P2 = shared_intrinsic_mat @ cam_t_base2[:3, :]
-
-    cam_points1 = (P1 @ points_hom.T).T
-    cam_points2 = (P2 @ points_hom.T).T
-
-    projectable_mask = (cam_points1[:, 2] > 1e-10) & (cam_points2[:, 2] > 1e-10)
-    cam_points1 = cam_points1[projectable_mask[:]]
-    cam_points2 = cam_points2[projectable_mask[:]]
-
-    projected1 = cam_points1[:, :2]/cam_points1[:, 2:3]
-    projected2 = cam_points2[:, :2]/cam_points2[:, 2:3]
-
-    errors = np.linalg.norm(projected1-projected2, axis=-1)
-
-    avg_error = np.mean(errors)
-    median_error = np.median(errors)
-
-    return avg_error, median_error
 
 
 def format_optional(value:Real | float | int | np.floating | None, fmt=".1f", default = "N/A", factor:float = 1.0):
@@ -146,25 +110,6 @@ class PredictionOnDataset:
 
         self.number_error_computable_poses = len(comparable_poses)
 
-        self.timed_reprojection_errors_avg_med = []
-        if point_cloud is not None:
-            for i, m1, m2 in comparable_poses:
-                avg__med = calculate_reprojection_metrics(
-                    cam_t_base1=m1, 
-                    cam_t_base2=m2, 
-                    shared_intrinsic_mat=headset_data.intrinsic_cam_mtx,
-                    points_3d=point_cloud
-                )
-                if avg__med is not None:
-                    self.timed_reprojection_errors_avg_med.append((i, avg__med[0], avg__med[0]))
-
-        self.avg_reprojection_error = None
-        self.median_reprojection_error = None
-        if len(self.timed_reprojection_errors_avg_med) > 0:
-            self.avg_reprojection_error = np.mean([avg for _, avg, _ in self.timed_reprojection_errors_avg_med])
-            self.median_reprojection_error = np.median([median for _, _, median in self.timed_reprojection_errors_avg_med])
-
-
         self.timed_translational_errors = [
             (i, translational_difference(m1, m2))
             for i, m1, m2 in comparable_poses
@@ -175,14 +120,38 @@ class PredictionOnDataset:
             for i, m1, m2 in comparable_poses
         ]
 
+        h, w = headset_data.bgr_image_s[0].shape[:2]
+        middle_pixels = sample_pixel_neighborhood((w//2, h//2), size=3)
+
+        self.timed_gripping_errors = []
+
+        if point_cloud is not None:
+            for i, m1, m2 in comparable_poses:
+                e = calculate_gripping_difference_4_pixels(
+                    base_t_cam_green=m2,
+                    base_t_cam_red=m1,
+                    points=point_cloud,
+                    intrinsics=headset_data.intrinsic_cam_mtx,
+                    pixels = middle_pixels,
+                    distance_type='median',
+                    visualize=False,
+                    valid_distance=0.01,
+                    voxel_downsample=0.005
+                )
+                if e is not None:
+                    self.timed_gripping_errors.append((i, e))
+
+        self.avg_gripping_error = np.mean([e for _, e in self.timed_gripping_errors]) if len(self.timed_gripping_errors) > 0 else None
+        self.median_gripping_error = np.median([e for _, e in self.timed_gripping_errors]) if len(self.timed_gripping_errors) > 0 else None
+
         self.translational_errors = [e for _, e in self.timed_translational_errors]
         self.rotational_errors = [e for _, e in self.timed_rotational_errors]
 
-        self.avg_translational_error = np.mean(self.translational_errors)
-        self.avg_rotational_error = np.mean(self.rotational_errors)
+        self.avg_translational_error = np.mean(self.translational_errors) if len(self.translational_errors) > 0 else None
+        self.avg_rotational_error = np.mean(self.rotational_errors) if len(self.rotational_errors) > 0 else None
 
-        self.median_translational_error = np.median(self.translational_errors)
-        self.median_rotational_error = np.median(self.rotational_errors)
+        self.median_translational_error = np.median(self.translational_errors) if len(self.translational_errors) > 0 else None
+        self.median_rotational_error = np.median(self.rotational_errors) if len(self.rotational_errors) > 0 else None
 
         timestamps_sync = [i for i, _, _ in comparable_poses]
         predicted_sync = np.asarray([predicted for _, predicted, _ in comparable_poses])
@@ -203,6 +172,15 @@ class PredictionOnDataset:
             actual=actual_sync
         )
 
+        # Extract and match metrics:
+        self.avg_number_of_tries = None
+        self.avg_number_of_inliers = None
+        if predictor.extract_and_match_wrapper is not None:
+            self.avg_number_of_tries = predictor.extract_and_match_wrapper.get_avg_number_of_tries()
+            self.avg_number_of_inliers = predictor.extract_and_match_wrapper.get_avg_number_of_inliers()
+
+
+
     def print_summary(self)->None:
         print(f"Success rate: {self.success_ratio} for {self.number_attempted_predictions} predictions")
 
@@ -210,12 +188,12 @@ class PredictionOnDataset:
         print(f"est_base_t_cam subcomponent times:\n")
         self._est_base_t_cam_time_tracker.print_report()
 
-        print(f"\n\nAvg. error: {self.avg_translational_error*1000:.1f} mm and {np.rad2deg(self.avg_rotational_error):.1f}°")
-        print(f"Median. error: {self.median_translational_error*1000:.1f} mm and {np.rad2deg(self.median_rotational_error):.1f}°")
+        print(f"\n\nAvg. error: {format_optional(self.avg_translational_error, factor=1000)} mm and {format_optional(self.avg_rotational_error, factor=180/np.pi)}°")
+        print(f"Median. error: {format_optional(self.median_translational_error, factor=1000)} mm and {format_optional(self.median_rotational_error, factor=180/np.pi)}°")
         print(f"ATE RMSE: {self.ate_translation_rmse * 1000:.1f} mm and {np.rad2deg(self.ate_rot_rmse):.1f}°")
         print(f"RTE RMSE: {self.rte_translation_rmse * 1000:.1f} mm and {np.rad2deg(self.rte_rotational_rmse):.1f}°")
-        print(f"avg reprojection error: {format_optional(self.avg_reprojection_error, fmt=".1f")} px")
-        print(f"median reprojection error: {format_optional(self.median_reprojection_error, fmt=".1f")} px")
+        print(f"avg gripping error: {format_optional(self.avg_gripping_error, fmt=".1f", factor=1000)} mm")
+        print(f"median gripping error: {format_optional(self.median_gripping_error, fmt=".1f", factor=1000)} mm")
 
 
     #def get_subcomponent_times_est_base_t_cam_call(self)-> list[tuple[str, float]]:

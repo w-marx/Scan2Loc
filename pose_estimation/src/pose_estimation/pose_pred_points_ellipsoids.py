@@ -1,103 +1,24 @@
 import cv2
 import numpy as np
-import open3d as o3d
 import matplotlib.pyplot as plt
-import matplotlib.lines as mlines
-from dataclasses import dataclass
 import logging
 
-from shared.assertion_helpers import *
+from shared.assertion_helpers import assert_bgr_xyz_image_pair_batch, assert_intrinsic_mat, assert_mxnx3_np_uint8_image
 
-from .geometric_utilities.union_find import UnionFind
+from .predictor_handling import *
+from .extractors_and_matchers import *
+
+from .small_utilities.image_augmentation import *
+from .small_utilities.sheduler import *
+
+from .geometric_utilities.foreground_segmentation import Segmenter, YOLOv26Segmenter, Sam3Prompt, SAM3Segmenter
 from .geometric_utilities.pypose_pne_optimizer import *
 from .geometric_utilities.ellipsoid_utilities_numpy import *
 from .geometric_utilities.pne_delta_pose_otimizer import *
-
-from .geometric_utilities.foreground_segmentation import Segmenter, display_image_masks, YOLOv26Segmenter, Sam3Prompt, SAM3Segmenter
-from .small_utilities.image_augmentation import *
-from .small_utilities.sheduler import *
-from .predictor_handling import *
-from .extractors_and_matchers import *
 from .geometric_utilities.packed_bool_mask_storage import ImageMaskStorage
 from .geometric_utilities.ellipsoid_fitting import *
-
-
-
-@dataclass(kw_only=True, frozen=True)
-class PointCloudMatchingConfig:
-    max_centroid_dist:float | None = 0.05
-    max_color_dist:float | None = 500
-    min_cluster_size:int = 1
-    min_number_points_per_detected_object:int = 1000
-
-
-
-def match_point_clouds(
-        masks:ImageMaskStorage, 
-        xyz_images:np.ndarray, 
-        mask_image_indices:list[int],
-        point_cloud_matching_config:PointCloudMatchingConfig,
-        bgr_images:np.ndarray | None = None
-    )->list[list[int]]:
-
-    n = 0
-    object_avg_colors = []
-    object_avg_centers = []
-    index_map = []
-
-    for pc_idx, imgidx in enumerate(mask_image_indices):
-        mask = masks.see_mask(pc_idx)
-
-        pc_3d = xyz_images[imgidx][mask > 0]
-        pc_3d = pc_3d[np.isfinite(pc_3d).all(axis=-1)]
-
-        if pc_3d.shape[0] < point_cloud_matching_config.min_number_points_per_detected_object:
-            continue
-
-        n += 1
-        index_map.append(pc_idx)
-
-        if point_cloud_matching_config.max_centroid_dist is not None:
-            object_avg_centers.append(np.mean(pc_3d, axis = 0))
-
-        if point_cloud_matching_config.max_color_dist is not None and bgr_images is not None:
-            pc_color = bgr_images[imgidx][mask > 0]
-            object_avg_colors.append(np.mean(pc_color, axis = 0))
-
-    valid_mask = np.ones((n, n), dtype=bool)
-
-    if point_cloud_matching_config.max_centroid_dist is not None:
-        object_avg_centers = np.stack(object_avg_centers, axis = 0)
-
-        centroid_distance_matrix = np.linalg.norm(
-            object_avg_centers[:, None] - object_avg_centers[None, :], axis=-1
-        )
-        valid_mask &= (centroid_distance_matrix < point_cloud_matching_config.max_centroid_dist)
-
-    if point_cloud_matching_config.max_color_dist is not None:
-        object_avg_colors = np.stack(object_avg_colors, axis = 0)
-
-        color_distance_matrix = np.mean(
-            np.abs(
-                object_avg_colors[:, None] -
-                object_avg_colors[None, :]
-            ),
-            axis=-1
-        )
-        valid_mask &= (color_distance_matrix < point_cloud_matching_config.max_color_dist)
-
-    union_find = UnionFind(n)
-    for row_idx in range(n):
-        for col_idx in range(row_idx+1, n):
-            if valid_mask[row_idx, col_idx]:
-                union_find.union(row_idx, col_idx)
-
-    clusters = union_find.return_clusters()
-    clusters = [c for c in clusters if len(c) >= point_cloud_matching_config.min_cluster_size]
-
-    clusters_old_indices = [[index_map[i] for i in c] for c in clusters]
-    return clusters_old_indices
-
+from .geometric_utilities.match_point_clouds import PointCloudMatchingConfig, match_point_clouds
+from .geometric_utilities.time_tracker import TimeTracker, TimeLabels
 
 
 def images_to_primal_quadratics(
@@ -117,18 +38,15 @@ def images_to_primal_quadratics(
     :param max_centroid_dist: The maximum distance in meters between two object centers in different images to be considered the same
     :return: the base_t_ellipsoid hom. matrices (Mx4x4) and the primal quadratics (Mx4x4) and the average colors (Nx3) (0-255)
     """
-    assert all([assert_mxnx3_np_uint8_image(bgr_img) for bgr_img in bgr_images])
-    assert xyz_images.ndim == 4 and xyz_images.shape[-1] == 3
-    assert bgr_images.shape[:3] == xyz_images.shape[:3]
+    assert assert_bgr_xyz_image_pair_batch(bgr_images=bgr_images, xyz_images=xyz_images)
 
     # Generate objects
-
     # (n-all-objs)xHxW-bool masks
     mask_storage = ImageMaskStorage(bgr_images.shape[1], bgr_images.shape[2])
 
 
     object_image_idxs = []
-    for i, (bgr_img, xyz_img) in enumerate(zip(bgr_images, xyz_images)):
+    for i, bgr_img in enumerate(bgr_images):
         object_masks = segmenter.get_object_masks(bgr_image=bgr_img, visualize=debug_vis_masks)
         for object_mask in object_masks:
             mask_storage.add_new_mask(object_mask)
@@ -178,7 +96,6 @@ def image_to_primal_conics(
     :param debug_vis_masks: If true will show the used mask
     :return: the primal conics (Nx3x3) and avg colors or None
     """
-    #tt = TimeTracker()
     assert assert_mxnx3_np_uint8_image(bgr_image)
 
     object_masks = segmenter.get_object_masks(bgr_image, visualize=debug_vis_masks)
@@ -289,6 +206,7 @@ def visualize_pose_prediction(
         width=0.005
     )
     
+
 class EllipsoidPredictor(PosePredictor):
     def __init__(
             self,
@@ -332,6 +250,10 @@ class EllipsoidPredictor(PosePredictor):
         :param visualize_segmentation_masks: If True will visualise the masks generated by the Segmenters
         """
         super().__init__()
+        if time_tracker_init is None:
+            time_tracker_init = TimeTracker()
+        time_tracker_init.reset_elapsed_time()
+
         assert assert_intrinsic_mat(cam2_intrinsic_mtx)
         
         self.cam2_segmenter = cam2_segmenter
@@ -344,8 +266,6 @@ class EllipsoidPredictor(PosePredictor):
             self.cam2_segmenter = YOLOv26Segmenter()
         if self.pne_optimizer is None:
             self.pne_optimizer = PyposePNEOptimizer()
-        if time_tracker_init is None:
-            time_tracker_init = TimeTracker()
 
         self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
 
@@ -353,9 +273,9 @@ class EllipsoidPredictor(PosePredictor):
 
         assert min_number_matched_ellipsoids_for_opt > 0
         self.min_number_matched_ellipsoids_for_opt = min_number_matched_ellipsoids_for_opt
+        time_tracker_init.add_time_stamp(TimeLabels.SIMPLE_ATTRIBUTE_INIT)
 
         self.visualize_segmentation_masks = visualize_segmentation_masks
-        time_tracker_init.reset_elapsed_time()
         b_t_e_s, prim_quad_s = images_to_primal_quadratics(
             bgr_images=cam1_bgr_images,
             xyz_images=cam1_xyz_images,
@@ -375,16 +295,16 @@ class EllipsoidPredictor(PosePredictor):
                 bg_point_cloud_colors=cam1_bgr_images.reshape(-1,3),
             )
 
-        time_tracker_init.add_time_stamp("Primal quadratics creation")
+        time_tracker_init.add_time_stamp(TimeLabels.CREATE_PRIMAL_QUADRATICS)
 
 
-        self.extract_and_match_wrapper = ExtractAndMatchWrapper(
+        self._extract_and_match_wrapper = ExtractAndMatchWrapper(
             cam2_mtx=cam2_intrinsic_mtx,
             cam1_bgr_images=cam1_bgr_images,
             cam1_xyz_images=cam1_xyz_images,
             config=extract_and_match_wrapper_config
         )
-        time_tracker_init.add_time_stamp("Extract and match wrapper initialisation")
+        time_tracker_init.add_time_stamp(TimeLabels.EXTRACT_AND_MATCH_WRAPPER_INIT)
 
         self.cam1_image_size = cam1_bgr_images.shape[1:3]
         self.matching_config = matching_config
@@ -446,12 +366,12 @@ class EllipsoidPredictor(PosePredictor):
         :return: The 4x4 Pose in SE3 if prediction was successful else None
         """
         time_tracker.reset_elapsed_time()
-        est_base_t_cam = self.extract_and_match_wrapper.est_base_t_cam2_with_retry(
+        est_base_t_cam = self._extract_and_match_wrapper.est_base_t_cam2_with_retry(
             cam2_bgr_image=cam2_bgr_image, 
             number_retry=number_retry,
             fd = fd
         )
-        time_tracker.add_time_stamp("Point based initial guess")
+        time_tracker.add_time_stamp(TimeLabels.EXTRACT_AND_MATCH_WRAPPER_CALL)
         if est_base_t_cam is None:
             return None
 
@@ -497,25 +417,26 @@ class EllipsoidPredictor(PosePredictor):
             primal_conicals=proj_primal_conics
         )
 
-        proj_gauss_elli_mu, proj_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(proj_primal_conics)
-        proj_gaussian_ellipses = gauss_ellipse_batch_tuple_to_mat_batch(proj_gauss_elli_mu, proj_gauss_elli_sigmas)
-
-        time_tracker.add_time_stamp("Projecting the 3d ellipsoids to 2d Gauss")
+        time_tracker.add_time_stamp(TimeLabels.PRIMAL_QUAD_2_CONICAL)
 
         observed_primal_conics = image_to_primal_conics(
             bgr_image=cam2_bgr_image, 
             segmenter=self.cam2_segmenter,
             debug_vis_masks=self.visualize_segmentation_masks,
         )
-        time_tracker.add_time_stamp("Image to primal conics")
+        time_tracker.add_time_stamp(TimeLabels.CREATE_PRIMAL_CONICALS)
 
         if observed_primal_conics.shape[0] < self.min_number_matched_ellipsoids_for_opt:
             return None
 
-        obs_gauss_elli_mu, obs_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(observed_primal_conics)
 
+        proj_gauss_elli_mu, proj_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(proj_primal_conics)
+        proj_gaussian_ellipses = gauss_ellipse_batch_tuple_to_mat_batch(proj_gauss_elli_mu, proj_gauss_elli_sigmas)
+
+        obs_gauss_elli_mu, obs_gauss_elli_sigmas = primal_conics_to_gaussian_ellipses(observed_primal_conics)
         obs_gauss_ellipses = gauss_ellipse_batch_tuple_to_mat_batch(obs_gauss_elli_mu, obs_gauss_elli_sigmas)
-        time_tracker.add_time_stamp("Primal conics to gaussians")
+
+        time_tracker.add_time_stamp(TimeLabels.PRIMAL_CONICALS_2_GAUSSIANS)
 
         proj_match_idx_s, obs_match_idx_s = match_gaussians_hungarian_on_wasserstein(
             proj_sigma_mu_s=proj_gaussian_ellipses,
@@ -524,7 +445,7 @@ class EllipsoidPredictor(PosePredictor):
             config=self.matching_config,
             visualize_matching=cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB) if self.visualize_matching else None
         )
-        time_tracker.add_time_stamp("Matching the 2d gaussians")
+        time_tracker.add_time_stamp(TimeLabels.GAUSSIAN_MATCHING_2D)
 
         if proj_match_idx_s.shape[0] < self.min_number_matched_ellipsoids_for_opt:
             logging.debug(f"to few ellipsoids for optimisation: {proj_match_idx_s.shape[0]}")
@@ -538,7 +459,7 @@ class EllipsoidPredictor(PosePredictor):
             visualize_result= cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB) if self.visualize_pne_optimisation else None,
         )
         
-        time_tracker.add_time_stamp("PNE optimisation")
+        time_tracker.add_time_stamp(TimeLabels.PNE_OPTIMIZATION)
 
         if fd is not None:
             visualize_pose_prediction(
@@ -552,3 +473,7 @@ class EllipsoidPredictor(PosePredictor):
             )
 
         return cam2_t_base_opt
+    
+    @property
+    def extract_and_match_wrapper(self)->ExtractAndMatchWrapper | None:
+        return self._extract_and_match_wrapper

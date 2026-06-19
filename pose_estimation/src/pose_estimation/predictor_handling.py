@@ -9,6 +9,7 @@ from shared.assertion_helpers import *
 
 from .geometric_utilities.slam2mp4 import FeatureDrawing
 from .geometric_utilities.time_tracker import TimeTracker
+from .extractors_and_matchers import ExtractAndMatchWrapper
 
 
 class PosePredictor(ABC):
@@ -25,4 +26,8 @@ class PosePredictor(ABC):
         :param axes: An matplotlib axes object on which the used features will be drawn if not None (bad for performance)
         :return: A 4x4 hom. transformation matrix: base T_cam2 or None if it fails.
         """
+        return None
+    
+    @property
+    def extract_and_match_wrapper(self)->ExtractAndMatchWrapper | None:
         return None

@@ -7,6 +7,7 @@ from shared.assertion_helpers import assert_mxn_np_float_image_batch, assert_mxn
 from .predictor_handling import *
 from .extractors_and_matchers import *
 from .robot_environment import RobotEnvironment
+from .geometric_utilities.time_tracker import TimeTracker, TimeLabels
 
 class OnlyPointsPredictor(PosePredictor):
     def __init__(
@@ -33,13 +34,14 @@ class OnlyPointsPredictor(PosePredictor):
         assert cam1_xyz_images.shape == cam1_xyz_images.shape
 
         time_tracker_init.reset_elapsed_time()
-        self.extract_and_match_wrapper = ExtractAndMatchWrapper(
+        self._extract_and_match_wrapper = ExtractAndMatchWrapper(
             cam2_mtx=cam2_intrinsic_mtx,
             cam1_bgr_images=cam1_bgr_images,
             cam1_xyz_images=cam1_xyz_images,
             config=extract_and_match_wrapper_config
         )
-        time_tracker_init.add_time_stamp("ExtractAndMatchWrapper Initialisation")
+        time_tracker_init.add_time_stamp(TimeLabels.EXTRACT_AND_MATCH_WRAPPER_INIT)
+
 
     @staticmethod
     def get_creation_function(
@@ -81,10 +83,15 @@ class OnlyPointsPredictor(PosePredictor):
         assert number_retry > 0
 
         time_tracker.reset_elapsed_time()
-        base_t_cam =  self.extract_and_match_wrapper.est_base_t_cam2_with_retry(
+        base_t_cam =  self._extract_and_match_wrapper.est_base_t_cam2_with_retry(
             cam2_bgr_image=cam2_bgr_image,
             number_retry=number_retry,
             fd = fd
         )
-        time_tracker.add_time_stamp("extract and match wrapper call")
+        time_tracker.add_time_stamp(TimeLabels.EXTRACT_AND_MATCH_WRAPPER_CALL)
         return base_t_cam
+    
+
+    @property
+    def extract_and_match_wrapper(self)->ExtractAndMatchWrapper | None:
+        return self._extract_and_match_wrapper
