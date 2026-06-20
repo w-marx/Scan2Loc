@@ -388,6 +388,8 @@ class ExtractAndMatchWrapper:
         if cam2_t_base__inliers is None:
             return None
         
+        self.debug_number_inliers.append(len(cam2_t_base__inliers[1]))
+        
         if self.display_matching:
             aug_img, points2 = augmented_image_point_4_vis
             ExtractAndMatch.plot_matched_points(
@@ -423,7 +425,7 @@ class ExtractAndMatchWrapper:
         return np.mean(self.debug_used_number_of_tries) if len(self.debug_used_number_of_tries) > 0 else None
     
     def get_avg_number_of_inliers(self)->SupportsFloat | None:
-        return np.mean(self.debug_used_number_of_tries) if len(self.debug_used_number_of_tries) > 0 else None
+        return np.mean(self.debug_number_inliers) if len(self.debug_number_inliers) > 0 else None
 
     def print_used_augmentations(self)->None:
         print(f"Chosen augmentations:")

@@ -12,7 +12,7 @@ from .robot_environment import RobotEnvironment
 from .headset_data import HeadsetData
 from .geometric_utilities.time_tracker import TimeTracker
 from .geometric_utilities.slam2mp4 import VideoGenerator, FeatureDrawing, InfoCard
-from .geometric_utilities.gripping_error import calculate_gripping_difference_4_pixels, sample_pixel_neighborhood
+from .geometric_utilities.gripping_error import calculate_gripping_difference_4_pixels, sample_pixel_neighborhood, FastGrippingError
 
 
 from .predictor_handling import PosePredictor
@@ -31,13 +31,14 @@ class PredictionOnDataset:
                  number_retry:int = 1,
                  vid_gen:VideoGenerator | None = None,
                  video_save_location:str = "test.mp4",
-                 point_cloud:np.ndarray | None = None
+                 gripping_error:FastGrippingError | None = None
             ):
         """
         Uses the predictor to run predictions on the dataset and gather metrics.
         :param predictor: The predictor that will do the predictions
         :param headset_data: The headset data that provides the prediction frames & maybe labels
         :param number_retry: Max number of retries given to est_base_t_cam
+        :param gripping_error: 
         """
         assert isinstance(predictor, PosePredictor)
         assert isinstance(headset_data, HeadsetData)
@@ -121,24 +122,18 @@ class PredictionOnDataset:
         ]
 
         h, w = headset_data.bgr_image_s[0].shape[:2]
-        middle_pixels = sample_pixel_neighborhood((w//2, h//2), size=3)
+        middle_pixels = sample_pixel_neighborhood((w//2, h//2), size=5)
 
         self.timed_gripping_errors = []
 
-        if point_cloud is not None:
+        if gripping_error is not None:
             for i, m1, m2 in comparable_poses:
-                e = calculate_gripping_difference_4_pixels(
-                    base_t_cam_green=m2,
-                    base_t_cam_red=m1,
-                    points=point_cloud,
-                    intrinsics=headset_data.intrinsic_cam_mtx,
-                    pixels = middle_pixels,
+                e = gripping_error.calculate_gripping_differences_4_pixels(
+                    base_t_cam_s= np.array([m1, m2]),
+                    pixels_batch= np.array([middle_pixels, middle_pixels]),
                     distance_type='median',
-                    visualize=False,
-                    valid_distance=0.01,
-                    voxel_downsample=0.005
-                )
-                if e is not None:
+                )[0,1]
+                if np.isfinite(e):
                     self.timed_gripping_errors.append((i, e))
 
         self.avg_gripping_error = np.mean([e for _, e in self.timed_gripping_errors]) if len(self.timed_gripping_errors) > 0 else None

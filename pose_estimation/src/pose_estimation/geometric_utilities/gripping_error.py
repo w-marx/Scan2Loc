@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Literal
 import open3d as o3d
+import matplotlib.pyplot as plt
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_homogeneous_mat
 
@@ -43,28 +44,36 @@ def ray_pointcloud_intersection(points:np.ndarray, origin:np.ndarray, directions
 
     if directions.shape[0] < 1:
         return np.empty((0,3), dtype=np.float32)
-
+    from .time_tracker import TimeTracker
+    tt = TimeTracker()
 
     projection_points = []
 
     v = points - origin
 
+    tt.add_time_stamp("Creating v")
+
     for direction in directions:
         t = np.dot(v, direction)
         points_on_line = origin + t[:, None] * direction
-        distances = np.linalg.norm(points_on_line-points, axis=-1)
+        distances = np.sum((points_on_line-points)**2, axis=-1)
 
+        tt.add_time_stamp("Distances")
 
-        valid_mask = (t > 1e-6) & (distances < max_dist)
+        valid_mask = (t > 1e-6) & (distances < max_dist**2)
 
         if not np.any(valid_mask):
             projection_points.append(np.full((3), np.nan))
             continue
-
+        
+        tt.add_time_stamp("Valid mask")
 
         best_proj_point_idx = np.argmin(distances[valid_mask])
-        projection_points.append(points_on_line[valid_mask][best_proj_point_idx])        
+        projection_points.append(points_on_line[valid_mask][best_proj_point_idx])
 
+        tt.add_time_stamp("Finalisation")     
+
+    tt.print_report()
     return np.asarray(projection_points)
 
 
@@ -165,3 +174,153 @@ def sample_pixel_neighborhood(center:tuple[int, int], size:int = 5)->np.ndarray:
     pixels = np.stack([xx.ravel(), yy.ravel()], axis=-1)
     
     return pixels
+
+
+class FastGrippingError:
+    def __init__(
+            self, 
+            points:np.ndarray, 
+            intrinsics:np.ndarray, 
+            visualize:bool = False,
+            voxel_downsample:float | None = 0.005,
+            alpha_mesh_generation:float = 0.01,
+            sparse_regions_removal_nb_neighbors:int = 20,
+            sparse_regions_removal_std_ratio:float = 2.0
+        ) -> None:
+        """
+        :param points: (N_0x...xN_n)x3 point-cloud
+        """
+
+        points = points.reshape(-1, 3)
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points[np.isfinite(points).all(axis=-1)])
+
+        if voxel_downsample is not None:
+            pcd = pcd.voxel_down_sample(voxel_size=voxel_downsample)
+
+        pcd, _ = pcd.remove_statistical_outlier(
+            nb_neighbors=sparse_regions_removal_nb_neighbors,
+            std_ratio=sparse_regions_removal_std_ratio
+        )
+
+        mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(
+            pcd,
+            alpha=alpha_mesh_generation
+        )
+
+        tmesh = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
+
+        self.scene = o3d.t.geometry.RaycastingScene()
+        self.scene.add_triangles(tmesh)
+
+        self.intrinsics = intrinsics
+        
+        self.visualize = visualize
+        self.points = None
+        self.mesh = None
+        if self.visualize:
+            self.points = points
+            self.mesh = mesh
+
+    
+    def _pixels_to_hitpoints(
+        self,
+        base_t_cam: np.ndarray,
+        pixels: np.ndarray,
+    ) -> np.ndarray:
+
+        origin, directions = pixels_to_rays(
+            intrinsics=self.intrinsics,
+            base_t_cam=base_t_cam,
+            uv_s=pixels
+        )
+
+        n = directions.shape[0]
+
+        rays = np.concatenate([
+            np.repeat(origin[None], n, axis=0),
+            directions
+        ], axis=1).astype(np.float32)
+
+        t_hits = self.scene.cast_rays(o3d.core.Tensor(rays))["t_hit"].numpy()
+
+        hit_points = np.full((n, 3), np.nan, dtype=np.float32)
+
+        valid = np.isfinite(t_hits)
+
+        hit_points[valid] = (origin[None]+ t_hits[valid, None] * directions[valid])
+
+        return hit_points
+
+
+    def calculate_gripping_differences_4_pixels(
+        self,
+        base_t_cam_s:np.ndarray,
+        pixels_batch:np.ndarray, 
+        distance_type:Literal['avg', 'median'] = 'median',
+    )-> np.ndarray:
+        """
+        :param base_t_cam_s: A Bx4x4 homogeneout base-T_cam transformation matrix batch
+        :param base_t_cam_red: Another 4x4 homogeneout base-T_cam transformation matrix
+        :param pixels_batch: BxNx2 Pixel coordinates
+        :param intrinsics: A 3x3 intrinsic camera matrix
+        :param distance_type: Whether to return the median of the distances for the pixels or the average
+        :param visualize: If true will visualize the error in 3d
+        :return: The computed BxB error matrix (may contain nan)
+        """
+        b = base_t_cam_s.shape[0]
+        hit_points = np.asarray([self._pixels_to_hitpoints(b_t_c, pixels) for b_t_c, pixels in zip(base_t_cam_s, pixels_batch)]) #[B, N, 3]
+        
+        
+        errors = np.full((b,b), np.nan)
+
+        for i in range(b):
+            for j in range(i + 1, b):
+
+                p1 = hit_points[i]
+                p2 = hit_points[j]
+
+                valid = np.all(np.isfinite(p1), axis=1) & np.all(np.isfinite(p2), axis=1)
+
+                if not np.any(valid):
+                    continue
+
+                d = np.linalg.norm(p1[valid] - p2[valid],axis=-1)
+
+                if distance_type == "avg":
+                    err = np.mean(d)
+                else:
+                    err = np.median(d)
+
+                errors[i, j] = err
+                errors[j, i] = err
+
+
+        
+        if self.visualize:
+            base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
+
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(self.points)
+            pcd.paint_uniform_color([0.5,0.0,0.5])
+
+            to_vis = [base_frame, pcd, self.mesh]
+            cmap = plt.get_cmap("jet")
+
+            for i in range(b):
+                pc = o3d.geometry.PointCloud()
+                pc.points = o3d.utility.Vector3dVector(hit_points[i])
+                pc.paint_uniform_color(color = cmap(i / max(b - 1, 1))[:3])
+                to_vis.append(pc)
+
+                cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+                cam_frame.transform(base_t_cam_s[i])
+                to_vis.append(cam_frame)
+
+            o3d.visualization.draw_geometries(
+                to_vis, 
+                window_name=f"Gripping distance vis: {np.round(errors*1000,1)} mm",
+                mesh_show_wireframe=True
+            )
+
+        return errors

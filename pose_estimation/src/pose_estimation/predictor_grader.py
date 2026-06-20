@@ -16,6 +16,7 @@ from .geometric_utilities.time_tracker import TimeTracker
 from .geometric_utilities.slam2mp4 import VideoGenerator, FeatureDrawing, InfoCard
 from .prediction_on_dataset import *
 from .predictor_handling import PosePredictor
+from .geometric_utilities.gripping_error import FastGrippingError
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -53,14 +54,11 @@ class SingleValueErrorType(Enum):
     ATE_RMSE_ROTATIONAL = "ATE RMSE [deg]"
     RTE_RMSE_TRANSLATIONAL = "RTE RMSE [mm]"
     RTE_RMSE_ROTATIONAL = "RTE RMSE [deg]"
-    AVG_REPROJECTION = "Average Reprojection error [px]"
-    MED_REPROJECTION = "Median Reprojection error [px]"
     SUCCESS_RATE = "Success Rate [%]"
     AVG_NUMBER_POINTS_INLIERS = "Average number of PnP inliers"
     AVG_NUMBER_OF_TRIES = "Average number of Point extract & match tries"
     AVG_GRIPPING_ERROR = "Average translational error for point grip"
     MEDIAN_GRIPPING_ERROR = "Median translational error for point grip"
-
 
     
     @property
@@ -105,14 +103,6 @@ SINGLE_VALUE_ERROR_CALCULATORS:dict[SingleValueErrorType, Callable[[PredictionOn
         None if grader.rte_rotational_rmse is None 
         else np.rad2deg(grader.rte_rotational_rmse)
     ),
-    SingleValueErrorType.AVG_REPROJECTION: lambda grader: (
-        None if grader.avg_reprojection_error is None 
-        else grader.avg_reprojection_error
-    ),
-    SingleValueErrorType.MED_REPROJECTION: lambda grader: (
-        None if grader.median_reprojection_error is None 
-        else grader.median_reprojection_error
-    ),
     SingleValueErrorType.SUCCESS_RATE: lambda grader: (
         None if grader.success_ratio is None 
         else grader.success_ratio * 100
@@ -145,8 +135,6 @@ SINGLE_VALUE_ERROR_LABELS = {
     SingleValueErrorType.ATE_RMSE_ROTATIONAL: "Error [deg]",
     SingleValueErrorType.RTE_RMSE_TRANSLATIONAL: "Error [mm]",
     SingleValueErrorType.RTE_RMSE_ROTATIONAL: "Error [deg]",
-    SingleValueErrorType.AVG_REPROJECTION: "Error [px]",
-    SingleValueErrorType.MED_REPROJECTION: "Error [px]",
     SingleValueErrorType.SUCCESS_RATE: "Rate [%]",
     SingleValueErrorType.AVG_NUMBER_POINTS_INLIERS: "Number point inliers [1]",
     SingleValueErrorType.AVG_NUMBER_OF_TRIES: "Number of tries [1]",
@@ -203,6 +191,8 @@ class NPredictors1DatasetGrader:
         self.gradable_pose_predictors = gradable_pose_predictors
         self.robot_env = robot_env
 
+        gripping_error_calculator = FastGrippingError(points=robot_env.robot_xyz_images, intrinsics=headset_data.intrinsic_cam_mtx)
+
 
         # Creation of n predictors
         self.creation_subcomponent_time_trackers = []
@@ -220,7 +210,8 @@ class NPredictors1DatasetGrader:
             grader = PredictionOnDataset(
                 predictor=predictor,
                 headset_data=headset_data,
-                number_retry=gradable_pose_predictor.number_retries
+                number_retry=gradable_pose_predictor.number_retries,
+                gripping_error=gripping_error_calculator
             )
             self.graders.append(grader)
 
@@ -246,33 +237,19 @@ class NPredictors1DatasetGrader:
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
             rows.append({
                 "Name": gpp.c_name,
-                "Success [%]": grader.success_ratio * 100,
-                "T/frame [ms]": (
-                    grader.time_per_successful_prediction * 1000
-                    if grader.time_per_successful_prediction is not None
-                    else np.nan
-                ),
-                "Avg t_err [mm]": grader.avg_translational_error * 1000,
-                "Avg r_err [deg]": np.rad2deg(grader.avg_rotational_error),
-                "Med t_err [mm]": grader.median_translational_error * 1000,
-                "Med r_err [deg]": np.rad2deg(grader.median_rotational_error),
+                "Success [%]": format_optional(grader.success_ratio, factor=100),
+                "T/frame [ms]": format_optional(grader.time_per_successful_prediction, factor=1000),
+                "Avg t_err [mm]": format_optional(grader.avg_translational_error, factor=1000, fmt=".1f"),
+                "Avg r_err [deg]": format_optional(grader.avg_translational_error, factor=180/np.pi, fmt=".1f"),
+                "Med t_err [mm]": format_optional(grader.median_translational_error, factor=1000, fmt=".1f"),
+                "Med r_err [deg]": format_optional(grader.median_rotational_error, factor=180/np.pi, fmt=".1f"),
+                "Avg grip_err [mm]": format_optional(grader.avg_gripping_error, factor=1000, fmt=".1f"),
+                "Med gripp_err [mm]": format_optional(grader.median_gripping_error, factor=1000, fmt=".1f"),
             })
 
         df = pd.DataFrame(rows)
 
-        print(
-            df.to_string(
-                index=False,
-                formatters={
-                    "Success [%]": "{:.2f}".format,
-                    "T/frame [ms]": "{:.0f}".format,
-                    "Avg t_err [mm]": "{:.1f}".format,
-                    "Avg r_err [deg]": "{:.1f}".format,
-                    "Med t_err [mm]": "{:.1f}".format,
-                    "Med r_err [deg]": "{:.1f}".format,
-                },
-            )
-        )
+        print(df.to_string(index=False))
 
 
     def plot_creation_times(self, ax):

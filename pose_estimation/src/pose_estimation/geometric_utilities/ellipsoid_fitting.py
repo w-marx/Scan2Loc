@@ -145,12 +145,13 @@ class SimpleEllipsoidFitter(EllipsoidFitter):
 
 
 class SimpleEllipsoidFitterGD(EllipsoidFitter):
-    def __init__(self, min_num_points:int = 10, contamination:float = 0.05, visualize:bool = False):
+    def __init__(self, min_num_points:int = 10, contamination:float = 0.05, visualize:bool = False, use_cnvx_hull:bool = True):
         super().__init__(
             min_num_points=min_num_points,
             contamination=contamination, 
             visualize=visualize
         )
+        self.use_cnvx_hull = use_cnvx_hull
 
     @staticmethod
     def compute_algebraic_distance(
@@ -158,10 +159,6 @@ class SimpleEllipsoidFitterGD(EllipsoidFitter):
             base_t_ellipsoid: torch.Tensor,
             abc: torch.Tensor
     ) -> torch.Tensor:
-        """
-        Compute the geometric distance from each point to the ellipsoid surface.
-        Uses a Newton method to find the closest point on the ellipsoid.
-        """
         R = base_t_ellipsoid[:3, :3]
         t = base_t_ellipsoid[:3, 3]
 
@@ -177,11 +174,16 @@ class SimpleEllipsoidFitterGD(EllipsoidFitter):
 
     def fit_ellipsoid(self, points:np.ndarray)->tuple[np.ndarray, np.ndarray] | None:
         
-        abc__base_t_ellipsoid = self.calculate_initial_params(points)
-        if abc__base_t_ellipsoid is None:
+        abc__base_t_ellipsoid__points = self.calculate_initial_params(points)
+        if abc__base_t_ellipsoid__points is None:
             return None
         
-        abc_init, base_t_ellipsoid_init, points_np = abc__base_t_ellipsoid
+        abc_init, base_t_ellipsoid_init, points_np = abc__base_t_ellipsoid__points
+
+        if self.use_cnvx_hull:
+            hull = ConvexHull(points_np)
+            points_np = points_np[hull.vertices]
+
 
         abc_init_torch = torch.tensor(abc_init)
         base_t_ellipsoid_init_torch = torch.tensor(base_t_ellipsoid_init, dtype=torch.float32)
@@ -226,7 +228,7 @@ class SimpleEllipsoidFitterGD(EllipsoidFitter):
 
         if self.visualize:
             self.visualize_ellipsoid_fit(
-                point_cloud=points,
+                point_cloud=points_np,
                 base_t_ellipsoid = final_base_t_ellipsoid,
                 primal_quadratic=primal_quadratic
             )
