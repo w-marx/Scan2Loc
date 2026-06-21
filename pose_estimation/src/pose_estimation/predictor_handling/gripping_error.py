@@ -44,7 +44,7 @@ def ray_pointcloud_intersection(points:np.ndarray, origin:np.ndarray, directions
 
     if directions.shape[0] < 1:
         return np.empty((0,3), dtype=np.float32)
-    from .time_tracker import TimeTracker
+    from ..utilities.time_tracker import TimeTracker
     tt = TimeTracker()
 
     projection_points = []

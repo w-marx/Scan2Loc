@@ -4,7 +4,7 @@ import cv2
 
 from shared.se3_utilities import r_t_to_hom
 
-from ..predictor_handling.slam2mp4 import FeatureDrawing
+from ..utilities.slam2mp4 import FeatureDrawing
 from ..utilities.point_utilities import project_visible_points
 
 

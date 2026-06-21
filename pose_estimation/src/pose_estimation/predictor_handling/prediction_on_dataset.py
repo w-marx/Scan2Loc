@@ -11,7 +11,7 @@ from ..data_interfaces.robot_environment import RobotEnvironment
 from ..data_interfaces.headset_data import HeadsetData
 from ..utilities.time_tracker import TimeTracker
 
-from .slam2mp4 import VideoGenerator, InfoCard
+from ..utilities.slam2mp4 import VideoGenerator, InfoCard
 from .gripping_error import sample_pixel_neighborhood, FastGrippingError
 from .pose_predictor import PosePredictor
 

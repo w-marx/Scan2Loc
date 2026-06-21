@@ -7,7 +7,7 @@ from shared.assertion_helpers import assert_bgr_xyz_image_pair_batch, assert_int
 
 from ..pnp.extract_and_match_wrapper import ExtractAndMatchWrapper, ExtractAndMatchWrapperConfig
 from ..predictor_handling.pose_predictor import PosePredictor
-from ..predictor_handling.slam2mp4 import FeatureDrawing
+from ..utilities.slam2mp4 import FeatureDrawing
 from ..utilities.time_tracker import TimeTracker, TimeLabels
 
 from .foreground_segmentation import Segmenter, YOLOv26Segmenter, Sam3Prompt, SAM3Segmenter

@@ -7,7 +7,7 @@ import torch
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_mxnx3_np_uint8_image, assert_bgr_xyz_image_pair_batch, assert_homogeneous_mat
 
-from ..predictor_handling.slam2mp4 import FeatureDrawing
+from ..utilities.slam2mp4 import FeatureDrawing
 from ..predictor_handling.pose_predictor import PosePredictor
 from ..pnp.extract_and_match_wrapper import ExtractAndMatchWrapperConfig, ExtractAndMatchWrapper
 from ..utilities.time_tracker import TimeTracker, TimeLabels
