@@ -307,7 +307,7 @@ class LinePredictor(PosePredictor):
 
         time_tracker.reset_elapsed_time()
         lines_img2 = self.cam2_line_generator.get_lines(cam2_bgr_image)
-        time_tracker.add_time_stamp("Image 2 LSD + cleanup")
+        time_tracker.add_time_stamp(TimeLabels.LSD_AND_CLEANUP)
 
         while est_base_t_cam is None and number_tries < number_retry:
             idx = self._extract_and_match_wrapper.sheduler.get_best()
@@ -315,6 +315,7 @@ class LinePredictor(PosePredictor):
                 idx=idx,
                 lines_img2 = lines_img2,
                 cam2_rgb_image = cam2_rgb_image,
+                time_tracker = time_tracker,
                 fd = fd
             )
             self._extract_and_match_wrapper.sheduler.adjust(idx, est_base_t_cam is not None)

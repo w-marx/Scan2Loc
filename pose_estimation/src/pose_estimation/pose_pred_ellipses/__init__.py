@@ -4,6 +4,8 @@ from .pne_delta_pose_otimizer import PnEDeltaPoseAdamOptimizer, PnEDeltaPoseAdam
 from .pne_optimizer import PnEOptimizer
 from .pose_pred_points_ellipsoids import EllipsoidPredictor
 from .pypose_pne_optimizer import PyposePNEOptimizer, PyposePnEOptimizerConfig
+from .foreground_segmentation import YOLOv26Segmenter, Sam3Prompt, SAM3Segmenter
+from .ellipsoid_utilities_numpy import GaussianMatchingConfig
 
 __all__ = [
     "EllipsoidFitter",
@@ -19,4 +21,8 @@ __all__ = [
     "EllipsoidPredictor",
     "PyposePNEOptimizer",
     "PyposePnEOptimizerConfig",
+    "YOLOv26Segmenter",
+    "Sam3Prompt",
+    "SAM3Segmenter",
+    "GaussianMatchingConfig"
 ]

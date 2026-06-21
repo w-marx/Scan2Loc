@@ -216,18 +216,56 @@ class NPredictors1DatasetGrader:
             )
             self.graders.append(grader)
 
-    def get_creation_times(self)->dict[str,tuple[float, list[tuple[str, float]]]]:
+
+    def get_creation_times(self)->pd.DataFrame:
         """
         Summarizes the creation times of the PosePredictors, in a data structure.
         :return: {predictor_name: (creation_time, [(creation_subcomponent_name, creation_subcomponent_time), ...])}
         """
-        times = {}
-        for gpp, subc_tt in zip(self.gradable_pose_predictors, self.creation_subcomponent_time_trackers):
-            times[gpp.c_name] = (
-                self.creation_time_tracker.get_timestamp_name_avg_time(gpp.c_name),
-                subc_tt.return_averaged_times()
-            )
-        return times
+        rows = {}
+
+        for gpp, subc_tt in zip(
+            self.gradable_pose_predictors,
+            self.creation_subcomponent_time_trackers,
+        ):
+            total = self.creation_time_tracker.get_timestamp_name_avg_time(gpp.c_name)
+            if total is None:
+                continue
+
+            sub_times = subc_tt.return_averaged_times()
+
+            row = {name: value * 1000 for name, value in sub_times}
+
+            subtotal = sum(value for _, value in sub_times)
+            row["rest"] = (total - subtotal) * 1000
+
+            rows[gpp.c_name] = row
+
+        return pd.DataFrame.from_dict(rows, orient="index").fillna(0)
+    
+    
+    def get_prediction_times(self)->pd.DataFrame:
+        """
+        Summarizes the prediction times of the PosePredictors, in a data structure.
+        :return: {predictor_name: (pred_time, [(creation_subcomponent_name, prediction_subcomponent_time), ...])}
+        """
+        rows = {}
+        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
+            total, sub_times = grader.get_prediction_times()
+
+            if total is None:
+                continue
+
+            row = {name: value * 1000 for name, value in sub_times}
+
+            subtotal = sum(value for _, value in sub_times)
+            row["rest"] = (total - subtotal) * 1000
+
+            rows[gpp.c_name] = row
+
+        return pd.DataFrame.from_dict(rows, orient="index").fillna(0)
+    
+
 
     def print_summary(self):
         """
@@ -253,45 +291,52 @@ class NPredictors1DatasetGrader:
         print(df.to_string(index=False))
 
 
-    def plot_creation_times(self, ax):
-        creation_times = self.get_creation_times()
-        
-        labels = list(creation_times.keys())
-        x = np.arange(len(labels))
-        bottoms = np.zeros(len(labels))
+    @staticmethod
+    def plot_times(
+        ax,
+        time_df: pd.DataFrame,
+        title: str,
+        plot_legend: bool = True
+    ):
+        cols = sorted(c for c in time_df.columns if c != "rest")
+        if "rest" in time_df.columns:
+            cols.append("rest")
 
-        all_sub_labels = set()
+        time_df = time_df[cols]
 
-        total_times = []
-        sub_dicts = []
+        time_df.plot(
+            kind="bar",
+            stacked=True,
+            ax=ax,
+            rot=0,
+        )
 
-        for label in labels:
-            total, sub_times = creation_times[label]
-            total_times.append(total)
-            sub_dicts.append(dict(sub_times))
-            all_sub_labels.update(sub_dicts[-1].keys())
-
-        for sub_label in sorted(all_sub_labels):
-            values = []
-            for i, label in enumerate(labels):
-                values.append(sub_dicts[i].get(sub_label, 0.0)*1000)
-
-            ax.bar(x, values, bottom=bottoms, label=sub_label)
-            bottoms += np.array(values)
-
-        # compute and plot "rest"
-        total_times = np.array(total_times)*1000
-        rest = total_times - bottoms
-        print(f"rest: {rest}")
-
-        ax.bar(x, rest, bottom=bottoms, label="rest", alpha=0.5)
-
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels)
         ax.set_ylabel("Time [ms]")
-        ax.set_title("Predictor Creation Times")
-        ax.legend()
+        ax.set_title(title)
+
+        if plot_legend:
+            ax.legend()
+
         ax.grid(True, axis="y", alpha=0.3)
+
+
+
+    def plot_creation_times(self, ax:Axes, plot_legend:bool = True):
+        NPredictors1DatasetGrader.plot_times(
+            ax=ax,
+            time_df=self.get_creation_times(),
+            title="Predictor Creation Times",
+            plot_legend=plot_legend
+        )
+
+
+    def plot_prediction_times(self, ax:Axes, plot_legend:bool = True):
+        NPredictors1DatasetGrader.plot_times(
+            ax=ax,
+            time_df=self.get_prediction_times(),
+            title="Average time consumpion for a sucessful prediction",
+            plot_legend=plot_legend
+        )
 
 
     def plot_successful_frame_prediction_times(self, ax):
