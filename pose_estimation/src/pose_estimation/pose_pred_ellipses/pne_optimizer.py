@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 from matplotlib.axes import Axes
 from abc import ABC, abstractmethod
+import seaborn as sns
+import pandas as pd
 
 from .ellipsoid_utilities_numpy import gaussian_ellipse_s_to_matplotlib_ellipse_s
 
@@ -110,7 +112,7 @@ def full_error_calculation(
         obs_gaussians_mu_s:torch.Tensor,
         obs_gaussians_sigma_s:torch.Tensor,
         obs_sigma_s_sqrt:torch.Tensor
-        ):
+        )->torch.Tensor:
         proj_primal_conincals = project_dual_quadratics_to_primal_conicals_torch(
             dual_quadratics=dual_quadratics,
             cam_t_base=cam_t_base,
@@ -125,12 +127,11 @@ def full_error_calculation(
             sigma2_s_sqrt=obs_sigma_s_sqrt
         )
 
-#TODO get compiled speedup
-#full_error_calculataion_compiled = torch.compile(full_error_calculation)
+full_error_calculation_compiled = torch.compile(full_error_calculation, mode="reduce-overhead")
 
 
 class PnEOptimizer(ABC):
-    def __init__(self) -> None:
+    def __init__(self, accumulate_losses:bool = False) -> None:
         """
        An PnEOptimizer is an class that optimized a given pose, so that the difference between projected and
        observed ellipsoids is minimized.
@@ -140,6 +141,19 @@ class PnEOptimizer(ABC):
         self._vis_img_rgb = None
         self._vis_intrinsic_mtx = None
         self._vis_dual_quadratics = None
+        self.accumulated_losses = [] if accumulate_losses else None
+
+
+    def visualize_opt_losses(self, ax:Axes):
+        if self.accumulated_losses is None:
+            return
+
+        rows = []
+        for run_idx, loss_list in enumerate(self.accumulated_losses):
+            for iteration, loss in enumerate(loss_list):
+                rows.append({"run": run_idx, "iteration": iteration, "loss": loss,})
+        df = pd.DataFrame(rows)
+        sns.lineplot(data=df, ax = ax, x="iteration", y="loss",hue="run")
 
 
     @abstractmethod
@@ -308,3 +322,26 @@ class PnEOptimizer(ABC):
         ]
         ax.legend(handles=empty_lines, loc='upper right')
         ax.axis('off')
+
+
+def visualize_multiple_pne_optimizer_losses(ax: Axes, optimizers: list[PnEOptimizer]):
+    rows = []
+
+    for optimizer in optimizers:
+        if optimizer.accumulated_losses is None:
+            continue
+
+        for run_idx, losses in enumerate(optimizer.accumulated_losses):
+            for iteration, loss in enumerate(losses):
+                rows.append({
+                    "optimizer": str(optimizer),
+                    "run": run_idx,
+                    "iteration": iteration,
+                    "loss": loss,
+                })
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        sns.lineplot(data=df, x="iteration", y="loss", hue="optimizer", ax=ax)
+        ax.set_yscale("log")
+    

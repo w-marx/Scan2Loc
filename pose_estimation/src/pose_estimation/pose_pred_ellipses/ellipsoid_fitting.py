@@ -5,6 +5,10 @@ import logging
 from abc import ABC, abstractmethod
 import torch
 from torch.optim import Adam
+from matplotlib.axes import Axes
+import pandas as pd
+import seaborn as sns
+from typing import Literal
 
 
 from shared.se3_utilities import r_t_to_hom
@@ -12,7 +16,7 @@ from shared.assertion_helpers import assert_homogeneous_mat
 
 from .ellipsoid_utilities_numpy import sample_points_in_primal_quadratic, assert_primal_quadratic_hom_ellipsoid
 
-from ..utilities.pose_optimisation import AdamConfig, compute_pose_exp_se3
+from ..utilities.pose_optimisation import AdamConfig, compute_pose_exp_se3, compute_pose_euler
 from ..utilities.point_utilities import remove_outliers_from_point_cloud
 
 
@@ -148,7 +152,13 @@ class LeastShellDistanceEllipsoidFitter(EllipsoidFitter):
             contamination:float = 0.05, 
             visualize:bool = False, 
             use_cnvx_hull:bool = True,
-            adam_config:AdamConfig = AdamConfig(learning_rate=0.001, max_itterations=1000)
+            adam_config:AdamConfig = AdamConfig(learning_rate=0.001, max_itterations=1000),
+            size_penalty:float = 0.95,
+            delta_pose_mapping:Literal["euler", "se3_exp"] = "se3_exp",
+            distance_p_norm: Literal['-inf', 'inf'] | int = 1,
+            size_p_norm: Literal['-inf', 'inf'] | int = 1,
+            device:Literal['cuda', 'cpu'] = 'cpu',
+            gather_losses:bool = False
         ):
         super().__init__(
             min_num_points=min_num_points,
@@ -157,6 +167,32 @@ class LeastShellDistanceEllipsoidFitter(EllipsoidFitter):
         )
         self.use_cnvx_hull = use_cnvx_hull
         self.adam_config = adam_config
+        self.size_penalty = size_penalty
+        self.distance_p_norm = distance_p_norm
+        self.size_p_norm = size_p_norm
+        
+        if delta_pose_mapping == "se3_exp":
+            self.apply_delta_pose = compute_pose_exp_se3
+        else:
+            self.apply_delta_pose = compute_pose_euler
+        
+        self.device = torch.device(device)
+
+        self.accumulated_losses = [] if gather_losses else None
+
+
+
+    def visualize_optimisation_losses(self, ax:Axes):
+        if self.accumulated_losses is None:
+            return
+        
+        rows = []
+        for run_idx, loss_list in enumerate(self.accumulated_losses):
+            for iteration, loss in enumerate(loss_list):
+                rows.append({"run": run_idx, "iteration": iteration, "loss": loss,})
+
+        df = pd.DataFrame(rows)
+        sns.lineplot(data=df, ax = ax, x="iteration", y="loss",hue="run")
 
 
     @staticmethod
@@ -191,23 +227,25 @@ class LeastShellDistanceEllipsoidFitter(EllipsoidFitter):
             points_np = points_np[hull.vertices]
 
 
-        abc_init_torch = torch.tensor(abc_init)
+        abc_init_torch = torch.tensor(abc_init, device=self.device, dtype=torch.float32)
         base_t_ellipsoid_init_torch = torch.tensor(base_t_ellipsoid_init, dtype=torch.float32)
-        points_torch = torch.Tensor(points_np)
+        points_torch = torch.tensor(points_np, device=self.device, dtype=torch.float32)
 
-        params = torch.nn.Parameter(torch.zeros(9, dtype=torch.float32))
+        params = torch.nn.Parameter(torch.zeros(9, dtype=torch.float32, device=self.device))
         params.data[6:9] = abc_init_torch
-    
-        lmbda = 0.95
+        
 
         def get_loss():
-            base_t_ellipsoid = compute_pose_exp_se3(x_i = params[:6], cam_t_base=base_t_ellipsoid_init_torch)
+            base_t_ellipsoid = self.apply_delta_pose(x_i = params[:6], cam_t_base=base_t_ellipsoid_init_torch)
             distances = LeastShellDistanceEllipsoidFitter.compute_algebraic_distance(
                 points=points_torch,
                 base_t_ellipsoid=base_t_ellipsoid,
                 abc=params[6:]
             )
-            return (1-lmbda)* torch.mean(torch.abs(distances)) + lmbda * torch.mean(torch.abs(params[6:]))
+            return (
+                (1-self.size_penalty)* torch.linalg.norm(distances, ord = self.distance_p_norm) 
+                + self.size_penalty * torch.linalg.norm(params[6:], ord = self.size_p_norm)
+            )
 
         optimizer = Adam(
             [params],
@@ -223,10 +261,13 @@ class LeastShellDistanceEllipsoidFitter(EllipsoidFitter):
             loss.backward()
             optimizer.step()
             losses.append(loss.item())
+        
+        if self.accumulated_losses is not None:
+            self.accumulated_losses.append(losses)
 
         final_abc = params[6:9].detach().cpu().numpy()
 
-        final_base_t_ellipsoid = compute_pose_exp_se3(x_i = params[:6], cam_t_base=base_t_ellipsoid_init_torch).detach().cpu().numpy()
+        final_base_t_ellipsoid = self.apply_delta_pose(x_i = params[:6], cam_t_base=base_t_ellipsoid_init_torch).detach().cpu().numpy()
 
         primal_quadratic = abc_and_base_t_ellipsoid_2_primal_quadratic(abc=final_abc, base_t_ellipsoid=final_base_t_ellipsoid)
 

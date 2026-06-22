@@ -296,7 +296,8 @@ class NPredictors1DatasetGrader:
         ax,
         time_df: pd.DataFrame,
         title: str,
-        plot_legend: bool = True
+        plot_legend: bool = True,
+        rotate_x_labels:bool = True
     ):
         cols = sorted(c for c in time_df.columns if c != "rest")
         if "rest" in time_df.columns:
@@ -308,7 +309,7 @@ class NPredictors1DatasetGrader:
             kind="bar",
             stacked=True,
             ax=ax,
-            rot=0,
+            rot=0
         )
 
         ax.set_ylabel("Time [ms]")
@@ -316,6 +317,8 @@ class NPredictors1DatasetGrader:
 
         if plot_legend:
             ax.legend()
+        if rotate_x_labels:
+            plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
         ax.grid(True, axis="y", alpha=0.3)
 
@@ -329,14 +332,21 @@ class NPredictors1DatasetGrader:
             plot_legend=plot_legend
         )
 
+    def print_creation_times(self):
+        print(self.get_creation_times().to_string(float_format="{:.1f}".format))
 
-    def plot_prediction_times(self, ax:Axes, plot_legend:bool = True):
+
+    def plot_prediction_times(self, ax:Axes, plot_legend:bool = True, rotate_x_labels:bool = True):
         NPredictors1DatasetGrader.plot_times(
             ax=ax,
             time_df=self.get_prediction_times(),
             title="Average time consumpion for a sucessful prediction",
-            plot_legend=plot_legend
+            plot_legend=plot_legend,
+            rotate_x_labels=rotate_x_labels
         )
+
+    def print_prediction_times(self):
+        print(self.get_prediction_times().to_string(float_format="{:.1f}".format))
 
 
     def plot_successful_frame_prediction_times(self, ax):
