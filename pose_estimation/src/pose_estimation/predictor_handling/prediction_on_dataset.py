@@ -29,7 +29,8 @@ class PredictionOnDataset:
                  number_retry:int = 1,
                  vid_gen:VideoGenerator | None = None,
                  video_save_location:str = "test.mp4",
-                 gripping_error:FastGrippingError | None = None
+                 gripping_error:FastGrippingError | None = None,
+                 use_tqdm:bool = True
             ):
         """
         Uses the predictor to run predictions on the dataset and gather metrics.
@@ -53,7 +54,7 @@ class PredictionOnDataset:
 
         self.predicted_base_t_headset_s = []
 
-        for i in tqdm(range(headset_data.n_frames)):
+        for i in (tqdm(range(headset_data.n_frames)) if use_tqdm else range(headset_data.n_frames)):
             self._per_frame_prediction_time_tracker.reset_elapsed_time()
             headset_image = headset_data.bgr_image_s[i]
 
@@ -146,9 +147,15 @@ class PredictionOnDataset:
         self.median_translational_error = np.median(self.translational_errors) if len(self.translational_errors) > 0 else None
         self.median_rotational_error = np.median(self.rotational_errors) if len(self.rotational_errors) > 0 else None
 
-        timestamps_sync = [i for i, _, _ in comparable_poses]
-        predicted_sync = np.asarray([predicted for _, predicted, _ in comparable_poses])
-        actual_sync = np.asarray([actual for _, _, actual in comparable_poses])
+
+        if len(comparable_poses) > 0:
+            timestamps_sync = [i for i, _, _ in comparable_poses]
+            predicted_sync = np.asarray([predicted for _, predicted, _ in comparable_poses])
+            actual_sync = np.asarray([actual for _, _, actual in comparable_poses])
+        else:
+            timestamps_sync = []
+            predicted_sync = np.empty((0,4,4))
+            actual_sync = np.empty((0,4,4))
 
         self.ate_translation_rmse, self.ate_rot_rmse = ate_rmse(
             predicted=predicted_sync,

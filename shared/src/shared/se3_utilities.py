@@ -65,7 +65,7 @@ def r_t_to_hom(r:np.ndarray, t:np.ndarray) -> np.ndarray:
     return m
 
 
-def t_quat_to_hom(t:np.ndarray, quat:list[float]):
+def t_quat_to_hom(t:np.ndarray, quat:list[float])->np.ndarray:
     """
     :param t: translation vector of the form: [tx, ty, tz]
     :param quat: quaternion of the form: [qx, qy, qz, qw]
@@ -73,6 +73,7 @@ def t_quat_to_hom(t:np.ndarray, quat:list[float]):
     """
     rotation = Rotation.from_quat(quat)
     return r_t_to_hom(r = rotation.as_matrix(), t = t)
+
 
 def ate_rmse(predicted:np.ndarray, actual:np.ndarray) -> tuple[float, float]:
     """
@@ -84,9 +85,13 @@ def ate_rmse(predicted:np.ndarray, actual:np.ndarray) -> tuple[float, float]:
     assert assert_homogeneous_mat_batch(predicted, size=4) and assert_homogeneous_mat_batch(actual, size=4)
     assert predicted.shape == actual.shape, f"Cant compute ATE between different pose sizes: {predicted.shape} != {actual.shape}"
 
+    if predicted.shape[0] == 0:
+        return np.nan, np.nan
+
     t_rmse = np.sqrt(np.mean(np.linalg.norm(predicted[:,:3, 3]- actual[:,:3, 3], axis = -1) **2))
     r_rmse = np.sqrt(np.mean(np.asarray([rotational_difference(m1, m2) for m1, m2 in zip(predicted, actual)])**2))
     return t_rmse, r_rmse
+
 
 def rte_error_matrice_s(timestamps:list[int], predicted:np.ndarray, actual:np.ndarray) -> list[None | np.ndarray]:
     """
@@ -114,6 +119,7 @@ def rte_error_matrice_s(timestamps:list[int], predicted:np.ndarray, actual:np.nd
         )
     return error_matrices
 
+
 def rte_translational_errors_rmse(
         timestamps:list[int],
         predicted:np.ndarray,
@@ -127,6 +133,11 @@ def rte_translational_errors_rmse(
     :param actual: The actual poses (Nx4x4), so that actual[i]~predicted[i]
     :return 1. a list of the translational errors (nan if not computable) 2. their RMSE
     """
+    assert assert_homogeneous_mat_batch(predicted) and assert_homogeneous_mat_batch(actual)
+
+    if len(timestamps) == 0:
+        return [], np.nan
+
     error_matrices = rte_error_matrice_s(timestamps, predicted, actual)
     translational_errors = [
         np.nan if m is None else np.linalg.norm(m[:3,3])
@@ -134,6 +145,7 @@ def rte_translational_errors_rmse(
     ]
     rmse = np.sqrt(np.nanmean(np.asarray(translational_errors)**2))
     return translational_errors, rmse
+
 
 def rte_rotational_errors_rmse(
         timestamps:list[int],
@@ -148,6 +160,11 @@ def rte_rotational_errors_rmse(
     :param actual: The actual poses (Nx4x4), so that actual[i]~predicted[i]
     :return 1. a list of the rotational errors (nan if not computable) 2. their RMSE
     """
+    assert assert_homogeneous_mat_batch(predicted) and assert_homogeneous_mat_batch(actual)
+
+    if len(timestamps) == 0:
+        return [], np.nan
+
     error_matrices = rte_error_matrice_s(timestamps, predicted, actual)
     rotational_errors = [
         np.nan if m is None else rotational_difference(m, np.eye(4))

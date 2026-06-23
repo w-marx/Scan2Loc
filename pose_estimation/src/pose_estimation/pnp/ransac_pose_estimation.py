@@ -1,11 +1,24 @@
 import numpy as np
 from dataclasses import dataclass
 import cv2
+from enum import Enum
 
 from shared.se3_utilities import r_t_to_hom
 
 from ..utilities.slam2mp4 import FeatureDrawing
 from ..utilities.point_utilities import project_visible_points
+
+
+class OpenCVPnPSolvers(Enum):    
+    SOLVEPNP_ITERATIVE = cv2.SOLVEPNP_ITERATIVE
+    SOLVEPNP_EPNP = cv2.SOLVEPNP_EPNP
+    SOLVEPNP_P3P = cv2.SOLVEPNP_P3P # exactly 4 points
+    SOLVEPNP_AP3P = cv2.SOLVEPNP_AP3P # exactly 4 points
+    SOLVEPNP_IPPE = cv2.SOLVEPNP_IPPE # For coplanar
+    SOLVEPNP_IPPE_SQUARE = cv2.SOLVEPNP_IPPE_SQUARE # For coplanar & 4 points
+
+    def __str__(self):
+        return self.name
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -16,13 +29,13 @@ class RansacPoseEstimationConfig:
     :param iterations: the number of iterations
     :param reprojection_error: the reprojection error for RANSAC
     :param confidence: the confidence for RANSAC
-    :param method: The solving method e.g. cv2.SOLVEPNP_EPNP
+    :param method: The solving method e.g. cv2.SOLVEPNP_EPNP, cv2.SOLVEPNP_ITERATIVE
     """
     min_number_inlier_afterwards:int = 10
     iterations:int = 500
     reprojection_error:float = 5.0
     confidence:float = 0.9
-    method:int = cv2.SOLVEPNP_EPNP
+    method:OpenCVPnPSolvers = OpenCVPnPSolvers.SOLVEPNP_EPNP
 
     def __post_init__(self):
         assert 0 < self.min_number_inlier_afterwards
@@ -77,11 +90,14 @@ def estimate_point_pose_ransac(
         return None
 
     success, r_img_t_obj, t_img_t_obj, inliers = cv2.solvePnPRansac(
-        world_points, img_points, intrinsic_matrix, None,
+        objectPoints = world_points.astype(np.float64), 
+        imagePoints = img_points.astype(np.float64), 
+        cameraMatrix = intrinsic_matrix.astype(np.float64), 
+        distCoeffs=np.zeros(5, dtype=np.float64),
         iterationsCount = config.iterations,
         reprojectionError=config.reprojection_error,
         confidence = config.confidence,
-        flags = config.method
+        flags = int(config.method.value)
     )
         
     if not success or len(inliers) < config.min_number_inlier_afterwards:

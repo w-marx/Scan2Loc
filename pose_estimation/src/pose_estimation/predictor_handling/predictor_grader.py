@@ -8,6 +8,7 @@ import pandas as pd
 import seaborn as sns
 from adjustText import adjust_text
 from enum import Enum
+from tqdm import tqdm
 
 
 from ..data_interfaces.robot_environment import RobotEnvironment
@@ -183,6 +184,8 @@ class NPredictors1DatasetGrader:
             gradable_pose_predictors: list[GradablePosePredictor],
             robot_env:RobotEnvironment,
             headset_data:HeadsetData,
+            use_tqdm_for_predictors:bool = False,
+            use_tqdm_for_frames:bool = True
     )->None:
         """
         :param gradable_pose_predictors: A list of N gradable PosePredictors
@@ -201,7 +204,7 @@ class NPredictors1DatasetGrader:
         self.headset_data = headset_data
         self.graders:list[PredictionOnDataset] = []
 
-        for gradable_pose_predictor in gradable_pose_predictors:
+        for gradable_pose_predictor in (tqdm(gradable_pose_predictors) if use_tqdm_for_predictors else gradable_pose_predictors):
             self.creation_time_tracker.reset_elapsed_time()
             creation_subcomponent_time_tracker = TimeTracker()
             predictor = gradable_pose_predictor.creator(robot_env, creation_subcomponent_time_tracker)
@@ -212,7 +215,8 @@ class NPredictors1DatasetGrader:
                 predictor=predictor,
                 headset_data=headset_data,
                 number_retry=gradable_pose_predictor.number_retries,
-                gripping_error=gripping_error_calculator
+                gripping_error=gripping_error_calculator,
+                use_tqdm=use_tqdm_for_frames
             )
             self.graders.append(grader)
 
@@ -397,6 +401,7 @@ class NPredictors1DatasetGrader:
         plot_frontier:bool = False, 
         use_category:bool = False,
         invert_y:bool = True,
+        invert_x:bool = False,
         category_key:str = "Category",
         name_key:str = "Name",
         full_name_key:str = "Predictor",
@@ -465,6 +470,9 @@ class NPredictors1DatasetGrader:
         if invert_y:
             ax.invert_yaxis()
 
+        if invert_x:
+            ax.invert_xaxis()
+
         ax.set_title(title)
         if plot_legend:
             ax.legend()
@@ -520,6 +528,8 @@ class NPredictors1DatasetGrader:
             error_type_2:SingleValueErrorType,
             plot_frontier:bool = False, 
             use_category:bool = False,
+            invert_x:bool = False,
+            invert_y:bool = False
         ):
         data = []
 
@@ -527,7 +537,7 @@ class NPredictors1DatasetGrader:
         error1_label = error_type_1.ylabel
 
         error2_access = error_type_2.calculator
-        error2_label = error_type_1.ylabel
+        error2_label = error_type_2.ylabel
 
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
             time = grader.time_per_successful_prediction
@@ -550,13 +560,14 @@ class NPredictors1DatasetGrader:
             df = df,
             xkey = error1_label,
             ykey = error2_label,
-            title = f"{error_type_1.value} vs {error_type_1.value}",
+            title = f"{error_type_1.value} vs {error_type_2.value}",
             plot_frontier = plot_frontier, 
             use_category = use_category,
-            invert_y = False,
+            invert_y = invert_y,
             category_key = "Category",
             name_key = "Name",
-            full_name_key = "Predictor"
+            full_name_key = "Predictor",
+            invert_x = invert_x,
         )
 
 
