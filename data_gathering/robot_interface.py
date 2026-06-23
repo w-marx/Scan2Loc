@@ -5,11 +5,11 @@ from deoxys import config_root
 
 import pyrealsense2 as rs
 import numpy as np
-import os, time
+import os, time, logging
 
 from shared.proto_robot_data import *
 
-from depth_filtering import *
+from .depth_filtering import *
 
 
 def extract_intrinsics(cam_intrinsics) -> tuple[np.ndarray,list[float],np.ndarray, list[float]]:
@@ -52,7 +52,7 @@ def gather_robot_imgs_eefs(
     align = rs.align(rs.stream.color)
 
     for frame_idx, position in enumerate(robot_positions):
-        print(f"moving to position {frame_idx} : {position}")
+        logging.info(f"moving to position {frame_idx} : {position}")
 
         reset_joints_to(robot_interface, position)
         time.sleep(stabilisation_timeout)

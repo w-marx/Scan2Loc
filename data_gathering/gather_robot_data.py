@@ -9,7 +9,7 @@ from shared.gathered_robot_data import GatheredRobotData
 from shared.se3_utilities import compute_pose_pseudo_median, rotational_difference
 
 
-from depth_filtering import DEPTH_OPTIMIZATION_CONFIGS
+from .depth_filtering import DEPTH_OPTIMIZATION_CONFIGS
 
 
 def optimize_robot_data(
@@ -183,7 +183,7 @@ Translation in mm cov & corr matrix:
     pos_3d_plot.set_ylabel("y-pos mm")
     pos_3d_plot.set_zlabel("z-pos mm")
 
-    if not os.path.exists(output_folder):
+    if save_result and not os.path.exists(output_folder):
         print(f"could not find folder {output_folder} for analysis storage")
     if save_result:
         fig.savefig(f"{output_folder}/error_analysis.pdf")
@@ -232,7 +232,7 @@ if __name__ == "__main__":
 
     proto_data = None
     if args.gather_data:
-        from robot_interface import gather_robot_data
+        from .robot_interface import gather_robot_data
         proto_data = gather_robot_data(
             number_of_positions = args.max_number_positions,
             stabilisation_timeout=args.stabilisation_timeout,
