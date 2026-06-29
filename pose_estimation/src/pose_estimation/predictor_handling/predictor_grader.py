@@ -149,6 +149,8 @@ class TimeSeriesErrorType(Enum):
     ABS_TRANSLATIONAL = "Absolute Translational error [mm]"
     ABS_ROTATIONAL = "Absolute Rotational error [mm]"
     ABS_GRIPPING = "Absolute point gripping error [mm]"
+    RTE_TRANSLATIONAL = "Relative translational error [mm]"
+    RTE_ROTATIONAL = "Relative rotational error [deg]"
     
     @property
     def calculator(self) -> Callable[[PredictionOnDataset], list[tuple[int, float]]]:
@@ -169,12 +171,20 @@ TIME_SERIES_ERROR_CALCULATORS:dict[TimeSeriesErrorType, Callable[[PredictionOnDa
     TimeSeriesErrorType.ABS_GRIPPING: lambda grader: (
         [(idx, error*1000) for idx,error in grader.timed_gripping_errors]
     ),
+    TimeSeriesErrorType.RTE_TRANSLATIONAL: lambda grader: (
+        [(idx, error*1000) for idx,error in enumerate(grader.rte_translation_errors) if np.isfinite(error)]
+    ),
+    TimeSeriesErrorType.RTE_ROTATIONAL: lambda grader: (
+        [(idx, np.rad2deg(error)) for idx,error in enumerate(grader.rte_rotational_errors) if np.isfinite(error)]
+    ),
 }
 
 TIME_SERIES_ERROR_LABELS = {
     TimeSeriesErrorType.ABS_TRANSLATIONAL: "Error [mm]",
     TimeSeriesErrorType.ABS_ROTATIONAL: "Error [deg]",
     TimeSeriesErrorType.ABS_GRIPPING: "Error [mm]",
+    TimeSeriesErrorType.RTE_TRANSLATIONAL: "Error [mm]",
+    TimeSeriesErrorType.RTE_ROTATIONAL: "Error [deg]"
 }
 
 
@@ -185,7 +195,8 @@ class NPredictors1DatasetGrader:
             robot_env:RobotEnvironment,
             headset_data:HeadsetData,
             use_tqdm_for_predictors:bool = False,
-            use_tqdm_for_frames:bool = True
+            use_tqdm_for_frames:bool = True,
+            compute_gripping_error:bool = False,
     )->None:
         """
         :param gradable_pose_predictors: A list of N gradable PosePredictors
@@ -195,7 +206,10 @@ class NPredictors1DatasetGrader:
         self.gradable_pose_predictors = gradable_pose_predictors
         self.robot_env = robot_env
 
-        gripping_error_calculator = FastGrippingError(points=robot_env.robot_xyz_images, intrinsics=headset_data.intrinsic_cam_mtx)
+        if compute_gripping_error:
+            gripping_error_calculator = FastGrippingError(points=robot_env.robot_xyz_images, intrinsics=headset_data.intrinsic_cam_mtx)
+        else:
+            gripping_error_calculator = None
 
 
         # Creation of n predictors
@@ -269,6 +283,27 @@ class NPredictors1DatasetGrader:
 
         return pd.DataFrame.from_dict(rows, orient="index").fillna(0)
     
+    def print_translational_error_under_limits(self, limits_m:list[float]):
+        
+        rows = []
+        for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
+            dict = {"Name": gpp.c_name}
+
+            t_error_s = grader.translational_errors
+            if t_error_s is None:
+                continue
+            t_error_s = np.array(t_error_s)
+
+            for limit in limits_m:
+                limit_mask = t_error_s < limit
+                valid_errors = t_error_s[limit_mask]
+                avg_error = format_optional(np.mean(valid_errors), fmt=".4f") if valid_errors.shape[0] > 0 else "N/A"
+                success = format_optional(np.sum(limit_mask)/grader.number_attempted_predictions, factor=100)
+                dict[str(limit)] = f"{avg_error}m, {success}%"
+            rows.append(dict)
+                
+        df = pd.DataFrame(rows)
+        print(df.to_string(index=False))
 
 
     def print_summary(self):
@@ -505,6 +540,9 @@ class NPredictors1DatasetGrader:
                     })
 
         df = pd.DataFrame(data)
+
+        if df.empty:
+            return
 
         self._plot_frontier_plot(
             ax = ax,

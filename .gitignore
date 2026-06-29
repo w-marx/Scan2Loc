@@ -122,3 +122,4 @@ notebooks/*.ts
 notebooks/*.mp4
 
 processed_datasets/
+tum_datasets/

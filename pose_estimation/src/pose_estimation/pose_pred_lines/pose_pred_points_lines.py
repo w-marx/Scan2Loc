@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from numbers import Number
 import torch
+from typing import Literal
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_mxnx3_np_uint8_image, assert_bgr_xyz_image_pair_batch, assert_homogeneous_mat
 
@@ -16,7 +17,8 @@ from ..utilities.point_utilities import project_visible_points
 from .pnpl_optimizer import optimize_pnpl, PnPLOptimizerConfig
 from .line_utilities import (
     assert_nd_line_batch, project_point_onto_line_slow, LineMatchingConfig, match_2d_line_segments,
-    line_segment_regression_3d_ransaac, robust_pca_2d_3d_points_lineseg_regression, line_seg_2d_to_3d_points
+    line_segment_regression_3d_ransaac, robust_pca_2d_3d_points_lineseg_regression, line_seg_2d_to_3d_points,
+    pca_2d_3d_points_lineseg_regression
 )
 from .line_generator import LineGenerator
 
@@ -29,15 +31,22 @@ class LineFitting3dConfig:
     :param ransac_iterations: Number of iterations the ransac algorithm needs
     :param ransac_inlier_distance: Distance in meters to be considered an inlier for the ransac algorithm
     """
-    use_ransac:bool = True
+    fitting_algorithm:Literal['ransac', 'pca', 'robust_pca'] = 'ransac'
     ransac_iterations:int = 100
     ransac_inlier_distance:float = 0.005
 
+    pca_iterations:int = 3
+    pca_inlier_quantile:float = 0.95
+    
+
     def __post_init__(self):
-        assert isinstance(self.use_ransac, bool)
-        if self.use_ransac:
+        if self.fitting_algorithm == 'ransac':
             assert isinstance(self.ransac_iterations, Number) and 0 < self.ransac_iterations
             assert isinstance(self.ransac_inlier_distance, Number) and 0 <= self.ransac_inlier_distance
+
+        if self.fitting_algorithm == 'robust_pca':
+            assert isinstance(self.pca_iterations, Number) and 0 < self.pca_iterations
+            assert isinstance(self.pca_inlier_quantile, Number) and 0 <= self.pca_inlier_quantile
 
 
 def visualize_features_2d(
@@ -142,13 +151,23 @@ class LinePredictor(PosePredictor):
 
         self.line_matching_config = line_matching_config
 
-        self.line_fitting_3d_method = (lambda points3d:(
-            line_segment_regression_3d_ransaac(
+        self.line_fitting_3d_method = None
+
+        if line_fitting_3d_config.fitting_algorithm == 'ransac':
+            self.line_fitting_3d_method = lambda points3d: line_segment_regression_3d_ransaac(
                 xyz_points=points3d,
                 inlier_distance=line_fitting_3d_config.ransac_inlier_distance,
                 itterations=line_fitting_3d_config.ransac_iterations
             )
-        )) if line_fitting_3d_config.use_ransac else lambda points3d: robust_pca_2d_3d_points_lineseg_regression(points=points3d)
+        elif line_fitting_3d_config.fitting_algorithm == 'robust_pca':
+            self.line_fitting_3d_method = lambda points3d: robust_pca_2d_3d_points_lineseg_regression(
+                points=points3d,
+                line_distance_quantile=line_fitting_3d_config.pca_inlier_quantile,
+                itterations=line_fitting_3d_config.pca_iterations
+            )
+        else:
+            self.line_fitting_3d_method = lambda points3d: pca_2d_3d_points_lineseg_regression(points3d) 
+
 
         self.pnpl_optimisation_conf = pnpl_optimisation_conf
         self.debug_visualize_pnpl = debug_visualize_pnpl

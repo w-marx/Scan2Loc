@@ -198,16 +198,6 @@ class PredictionOnDataset:
         print(f"RTE RMSE: {self.rte_translation_rmse * 1000:.1f} mm and {np.rad2deg(self.rte_rotational_rmse):.1f}°")
         print(f"avg gripping error: {format_optional(self.avg_gripping_error, fmt=".1f", factor=1000)} mm")
         print(f"median gripping error: {format_optional(self.median_gripping_error, fmt=".1f", factor=1000)} mm")
-
-
-    #def get_subcomponent_times_est_base_t_cam_call(self)-> list[tuple[str, float]]:
-    #    """
-    #    Returns the avg. times and their subcomponents per est_base_t_cam call
-    #    :return: The time per call and a list of [subcomponent_name, avg time in seconds] tuples (sorted by time descending)
-    #    """
-    #    complete_time = self._predictions_whole_time_tracker.get_timestamp_name_avg_time("1 est_base_t_cam call")
-    #    sub_times = self._est_base_t_cam_time_tracker.return_averaged_times()
-    #    return complete_time, sub_times
     
 
     def visualize_predictions(self, robot_env:RobotEnvironment|None = None, show_label:bool = False, vis_robot_cams:bool = False)->None:
