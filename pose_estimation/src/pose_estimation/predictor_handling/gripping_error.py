@@ -302,7 +302,7 @@ class FastGrippingError:
 
             pcd = o3d.geometry.PointCloud()
             pcd.points = o3d.utility.Vector3dVector(self.points)
-            pcd.paint_uniform_color([0.5,0.0,0.5])
+            pcd.paint_uniform_color([0.3,0.3,0.3])
 
             to_vis = [base_frame, pcd, self.mesh]
             cmap = plt.get_cmap("jet")

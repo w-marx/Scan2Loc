@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 import seaborn as sns
 import pandas as pd
 
+from shared.image_camera_manipulation import show_image_with_one_diag
+
 from .ellipsoid_utilities_numpy import gaussian_ellipse_s_to_matplotlib_ellipse_s
 
 
@@ -272,7 +274,7 @@ class PnEOptimizer(ABC):
         obs_sigma_mu_s_np = obs_sigma_mu_s.detach().cpu().numpy()
 
         ax.set_title(title)
-        ax.imshow(img_rgb)
+        show_image_with_one_diag(ax=ax,img_rgb=img_rgb)
 
         n = obs_sigma_mu_s_np.shape[0]
 

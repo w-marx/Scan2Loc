@@ -132,7 +132,13 @@ class FeatureDrawing:
     
     def render_to_image(self) -> np.ndarray:
         self.fig.canvas.draw()
-        buffer = self.fig.canvas.buffer_rgba()
+
+        try:
+            buffer = self.fig.canvas.buffer_rgba()
+            image_array = np.asarray(buffer)
+        except AttributeError:
+            image_array = np.array(self.fig.canvas.renderer.buffer_rgba())
+            
         image_array = np.asarray(buffer)
         return image_array[:, :, :3]
 

@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from matplotlib.axes import Axes
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_homogeneous_mat, assert_mxnx3_np_uint8_image_batch
 
@@ -25,6 +26,34 @@ def build_intrinsic_mat(fx:float, fy:float, cx:float, cy:float):
             [0, 0, 1]
         ]
     )
+
+
+def show_image_with_one_diag(ax:Axes, img_rgb:np.ndarray):
+    h, w = img_rgb.shape[:2]
+    diagonal = np.sqrt(w**2 + h**2)
+    ax.imshow(img_rgb, extent=(0, w/diagonal, h/diagonal, 0))
+
+
+
+def scale_intrinsic_mat(intrinsic_mat:np.ndarray, size_old:tuple[int, int], size_new:tuple[float, float] = (1,1))->np.ndarray:
+    """
+    Scales an intrinsic matrix to the new resolution
+    :param intrinsic_mat: the intrinsic matrix to rescale
+    :param size_old: the old image size (w,h)
+    :param size_new: the new images size (w,h)
+    """
+    w_old, h_old = size_old
+    w_new, h_new = size_new
+
+    assert assert_intrinsic_mat(intrinsic_mat)
+    assert w_old > 0 and h_old > 0 and w_new > 0 and h_new > 0
+
+    scale_w, scale_h = w_new/w_old, h_new/h_old
+    fx, fy, cx, cy = extract_params_from_intrinsic_mat(intrinsic_mat=intrinsic_mat)
+    return build_intrinsic_mat(fx = fx*scale_w, fy=fy*scale_h, cx=cx*scale_w, cy = cy * scale_h)
+
+
+
 
 
 def extract_params_from_intrinsic_mat(intrinsic_mat:np.ndarray)->tuple[float, float, float, float]:

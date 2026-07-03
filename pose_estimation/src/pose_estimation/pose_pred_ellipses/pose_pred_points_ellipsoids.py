@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import logging
 
 from shared.assertion_helpers import assert_bgr_xyz_image_pair_batch, assert_intrinsic_mat, assert_mxnx3_np_uint8_image
+from shared.image_camera_manipulation import scale_intrinsic_mat
 
 from ..pnp.extract_and_match_wrapper import ExtractAndMatchWrapper, ExtractAndMatchWrapperConfig
 from ..predictor_handling.pose_predictor import PosePredictor
@@ -16,7 +17,7 @@ from .pypose_pne_optimizer import PyposePNEOptimizer
 from .ellipsoid_utilities_numpy import (
     fit_primal_conic_to_2d_point_cloud, primal_conics_to_gaussian_ellipses, gaussian_ellipse_s_to_matplotlib_ellipse_s, 
     gauss_ellipse_batch_tuple_to_mat_batch, project_primal_quadratics_to_primal_conicals, GaussianMatchingConfig,
-    visualize_primal_quadratics, filter_good_primal_conicals, match_gaussians_hungarian_on_wasserstein
+    visualize_primal_quadratics, filter_good_primal_conicals, match_gaussians_hungarian_on_wasserstein, rescale_gaussians
 )
 from .packed_bool_mask_storage import ImageMaskStorage
 from .ellipsoid_fitting import EllipsoidFitter, SimpleEllipsoidFitter
@@ -89,26 +90,36 @@ def images_to_primal_quadratics(
 def image_to_primal_conics(
         bgr_image:np.ndarray, 
         segmenter:Segmenter,
-        debug_vis_masks:bool = True
+        debug_vis_masks:bool = True,
+        segment_at_res:tuple[int, int] | None = None
     ) -> np.ndarray:
     """
     Creates a Nx3x3 batch of primal conics from the image by segmenting it using sam3.
     :param bgr_image: the bgr image
     :param segmenter: how to segment the image
     :param debug_vis_masks: If true will show the used mask
-    :return: the primal conics (Nx3x3) and avg colors or None
+    :return: the primal conics (Nx3x3) in (0-1) coordinates and avg colors or None
     """
     assert assert_mxnx3_np_uint8_image(bgr_image)
 
-    object_masks = segmenter.get_object_masks(bgr_image, visualize=debug_vis_masks)
+    seg_image = bgr_image
+    if segment_at_res is not None:
+        seg_image = cv2.resize(bgr_image, segment_at_res)
+
+
+    object_masks = segmenter.get_object_masks(seg_image, visualize=debug_vis_masks)
 
     if object_masks is None or object_masks.shape[0] == 0:
         return np.empty((0,3,3))
+
+    seg_diag = np.sqrt(seg_image.shape[0]**2 + seg_image.shape[1]**2)
 
     primal_conic_s = []
 
     for object_mask in object_masks:
         rows, cols = np.where(object_mask)
+        rows = rows/seg_diag
+        cols = cols/seg_diag
         pc_2d = np.column_stack((cols, rows))
         primal_conic_s.append(fit_primal_conic_to_2d_point_cloud(pc_2d))
 
@@ -131,7 +142,7 @@ def visualize_pose_prediction(
         intrinsic_mtx:np.ndarray,
         obs_gaussians_sigma_mu_s:np.ndarray,
         proj_match_indices:list[int],
-        obs_match_indices:list[int]
+        obs_match_indices:list[int],
     ):
     """
     :param fd: The feature drawing with the axis to draw upon and the style guide
@@ -150,7 +161,6 @@ def visualize_pose_prediction(
     )
     proj_mu_s, proj_sigma_s = primal_conics_to_gaussian_ellipses(proj_primal_conincals)
     proj_sigma_mu_s = gauss_ellipse_batch_tuple_to_mat_batch(mu_s=proj_mu_s, sigma_s=proj_sigma_s)
-
 
     n_obs = obs_gaussians_sigma_mu_s.shape[0]
     n_proj = proj_sigma_mu_s.shape[0]
@@ -271,7 +281,7 @@ class EllipsoidPredictor(PosePredictor):
 
         self.cam2_intrinsic_mtx = cam2_intrinsic_mtx
 
-        self.ellipsoid_refinement_res = ellipsoid_refinement_at_res
+        self.image_segmentation_res = ellipsoid_refinement_at_res
 
         assert min_number_matched_ellipsoids_for_opt > 0
         self.min_number_matched_ellipsoids_for_opt = min_number_matched_ellipsoids_for_opt
@@ -398,33 +408,35 @@ class EllipsoidPredictor(PosePredictor):
         """
         if self.base_t_ellipsoid_s.shape[0] < self.min_number_matched_ellipsoids_for_opt:
             return None
-        
-        scaled_cam2_intrinsics = self.cam2_intrinsic_mtx.copy()
-        if self.ellipsoid_refinement_res is not None:
-            h_old, w_old = cam2_bgr_image.shape[:2]
-            w_new, h_new = self.ellipsoid_refinement_res
-            cam2_bgr_image = cv2.resize(cam2_bgr_image, (w_new, h_new))
-            scaled_cam2_intrinsics[0, :] *= w_new/w_old
-            scaled_cam2_intrinsics[1, :] *= h_new/h_old
 
         time_tracker.reset_elapsed_time()
+
+
+        h_orig, w_orig = cam2_bgr_image.shape[:2]
+        old_diag = np.sqrt(h_orig**2+ w_orig**2)
+        img_size_new = (w_orig/old_diag,h_orig/old_diag)
+
+        diag_one_intrinsic_mat = scale_intrinsic_mat(
+                intrinsic_mat=self.cam2_intrinsic_mtx, 
+                size_old=(w_orig, h_orig), size_new=img_size_new
+        )
+
 
         proj_primal_conics = project_primal_quadratics_to_primal_conicals(
             primal_quadratics= self.primal_quadratic_s,
             cam_t_base=rough_cam_t_base,
-            intrinsic_mtx=scaled_cam2_intrinsics,
+            intrinsic_mtx=diag_one_intrinsic_mat,
         )
-
-        proj_primal_conics = filter_good_primal_conicals(
-            primal_conicals=proj_primal_conics
-        )
+        proj_primal_conics = filter_good_primal_conicals(primal_conicals=proj_primal_conics)
 
         time_tracker.add_time_stamp(TimeLabels.PRIMAL_QUAD_2_CONICAL)
+
 
         observed_primal_conics = image_to_primal_conics(
             bgr_image=cam2_bgr_image, 
             segmenter=self.cam2_segmenter,
             debug_vis_masks=self.visualize_segmentation_masks,
+            segment_at_res=self.image_segmentation_res
         )
         time_tracker.add_time_stamp(TimeLabels.CREATE_PRIMAL_CONICALS)
 
@@ -443,7 +455,6 @@ class EllipsoidPredictor(PosePredictor):
         proj_match_idx_s, obs_match_idx_s = match_gaussians_hungarian_on_wasserstein(
             proj_sigma_mu_s=proj_gaussian_ellipses,
             obs_sigma_mu_s=obs_gauss_ellipses,
-            image_size=cam2_bgr_image.shape[:2],
             config=self.matching_config,
             visualize_matching=cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB) if self.visualize_matching else None
         )
@@ -457,19 +468,20 @@ class EllipsoidPredictor(PosePredictor):
             initial_cam_t_base=rough_cam_t_base,
             primal_quadratics=self.primal_quadratic_s[proj_match_idx_s],
             primal_conicals= np.array(observed_primal_conics)[obs_match_idx_s],
-            intrinsic_cam_mat=scaled_cam2_intrinsics,
+            intrinsic_cam_mat=diag_one_intrinsic_mat,
             visualize_result= cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB) if self.visualize_pne_optimisation else None,
         )
         
         time_tracker.add_time_stamp(TimeLabels.PNE_OPTIMIZATION)
 
         if fd is not None:
+            obs_gauss_ellipses_rs = rescale_gaussians(obs_gauss_ellipses, old_res=img_size_new, new_res=(w_orig, h_orig))
             visualize_pose_prediction(
                 fd=fd,
                 dual_quadratics=np.linalg.inv(self.primal_quadratic_s),
                 cam_t_base=cam2_t_base_opt if cam2_t_base_opt is not None else rough_cam_t_base,
                 intrinsic_mtx=self.cam2_intrinsic_mtx,
-                obs_gaussians_sigma_mu_s=obs_gauss_ellipses,
+                obs_gaussians_sigma_mu_s=obs_gauss_ellipses_rs,
                 proj_match_indices=list(proj_match_idx_s),
                 obs_match_indices=list(obs_match_idx_s)
             )

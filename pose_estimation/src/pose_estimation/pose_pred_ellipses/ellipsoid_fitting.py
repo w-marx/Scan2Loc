@@ -14,7 +14,7 @@ from typing import Literal
 from shared.se3_utilities import r_t_to_hom
 from shared.assertion_helpers import assert_homogeneous_mat
 
-from .ellipsoid_utilities_numpy import sample_points_in_primal_quadratic, assert_primal_quadratic_hom_ellipsoid
+from .ellipsoid_utilities_numpy import create_ellipsoid_lineset, assert_primal_quadratic_hom_ellipsoid
 
 from ..utilities.pose_optimisation import AdamConfig, compute_pose_exp_se3, compute_pose_euler
 from ..utilities.point_utilities import remove_outliers_from_point_cloud
@@ -50,7 +50,7 @@ class EllipsoidFitter(ABC):
         pass
 
     def prep_point_cloud(self, points:np.ndarray)->np.ndarray | None:
-        assert points.ndim == 2 and points.shape[-1] == 3
+        assert points.ndim == 2 and points.shape[-1] == 3, f"Not valid point format: {points.shape}"
 
         points = points[np.isfinite(points).all(axis=-1)]
 
@@ -99,10 +99,7 @@ class EllipsoidFitter(ABC):
     def visualize_ellipsoid_fit(point_cloud:np.ndarray, base_t_ellipsoid:np.ndarray, primal_quadratic:np.ndarray):
         base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
         to_vis = [base_frame]
-        pc_np = sample_points_in_primal_quadratic(base_t_ellipsoid, primal_quadratic)
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(pc_np)
-        pcd.paint_uniform_color([0,1,0])
+        ls = create_ellipsoid_lineset(base_t_ellipsoid, primal_quadratic)
 
         pcd1 = o3d.geometry.PointCloud()
         pcd1.points = o3d.utility.Vector3dVector(point_cloud)
@@ -111,7 +108,7 @@ class EllipsoidFitter(ABC):
         frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05)
         frame.transform(base_t_ellipsoid)
 
-        to_vis += [pcd, pcd1, frame]
+        to_vis += [base_frame, ls, pcd1, frame]
         o3d.visualization.draw_geometries(to_vis, f"Ellipsoid fit visualization")
 
 

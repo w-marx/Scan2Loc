@@ -5,6 +5,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.axes import Axes
 from dataclasses import dataclass, field
 from numbers import Real
+import logging
 
 from shared.assertion_helpers import assert_mxnx3_np_uint8_image
 
@@ -12,7 +13,7 @@ from .line_utilities import lines_to_points_distances_2d
 from ..utilities.union_find import UnionFind
 
 
-def merge_line_seg_cluster_into_one_weighted(line_segs_2d:np.ndarray)->np.ndarray:
+def merge_line_seg_cluster_into_one_weighted(line_segs_2d:np.ndarray, use_pca:bool = False)->np.ndarray:
     """
     Joins multiple 2d line segments into one
     :param line_segs_2d: Nx4 array of the structure: [[x1, y1, x2, y2], ...] (with N > 0)
@@ -29,9 +30,17 @@ def merge_line_seg_cluster_into_one_weighted(line_segs_2d:np.ndarray)->np.ndarra
     line_segment_lengths = np.linalg.norm(dxdy, axis = 1)
 
     line_segment_relevances = line_segment_lengths/line_segment_lengths.sum()
-
-    weighted_direction = np.mean(dxdy[:, :]/line_segment_lengths[:, None] * line_segment_relevances[:, None], axis = 0)
-    weighted_direction = weighted_direction/np.linalg.norm(weighted_direction)
+    if use_pca:
+        logging.debug("pca for weighted merging used")
+        weighted_dxdy = dxdy[:, :]/line_segment_lengths[:, None] * line_segment_relevances[:, None]
+        cov = weighted_dxdy.T @ weighted_dxdy
+        vals, vecs = np.linalg.eigh(cov)
+        weighted_direction = vecs[:, np.argmax(vals)]
+        weighted_direction = weighted_direction / np.linalg.norm(weighted_direction)
+    else:
+        logging.debug("weighted direction for weighted merging used")
+        weighted_direction = np.mean(dxdy[:, :]/line_segment_lengths[:, None] * line_segment_relevances[:, None], axis = 0)
+        weighted_direction = weighted_direction/np.linalg.norm(weighted_direction)
 
     weighted_center = np.sum((line_segs_2d[:, :2]+dxdy/2)*line_segment_relevances[:, None], axis = 0)
 
@@ -49,7 +58,8 @@ def merge_close_line_segments(
         max_angle_diff:float = 5,
         max_midpoint_dist:float = 5,
         max_endpoint_dist:float = 15,
-        quick_join:bool = False
+        quick_join:bool = False,
+        use_pca_for_merge:bool = False
     ) -> np.ndarray:
     """
     Clusters lines and merges each cluster.
@@ -63,6 +73,7 @@ def merge_close_line_segments(
     :param max_midpoint_dist: maximum angle between 2 midpoints, higher causes less colinear lines to be joined
     :param max_endpoint_dist: maximum distance between 2 line-endpoints to be joined, higher causes lines with more distance to be joined
     :param quick_join: if false the line clusters will be segmented further, can help when chaining is a problem (takes ~1/4 longer)
+    :param use_pca_for_merge: If true will use pca to find the weighted direction instead of the mean direction
     :return Mx4 array of the same structure with M <= N
     """
     assert line_segs_2d.ndim == 2 and line_segs_2d.shape[-1] == 4, f"invalid shape: {line_segs_2d.shape} != (N,4)"
@@ -142,7 +153,7 @@ def merge_close_line_segments(
     or_clusters =  union_find.return_clusters()
 
     if quick_join:
-        return np.array([merge_line_seg_cluster_into_one_weighted(line_segs_2d[np.array(line_cluster)])
+        return np.array([merge_line_seg_cluster_into_one_weighted(line_segs_2d[np.array(line_cluster)], use_pca=use_pca_for_merge)
             for line_cluster in or_clusters
         ])
     
@@ -179,9 +190,10 @@ def merge_close_line_segments(
         else:
             clusters[representative] = [idx]
 
-    return np.array([merge_line_seg_cluster_into_one_weighted(line_segs_2d[np.array(line_cluster)])
+    return np.array([merge_line_seg_cluster_into_one_weighted(line_segs_2d[np.array(line_cluster)], use_pca=use_pca_for_merge)
         for line_cluster in list(clusters.values())
     ])
+
 
 def remove_short_2d_line_segments(line_segs_2d:np.ndarray, min_line_length_px:float = 5) -> np.ndarray:
     """
@@ -249,12 +261,14 @@ class LineMerging2dConfig:
     :param max_midpoint_dist: The maximal angle between the line midpoint and the infinite other line.
     :param max_endpoint_dist: The maximal shortest distance between an endpoint pair.
     :param min_line_length: The minimum length of the line.
+    :param pca: Wheather to use pca for the weighted join or the direction average
     """
     max_angle_diff:float = 2
     max_midpoint_dist:float = 0.005
     max_endpoint_dist:float = 0.01
     min_line_length:float = 0.01
     use_quick_merge:bool = False
+    use_pca:bool = True
 
     def __post_init__(self):
         assert isinstance(self.max_angle_diff, Real) and 0 <= self.max_angle_diff <= 180
@@ -268,7 +282,8 @@ line_merging_2d_config_for_short_lines = LineMerging2dConfig(
     max_midpoint_dist = 3/850,
     max_endpoint_dist = 0.01,
     min_line_length = 10/850,
-    use_quick_merge = False
+    use_quick_merge = False,
+    use_pca=True
 )
 
 line_merging_2d_config_for_longer_lines = LineMerging2dConfig(
@@ -276,7 +291,8 @@ line_merging_2d_config_for_longer_lines = LineMerging2dConfig(
     max_midpoint_dist = 4/850,
     max_endpoint_dist = 0.02,
     min_line_length = 40/850,
-    use_quick_merge = False
+    use_quick_merge = False,
+    use_pca=True
 )
 
 @dataclass(frozen=True, kw_only=True)
@@ -337,7 +353,7 @@ class LineGenerator:
             lines = remove_short_2d_line_segments(
                 merge_close_line_segments(
                     lines, ref_conf.max_angle_diff, ref_conf.max_midpoint_dist, ref_conf.max_endpoint_dist,
-                    ref_conf.use_quick_merge,
+                    ref_conf.use_quick_merge, use_pca_for_merge=ref_conf.use_pca
                 ),
                 min_line_length_px=ref_conf.min_line_length)
         return lines * diagonal_length

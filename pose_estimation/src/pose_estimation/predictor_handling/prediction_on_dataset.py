@@ -102,22 +102,22 @@ class PredictionOnDataset:
         self.avg_time_for_frame_prediction = self._per_frame_prediction_time_tracker.get_timestamp_name_avg_time("predicted 1 frame")
 
         # Accuracy metrics
-        comparable_poses = [
+        self.comparable_poses = [
             (i, predicted, label)
             for i, (predicted, label) in enumerate(zip(self.predicted_base_t_headset_s, headset_data.robot_base_t_headset_s))
             if predicted is not None and label is not None
         ]
 
-        self.number_error_computable_poses = len(comparable_poses)
+        self.number_error_computable_poses = len(self.comparable_poses)
 
         self.timed_translational_errors = [
             (i, translational_difference(m1, m2))
-            for i, m1, m2 in comparable_poses
+            for i, m1, m2 in self.comparable_poses
         ]
 
         self.timed_rotational_errors = [
             (i, rotational_difference(m1, m2))
-            for i, m1, m2 in comparable_poses
+            for i, m1, m2 in self.comparable_poses
         ]
 
         h, w = headset_data.bgr_image_s[0].shape[:2]
@@ -126,7 +126,7 @@ class PredictionOnDataset:
         self.timed_gripping_errors = []
 
         if gripping_error is not None:
-            for i, m1, m2 in comparable_poses:
+            for i, m1, m2 in self.comparable_poses:
                 e = gripping_error.calculate_gripping_differences_4_pixels(
                     base_t_cam_s= np.array([m1, m2]),
                     pixels_batch= np.array([middle_pixels, middle_pixels]),
@@ -148,10 +148,10 @@ class PredictionOnDataset:
         self.median_rotational_error = np.median(self.rotational_errors) if len(self.rotational_errors) > 0 else None
 
 
-        if len(comparable_poses) > 0:
-            timestamps_sync = [i for i, _, _ in comparable_poses]
-            predicted_sync = np.asarray([predicted for _, predicted, _ in comparable_poses])
-            actual_sync = np.asarray([actual for _, _, actual in comparable_poses])
+        if len(self.comparable_poses) > 0:
+            timestamps_sync = [i for i, _, _ in self.comparable_poses]
+            predicted_sync = np.asarray([predicted for _, predicted, _ in self.comparable_poses])
+            actual_sync = np.asarray([actual for _, _, actual in self.comparable_poses])
         else:
             timestamps_sync = []
             predicted_sync = np.empty((0,4,4))
