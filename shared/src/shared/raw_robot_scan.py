@@ -2,7 +2,7 @@ import numpy as np
 import os, sys, json, cv2, shutil
 from .assertion_helpers import assert_intrinsic_mat, assert_homogeneous_mat
 
-class ProtoRobotData:
+class RawRobotScan:
     def __init__(
             self,
             depth_images:np.ndarray,
@@ -50,7 +50,7 @@ class ProtoRobotData:
 
         camera_data = {
             'camera_intrinsic_matrix': self.cam_intrinsic_mtx.tolist(),
-            'camera_distortion_coefficients': self.cam_distortion_coefficients(),
+            'camera_distortion_coefficients': self.cam_distortion_coefficients,
         }
         os.makedirs(f"{output_folder}", exist_ok=True)
         with open(f"{output_folder}/robot_cam_calibration.json", 'w') as f:

@@ -7,7 +7,7 @@ from numbers import Real
 from shared.se3_utilities import translational_difference, rotational_difference, ate_rmse, rte_rotational_errors_rmse, rte_translational_errors_rmse
 from shared.image_camera_manipulation import create_3d_camera
 
-from ..data_interfaces.robot_environment import RobotEnvironment
+from ..data_interfaces.scanned_3d_environment import Scanned3dEnvironment
 from ..data_interfaces.headset_data import HeadsetData
 from ..utilities.time_tracker import TimeTracker
 
@@ -200,7 +200,7 @@ class PredictionOnDataset:
         print(f"median gripping error: {format_optional(self.median_gripping_error, fmt=".1f", factor=1000)} mm")
     
 
-    def visualize_predictions(self, robot_env:RobotEnvironment|None = None, show_label:bool = False, vis_robot_cams:bool = False)->None:
+    def visualize_predictions(self, robot_env:Scanned3dEnvironment|None = None, show_label:bool = False, vis_robot_cams:bool = False)->None:
         """
         Visualizes the predictions made by the predictor using open3d
         :param robot_env: RobotEnvironment or None, if not None will be added to the plot

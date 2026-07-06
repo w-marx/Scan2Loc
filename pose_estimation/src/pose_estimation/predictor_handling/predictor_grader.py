@@ -11,7 +11,7 @@ from enum import Enum
 from tqdm import tqdm
 
 
-from ..data_interfaces.robot_environment import RobotEnvironment
+from ..data_interfaces.scanned_3d_environment import Scanned3dEnvironment
 from ..data_interfaces.headset_data import HeadsetData
 
 from ..utilities.time_tracker import TimeTracker
@@ -31,7 +31,7 @@ class GradablePosePredictor:
     :param category: A category for the predictor (for most plots Category-Name can be used if wanted)
     :param index: An optional value for plotting different predictors on an axis
     """
-    creator:Callable[[RobotEnvironment, TimeTracker], PosePredictor]
+    creator:Callable[[Scanned3dEnvironment, TimeTracker], PosePredictor]
     name: str
     number_retries: int = 1
     category: str = ""
@@ -192,7 +192,7 @@ class NPredictors1DatasetGrader:
     def __init__(
             self,
             gradable_pose_predictors: list[GradablePosePredictor],
-            robot_env:RobotEnvironment,
+            robot_env:Scanned3dEnvironment,
             headset_data:HeadsetData,
             use_tqdm_for_predictors:bool = False,
             use_tqdm_for_frames:bool = True,
@@ -592,6 +592,9 @@ class NPredictors1DatasetGrader:
                     })
 
         df = pd.DataFrame(data)
+
+        if df.empty:
+            return
 
         self._plot_frontier_plot(
             ax = ax,

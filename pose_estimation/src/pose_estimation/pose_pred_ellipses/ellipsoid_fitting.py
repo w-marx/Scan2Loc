@@ -289,30 +289,16 @@ class MVEEEllipsoidFitter(EllipsoidFitter):
             visualize:bool = False,
             tolerance: float = 1e-3,
             max_iterations: int = 20000,
-            margin: float = 1e-6,
             use_convex_hull: bool = True,
         ):
         """
-        MVEE。
-
-        Defination:
-            sum(((p - center) @ rotation / axes) ** 2) <= 1
-
-        Parameters
-        ----------
-        points : ndarray, shape (N, 3)
-            Input 3D points to be enclosed by the ellipsoid.
-
-        tolerance : float
-            Khachiyan threshold for convergence. Smaller values lead to a more accurate ellipsoid but require more iterations.
-        max_iterations : int
-        Maximum number of iterations for the Khachiyan algorithm.
-
-        margin : float
-            scale the axes by (1 + margin) to ensure all points are enclosed, accounting for numerical issues.
-
-        use_convex_hull : bool
-            If True, only use the convex hull vertices of the input points for fitting to speed up the algorithm.
+        A Minimal volume enclosing ellipsoid fitter.
+        :param min_num_points: Minimal number of points to fit an ellipsoid
+        :param contamination: The contamination for i-Forest pointcloud cleanup
+        :param visualize: if true will visualize each fit
+        :param max_itterations: The max number of itterations used by the fitter
+        :param tolerance: Convergence threshhold, smaller -> more accurate but more itterations
+        :param use_convex_hull: If true will fit to the convex hull for fitting
         """
 
         super().__init__(
@@ -323,7 +309,6 @@ class MVEEEllipsoidFitter(EllipsoidFitter):
 
         self.tolerance = tolerance
         self.max_iterations = max_iterations
-        self.margin = margin
         self.use_convex_hull = use_convex_hull
 
 
@@ -333,71 +318,37 @@ class MVEEEllipsoidFitter(EllipsoidFitter):
 
         if points_clean is None:
             return None
-        else:
-            points = points_clean
 
-        # all input points will be checked for enclosure at the end, 
-        all_points = points
-
-        # MVEE only depends on the convex hull vertices, so we can optionally filter the input points to speed up the algorithm. However, we still need to check all input points at the end to ensure they are enclosed.
-        fitting_points = all_points
-
-        if self.use_convex_hull and len(all_points) > 20:
+        fitting_points = points_clean
+        if self.use_convex_hull and len(points_clean) > 20:
             try:
-                hull = ConvexHull(all_points)
-                fitting_points = all_points[hull.vertices]
+                hull = ConvexHull(points_clean)
+                fitting_points = points_clean[hull.vertices]
             except QhullError:
-                fitting_points = all_points
+                logging.debug("Convex hull generation failed")
 
-        if np.linalg.matrix_rank(
-            fitting_points - np.mean(fitting_points, axis=0)
-        ) < 3:
+        if np.linalg.matrix_rank(fitting_points - np.mean(fitting_points, axis=0)) < 3:
             logging.debug(
                 "The points are coplanar or nearly coplanar. "
                 "A finite 3D enclosing ellipsoid cannot be determined."
             )
             return None
 
-        # ---------------------------------------------------------
-        # 1. Nomilization and setup for Khachiyan MVEE algorithm
-        # ---------------------------------------------------------
         offset = np.mean(fitting_points, axis=0)
         scale = np.std(fitting_points, axis=0)
 
-        cloud_size = np.linalg.norm(
-            np.ptp(fitting_points, axis=0)
-        )
+        cloud_size = np.linalg.norm(np.ptp(fitting_points, axis=0))
+        scale = np.maximum(scale, (cloud_size * 1e-12).clip(min = 1e-12))
+        normalized_points = (fitting_points - offset) / scale
 
-        minimum_scale = max(
-            cloud_size * 1e-12,
-            1e-12,
-        )
+        number_of_points, _ = normalized_points.shape
 
-        scale = np.maximum(scale, minimum_scale)
+        Q = np.vstack([normalized_points.T,np.ones(number_of_points)]) # [4, m]
 
-        normalized_points = (
-            fitting_points - offset
-        ) / scale
+        weights = np.full(number_of_points, 1.0 / number_of_points,)
 
-        number_of_points, dimension = normalized_points.shape
-
-        # Q shape: (dimension + 1, number_of_points)
-        Q = np.vstack([
-            normalized_points.T,
-            np.ones(number_of_points),
-        ])
-
-        weights = np.full(
-            number_of_points,
-            1.0 / number_of_points,
-        )
-
-        maximum_M = np.inf
-
-        # ---------------------------------------------------------
         # 2. Khachiyan MVEE 
-        # ---------------------------------------------------------
-        for iteration in range(self.max_iterations):
+        for _ in range(self.max_iterations):
             X = (Q * weights) @ Q.T
 
             X_inverse = np.linalg.pinv(X,rcond=1e-14)
@@ -407,39 +358,28 @@ class MVEEEllipsoidFitter(EllipsoidFitter):
             maximum_index = int(np.argmax(M))
             maximum_M = float(M[maximum_index])
 
-            convergence_threshold = (1.0 + self.tolerance) * (dimension + 1)
+            convergence_threshold = (1.0 + self.tolerance) * 4.0
 
             if maximum_M <= convergence_threshold:
                 break
 
-            step_size = (maximum_M - dimension - 1.0) / ((dimension + 1.0) * (maximum_M - 1.0))
+            step_size = (maximum_M - 4.0) / (4.0 * (maximum_M - 1.0))
 
             step_size = float(np.clip(step_size, 0.0, 1.0))
 
             weights *= 1.0 - step_size
             weights[maximum_index] += step_size
 
-        # ---------------------------------------------------------
-        # 3. In the normalized space, the MVEE matrix A can be directly computed from the optimal weights.
-        # ---------------------------------------------------------
+
         normalized_center = normalized_points.T @ weights
 
-        covariance_like = (
-            (normalized_points.T * weights)
-            @ normalized_points
-            - np.outer(
-                normalized_center,
-                normalized_center,
-            )
-        )
+        covariance_like = (normalized_points.T * weights) @ normalized_points - np.outer(normalized_center, normalized_center,)
 
-        normalized_A = np.linalg.pinv(covariance_like,rcond=1e-14,) / dimension
+        normalized_A = np.linalg.pinv(covariance_like,rcond=1e-14) / 3
 
         # Change back to original scale and offset
         center = offset + scale * normalized_center
-
         inverse_scale = np.diag(1.0 / scale)
-
         A = inverse_scale @ normalized_A @ inverse_scale
         A = 0.5 * (A + A.T)
 
@@ -463,38 +403,9 @@ class MVEEEllipsoidFitter(EllipsoidFitter):
         if np.linalg.det(rotation) < 0:
             rotation[:, -1] *= -1
 
-        # ---------------------------------------------------------
-        # 5. Check all input points are enclosed, and apply margin inflation
-        # ---------------------------------------------------------
-        local_points = (
-            all_points - center
-        ) @ rotation
-
-        ellipsoid_values = np.sum(
-            (local_points / axes) ** 2,
-            axis=1,
-        )
-
-        maximum_value_before_inflation = float(np.max(ellipsoid_values))
-
-        # If the maximum value is slightly above 1 due to numerical issues, we can inflate the axes to ensure all points are enclosed.
-        inflation_factor = np.sqrt(max(1.0, maximum_value_before_inflation))
-
-        inflation_factor *= 1.0 + self.margin
-        axes *= inflation_factor
-
         base_t_ellipsoid = r_t_to_hom(rotation, center)
 
-        q_ellipsoid = np.diag([
-            1.0 / axes[0]**2,
-            1.0 / axes[1]**2,
-            1.0 / axes[2]**2,
-            -1.0
-        ])
-
-        ellipsoid_t_base = np.linalg.inv(base_t_ellipsoid)
-
-        primal_quadratic = ellipsoid_t_base.T @ q_ellipsoid @ ellipsoid_t_base
+        primal_quadratic = abc_and_base_t_ellipsoid_2_primal_quadratic(abc=axes, base_t_ellipsoid=base_t_ellipsoid)
 
         if self.visualize:
             self.visualize_ellipsoid_fit(

@@ -5,14 +5,14 @@ import open3d as o3d
 
 from shared.assertion_helpers import assert_mxnx3_np_uint8_image_batch, assert_intrinsic_mat, assert_homogeneous_mat
 from shared.se3_utilities import compute_pose_pseudo_median, translational_difference
-from shared.gathered_robot_data import GatheredRobotData
+from shared.complete_robot_scan import CompleteRobotScan
 from shared.image_camera_manipulation import create_3d_camera
 
 from .headset_data import HeadsetData
 from .image_to_pointcloud import XYZImageGenerationConfig, ICPAlignmentConfig, create_aligned_xyz_images
 
 
-class RobotEnvironment:
+class Scanned3dEnvironment:
     def __init__(
             self,
             name:str,
@@ -80,14 +80,14 @@ class RobotEnvironment:
     @classmethod
     def from_gathered_robot_data(
         cls,
-        robot_data:GatheredRobotData,
+        robot_data:CompleteRobotScan,
         number_of_sampled_datapoints: int = 10,
         sample_datapoints_based_on_aruco_corectness:bool = False,
         only_sample_robot_datapoints_w_marker_estimates: bool = False,
         markers_use_advanced_removal: bool = False,
         est3d_xyz_image_gen_config:XYZImageGenerationConfig | None = XYZImageGenerationConfig(),
         est3d_xyz_icp_config:ICPAlignmentConfig | None = ICPAlignmentConfig(),
-    )->'RobotEnvironment':
+    )->'Scanned3dEnvironment':
         """
         :param robot_data: GatheredRobotData instance
         :param number_of_sampled_datapoints: The number of datapoints in the resulting prediction data
@@ -189,6 +189,7 @@ class RobotEnvironment:
             with open(f"{robot_folder}/robot_base_t_robot_camera.json", 'w') as f:
                 json.dump(self.robot_base_t_robot_camera_s[i].tolist(), f, indent=4)
 
+
     def visualize_3d_data(self, visualize:bool = True, visualize_robot_cameras:bool = True):
         """
         Visualizes the robot environment using open3d
@@ -245,7 +246,7 @@ class RobotEnvironment:
         return self._robot_base_t_robot_camera_s
     
 
-def visualize_robot_camera_environment_combo(robot_env:RobotEnvironment, headset_data:HeadsetData):
+def visualize_robot_camera_environment_combo(robot_env:Scanned3dEnvironment, headset_data:HeadsetData):
     to_vis_robot = robot_env.visualize_3d_data(visualize=False)
     to_vis_headset = headset_data.visualize_3d_data(visualize=False)
     o3d.visualization.draw_geometries(

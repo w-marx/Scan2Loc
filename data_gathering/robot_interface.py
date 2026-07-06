@@ -7,7 +7,7 @@ import pyrealsense2 as rs
 import numpy as np
 import os, time, logging
 
-from shared.proto_robot_data import *
+from shared.raw_robot_scan import *
 
 from .depth_filtering import *
 
@@ -81,7 +81,7 @@ def gather_robot_data(
         depth_filter_config:DepthOptimisationConfig = DepthOptimisationConfig(),
         stabilisation_timeout:float = 0.0,
         position_file:str = "positions_panda_personpov_19.csv"
-    ) -> ProtoRobotData:
+    ) -> RawRobotScan:
     """
     Creates an instance of ProtoRobotData by moving the robot and taking images:
 
@@ -125,7 +125,7 @@ def gather_robot_data(
                                                                         )
     pipeline.stop()
     robot_interface.close()
-    gathered_data = ProtoRobotData(
+    gathered_data = RawRobotScan(
         depth_images=np.array(depth_images),
         cam_intrinsic_mtx=rgb_cam_mat,
         cam_distortion_coefficients=rgb_cam_dist_coef,

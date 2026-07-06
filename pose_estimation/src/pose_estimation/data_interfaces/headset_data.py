@@ -3,10 +3,10 @@ import open3d as o3d
 import cv2
 import numpy as np
 
-from shared.se3_utilities import compute_pose_pseudo_median
-from shared.image_camera_manipulation import create_3d_camera, crop_images, scale_images
-from shared.assertion_helpers import assert_mxnx3_np_uint8_image_batch, assert_intrinsic_mat, assert_homogeneous_mat
-from shared.gathered_robot_data import GatheredRobotData
+from shared import (
+    compute_pose_pseudo_median, create_3d_camera, crop_images, scale_images, assert_mxnx3_np_uint8_image_batch, 
+    assert_intrinsic_mat, assert_homogeneous_mat, CompleteRobotScan
+)
 
 
 class HeadsetData:
@@ -214,7 +214,7 @@ class HeadsetData:
 
 def create_robot_bound_headset_data(
         headset_data:HeadsetData,
-        robot_data:GatheredRobotData,
+        robot_data:CompleteRobotScan,
     )->HeadsetData:
     """
     Uses the robot_data to add labels to an HeadsetData object

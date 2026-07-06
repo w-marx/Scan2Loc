@@ -3,9 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
-from shared.proto_robot_data import ProtoRobotData
+from shared.raw_robot_scan import RawRobotScan
 from shared.aruco_charuco_detection import MarkerDetector, NoMarkerDetector, DEFAULT_MARKER_CONFIGS
-from shared.gathered_robot_data import GatheredRobotData
+from shared.complete_robot_scan import CompleteRobotScan
 from shared.se3_utilities import compute_pose_pseudo_median, rotational_difference
 
 
@@ -13,12 +13,12 @@ from .depth_filtering import DEPTH_OPTIMIZATION_CONFIGS
 
 
 def optimize_robot_data(
-        proto_data:ProtoRobotData,
+        proto_data:RawRobotScan,
         name: str = "rob_data1",
-        marker_detector: MarkerDetector = None,
-        gripper_t_cam: np.ndarray|None = None,
+        marker_detector: MarkerDetector | None = None,
+        gripper_t_cam: np.ndarray | None = None,
         base_t_gripper_outlier_quantiles:tuple[float, float] = (0.0, 0.0)
-    )->GatheredRobotData:
+    )->CompleteRobotScan:
     """
     Processed Raw gathered robot data to get a GatheredRobotData instance
 
@@ -76,7 +76,7 @@ def optimize_robot_data(
             if not low_t_err or not low_r_err:
                 camera_t_marker_s[idx] = None
 
-    return GatheredRobotData(
+    return CompleteRobotScan(
         name = name,
         bgr_images=proto_data.bgr_images,
         cam_intrinsic_mtx=proto_data.cam_intrinsic_mtx,
@@ -91,7 +91,7 @@ def optimize_robot_data(
 
 
 def check_output_data(
-        gathered_data: GatheredRobotData,
+        gathered_data: CompleteRobotScan,
         output_folder:str = "data",
         use_mean:bool = True,
         save_result:bool = True,
@@ -240,7 +240,7 @@ if __name__ == "__main__":
             depth_filter_config=DEPTH_OPTIMIZATION_CONFIGS[args.depth_filter]
         )
     else:
-        proto_data = ProtoRobotData.from_folder(args.output_folder)
+        proto_data = RawRobotScan.from_folder(args.output_folder)
 
     marker_detector = MarkerDetector.from_config(DEFAULT_MARKER_CONFIGS[args.marker_detection])
     gd = optimize_robot_data(

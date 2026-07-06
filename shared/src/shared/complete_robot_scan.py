@@ -4,7 +4,7 @@ import numpy as np
 from shared.aruco_charuco_detection import MarkerDetector
 from shared.assertion_helpers import *
 
-class GatheredRobotData:
+class CompleteRobotScan:
     def __init__(
         self,
         name:str,

@@ -54,8 +54,6 @@ def scale_intrinsic_mat(intrinsic_mat:np.ndarray, size_old:tuple[int, int], size
 
 
 
-
-
 def extract_params_from_intrinsic_mat(intrinsic_mat:np.ndarray)->tuple[float, float, float, float]:
     """
     :param intrinsic_mat: A 3x3 intrinsic matrix

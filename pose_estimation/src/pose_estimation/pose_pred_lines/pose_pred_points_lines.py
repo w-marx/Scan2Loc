@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from numbers import Number
 import torch
-from typing import Literal
+from typing import Literal, Any, Callable
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_mxnx3_np_uint8_image, assert_bgr_xyz_image_pair_batch, assert_homogeneous_mat
 
@@ -151,7 +151,6 @@ class LinePredictor(PosePredictor):
 
         self.line_matching_config = line_matching_config
 
-        self.line_fitting_3d_method = None
 
         if line_fitting_3d_config.fitting_algorithm == 'ransac':
             self.line_fitting_3d_method = lambda points3d: line_segment_regression_3d_ransaac(
@@ -224,7 +223,10 @@ class LinePredictor(PosePredictor):
 
     def _est_base_t_cam2_4_idx(
             self,
-            cam2_rgb_image: np.ndarray,
+            cam2_rgb_image_features: list[Any],
+            backward_transformations_names: list[tuple[str, Callable[[np.ndarray], np.ndarray]]],
+            cam2_augmented_images: np.ndarray,
+            cam2_rgb_image:np.ndarray,
             idx:int,
             lines_img2:np.ndarray,
             time_tracker:TimeTracker = TimeTracker(),
@@ -239,7 +241,11 @@ class LinePredictor(PosePredictor):
         """
         time_tracker.reset_elapsed_time()
         base_t_cam_and_points = self._extract_and_match_wrapper.est_base_t_cam2_and_points(
-            idx=idx, cam2_rgb_image=cam2_rgb_image, fd=fd
+            idx=idx, 
+            cam2_rgb_image_features=cam2_rgb_image_features, 
+            backward_transformations_names = backward_transformations_names,
+            augmented_images=cam2_augmented_images,
+            fd=fd
         )
         time_tracker.add_time_stamp(TimeLabels.EXTRACT_AND_MATCH_WRAPPER_CALL)
 
@@ -328,12 +334,30 @@ class LinePredictor(PosePredictor):
         lines_img2 = self.cam2_line_generator.get_lines(cam2_bgr_image)
         time_tracker.add_time_stamp(TimeLabels.LSD_AND_CLEANUP)
 
+        augmented_images = []
+        augmented_images_features = []
+        map_points_to_unaugmented_functions_and_names = []
+
+        for c_aug in self._extract_and_match_wrapper.crop_augmentations:
+            for r_aug in self._extract_and_match_wrapper.rotation_augmentations:
+                augmented_image, backward_aug2 = c_aug.forward(cam2_rgb_image)
+                augmented_image, backward_aug1 = r_aug.forward(augmented_image)
+
+                augmented_images.append(augmented_image)
+                augmented_images_features.append(self._extract_and_match_wrapper.extract_and_match.get_features(augmented_image))
+                map_points_to_unaugmented_functions_and_names.append(
+                    (f"{c_aug} x {r_aug}", lambda points: backward_aug2(backward_aug1(points)))
+                )
+
         while est_base_t_cam is None and number_tries < number_retry:
             idx = self._extract_and_match_wrapper.sheduler.get_best()
             est_base_t_cam = self._est_base_t_cam2_4_idx(
                 idx=idx,
-                lines_img2 = lines_img2,
+                cam2_rgb_image_features = augmented_images_features,
+                backward_transformations_names = map_points_to_unaugmented_functions_and_names,
+                cam2_augmented_images = np.asarray(augmented_images),
                 cam2_rgb_image = cam2_rgb_image,
+                lines_img2 = lines_img2,
                 time_tracker = time_tracker,
                 fd = fd
             )
