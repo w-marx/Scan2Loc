@@ -143,7 +143,12 @@ class ExtractAndLightGlue(ExtractAndMatch):
     
 
 class ExtractAndMatchLoMa(ExtractAndMatch):
-    def __init__(self, loma_variant:Literal["LoMaB", "LoMaB128", "LoMaL", "LoMaG", "LoMaR"] = "LoMaG"):
+    def __init__(
+            self, 
+            loma_variant:Literal["LoMaB", "LoMaB128", "LoMaL", "LoMaG", "LoMaR"] = "LoMaG", 
+            num_keypoints:int | None = None, 
+            filter_threshold:float | None = None
+        ):
         """
         LoMa based ExtractAndMatch class
         :param loma_variant:
@@ -157,8 +162,10 @@ class ExtractAndMatchLoMa(ExtractAndMatch):
             "LoMaR": LoMaR
         }
         assert loma_variant in loma_variant_s, f"The Loma variant:{loma_variant} is not supported"
-
         self.model = LoMa(loma_variant_s[loma_variant])
+
+        self.num_keypoints = num_keypoints
+        self.filter_threshold = filter_threshold
 
     def get_features(self, img_rgb:np.ndarray):
         """
@@ -170,8 +177,48 @@ class ExtractAndMatchLoMa(ExtractAndMatch):
         h1, w1 = (img_rgb.shape[0] // 14)*14, (img_rgb.shape[1] // 14)*14
         img_rgb_m14 = img_rgb[:h1, : w1, :]
         img_tensor = torch.from_numpy(img_rgb_m14).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-        return img_tensor
+
+        keypoints_A, descriptors_A, h1, w1 = self.model.detect_and_describe(
+            img_tensor, self.num_keypoints
+        )
+
+        return (keypoints_A, descriptors_A, h1, w1)
     
+    
+    @staticmethod
+    def _to_pixel_coords(flow, h1, w1):
+        """
+        Method copied from: https://github.com/davnords/LoMa/blob/main/src/loma/loma.py
+        """
+        flow = torch.stack(
+            (
+                w1 * (flow[..., 0] + 1) / 2,
+                h1 * (flow[..., 1] + 1) / 2,
+            ),
+            dim=-1,
+        )
+        return flow
+
+
+    @staticmethod
+    def _filter_matches(scores: torch.Tensor, th: float):
+        """
+        Method copied from: https://github.com/davnords/LoMa/blob/main/src/loma/loma.py
+        """
+        max0, max1 = scores.max(2), scores.max(1)
+        m0, m1 = max0.indices, max1.indices
+        indices0 = torch.arange(m0.shape[1], device=m0.device)[None]
+        indices1 = torch.arange(m1.shape[1], device=m1.device)[None]
+        mutual0 = indices0 == m1.gather(1, m0)
+        mutual1 = indices1 == m0.gather(1, m1)
+        mscores0 = torch.where(mutual0, max0.values, max0.values.new_tensor(0))
+        mscores1 = torch.where(mutual1, mscores0.gather(1, m1), mscores0.new_tensor(0))
+        valid0 = mutual0 & (mscores0 > th)
+        valid1 = mutual1 & valid0.gather(1, m1)
+        m0 = torch.where(valid0, m0, -1)
+        m1 = torch.where(valid1, m1, -1)
+        return m0, m1, mscores0, mscores1   
+     
 
     def match_features(self, features1, features2) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -179,8 +226,22 @@ class ExtractAndMatchLoMa(ExtractAndMatch):
         :param features2: Another torch tensor of a image with height & width %14 = 0
         :return: a tuple of image Points as 2 Nx2 numpy arrays (in the x-y format)
         """
-        kpts1, kpts2 = self.model.match(features1, features2)
-        return kpts1, kpts2
+        keypoints_A, descriptors_A, h1, w1 = features1
+        keypoints_B, descriptors_B, h2, w2 = features2
+
+
+        if self.filter_threshold is None:
+            filter_threshold = self.model.cfg.filter_threshold
+
+        scores = self.model(keypoints_A, keypoints_B, descriptors_A, descriptors_B)["scores"]
+        m0, _, _, _ = self._filter_matches(scores, filter_threshold)
+
+        valid = m0[0] > -1
+        matched_A = keypoints_A[0][torch.where(valid)[0]]
+        matched_B = keypoints_B[0][m0[0][valid]]
+
+        return self._to_pixel_coords(matched_A, h1, w1).cpu().numpy(), self._to_pixel_coords(matched_B, h2, w2).cpu().numpy()
+
 
 class ExtractAndMatchEffLoFTR(ExtractAndMatch):
     _processor = None
