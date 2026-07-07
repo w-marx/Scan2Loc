@@ -1,15 +1,15 @@
-from .pose_predictor import PosePredictor
+from .headset_localizer import HeadsetLocalizer
 from .prediction_on_dataset import PredictionOnDataset
-from .predictor_grader import NPredictors1DatasetGrader, TimeSeriesErrorType, SingleValueErrorType, GradablePosePredictor
+from .localizer_comparison import NPredictors1DatasetGrader, TimeSeriesErrorType, SingleValueErrorType, GradableLocalizer
 from .gripping_error import FastGrippingError, sample_pixel_neighborhood
 
 __all__ = [
-    "PosePredictor",
+    "HeadsetLocalizer",
     "PredictionOnDataset",
     "NPredictors1DatasetGrader",
     "TimeSeriesErrorType",
     "SingleValueErrorType",
-    "GradablePosePredictor",
+    "GradableLocalizer",
     "FastGrippingError",
     "sample_pixel_neighborhood"
 ]

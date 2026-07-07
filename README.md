@@ -13,7 +13,7 @@ conda activate ./data_gather_env
 pip install -e ../shared
 ```
 
-## For Pose estimation & data preprocessing
+## For Headset localisation & data preprocessing
 
 ```
 conda env create -f env_3090.yml -p ./env

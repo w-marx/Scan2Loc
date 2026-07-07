@@ -10,7 +10,7 @@ from shared.image_camera_manipulation import build_intrinsic_mat
 from shared.assertion_helpers import assert_mxnx3_np_uint8_image_batch, assert_mxn_np_float_image_batch, assert_homogeneous_mat_batch
 
 from .scanned_3d_environment import Scanned3dEnvironment, visualize_robot_camera_environment_combo
-from .headset_data import HeadsetData
+from .headset_recording import HeadsetRecording
 from .image_to_pointcloud import create_aligned_xyz_images, ICPAlignmentConfig, XYZImageGenerationConfig, ICPAlignmentConfigs, XYZImageGenerationConfigs
 
 
@@ -126,7 +126,7 @@ def robot_environment_and_headset_data_from_tum(
         xyz_image_generation_config:XYZImageGenerationConfig = XYZImageGenerationConfig(crop_square=False),
         xyz_image_alginment_config:ICPAlignmentConfig = ICPAlignmentConfig(),
         intervall: tuple[float, float] | None = None
-)-> tuple[Scanned3dEnvironment, HeadsetData]:
+)-> tuple[Scanned3dEnvironment, HeadsetRecording]:
     
     assert rgb_camera_name in ["freiburg1", "freiburg2", "freiburg3"]
     assert time_tolerance > 0
@@ -183,7 +183,7 @@ def robot_environment_and_headset_data_from_tum(
     )
 
     # Headset data generation
-    headset_data = HeadsetData(
+    headset_data = HeadsetRecording(
         name=f"{os.path.basename(folder)}_headset_data",
         bgr_image_s=sync_bgr_images[headset_mask],
         intrinsic_cam_mtx=INTRINSIC_FREIBURG_MATRICES[rgb_camera_name],
@@ -230,6 +230,6 @@ if __name__ == "__main__":
     headset_data.save(args.output_base_folder)
 
     rob_load = Scanned3dEnvironment.from_folder(f"{args.output_base_folder}/{os.path.basename(args.input_folder)}_robot_env")
-    head_load = HeadsetData.from_folder(f"{args.output_base_folder}/{os.path.basename(args.input_folder)}_headset_data")
+    head_load = HeadsetRecording.from_folder(f"{args.output_base_folder}/{os.path.basename(args.input_folder)}_headset_data")
 
     visualize_robot_camera_environment_combo(robot_env=rob_load, headset_data=head_load)

@@ -3,14 +3,14 @@ from typing import Callable
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_bgr_xyz_image_pair_batch, assert_mxnx3_np_uint8_image
 
-from ..predictor_handling.pose_predictor import PosePredictor
+from ..localizer_handling.headset_localizer import HeadsetLocalizer
 from ..pnp.extract_and_match_wrapper import ExtractAndMatchWrapperConfig, ExtractAndMatchWrapper
 from ..data_interfaces.scanned_3d_environment import Scanned3dEnvironment
 from ..utilities.time_tracker import TimeTracker, TimeLabels
 from ..utilities.slam2mp4 import FeatureDrawing
 
 
-class OnlyPointsPredictor(PosePredictor):
+class PnPLocalizer(HeadsetLocalizer):
     def __init__(
             self,
             cam2_intrinsic_mtx:np.ndarray,
@@ -46,7 +46,7 @@ class OnlyPointsPredictor(PosePredictor):
     def get_creation_function(
             cam2_intrinsic_mtx:np.ndarray,
             extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig = ExtractAndMatchWrapperConfig(),
-    )->Callable[[Scanned3dEnvironment,TimeTracker], 'OnlyPointsPredictor']:
+    )->Callable[[Scanned3dEnvironment,TimeTracker], 'PnPLocalizer']:
         """
         Returns a function with which a new NoExtrasPredictor may be created.
         :param cam2_intrinsic_mtx: The 3x3 intrinsic matrix for camera 2
@@ -55,7 +55,7 @@ class OnlyPointsPredictor(PosePredictor):
         """
         assert assert_intrinsic_mat(cam2_intrinsic_mtx)
 
-        creation_function = lambda robot_env, init_tt: OnlyPointsPredictor(
+        creation_function = lambda robot_env, init_tt: PnPLocalizer(
             cam2_intrinsic_mtx=cam2_intrinsic_mtx,
             cam1_bgr_images=robot_env.robot_bgr_images,
             cam1_xyz_images=robot_env.robot_xyz_images,

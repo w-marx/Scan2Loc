@@ -9,7 +9,7 @@ from shared import (
 )
 
 
-class HeadsetData:
+class HeadsetRecording:
     def __init__(self,
                  name:str,
                  bgr_image_s: np.ndarray,
@@ -38,7 +38,7 @@ class HeadsetData:
         self._robot_base_t_headset_s = robot_base_t_headset_s
     
     @classmethod
-    def from_folder(cls, load_folder:str)->'HeadsetData':
+    def from_folder(cls, load_folder:str)->'HeadsetRecording':
         """
         Loads from a folder of the structure:
         `load_folder`
@@ -72,7 +72,7 @@ class HeadsetData:
         return instance
     
     @classmethod
-    def from_vrs_file(cls, file_location:str)->'HeadsetData':
+    def from_vrs_file(cls, file_location:str)->'HeadsetRecording':
         """
         This function takes a .vrs file and creates a HeadsetData instance
         It undistorts the images by taking the camera-rgb - fisheye camera and transforming it to a pinhole camera
@@ -112,7 +112,7 @@ class HeadsetData:
         )
     
         
-    def resized_and_cropped(self, *, crop_amount: tuple[int, int] | None = None, new_res: tuple[int, int] | None = None)->'HeadsetData':
+    def resized_and_cropped(self, *, crop_amount: tuple[int, int] | None = None, new_res: tuple[int, int] | None = None)->'HeadsetRecording':
         """
         Returns a copy of the instance with the new resolution
         :param crop_amount: The amount to be cropped before scaling to the new resolution (crop_w, crop_h) (applied twice on each side)
@@ -125,7 +125,7 @@ class HeadsetData:
         if new_res is not None:
             new_images, new_intrinsics = scale_images(new_images, new_intrinsics, new_res)
 
-        return HeadsetData(
+        return HeadsetRecording(
             name=self.name,
             bgr_image_s=new_images,
             intrinsic_cam_mtx=new_intrinsics,
@@ -212,10 +212,10 @@ class HeadsetData:
         return self._n_frames
 
 
-def create_robot_bound_headset_data(
-        headset_data:HeadsetData,
+def bind_headset_recording_to_scan(
+        headset_data:HeadsetRecording,
         robot_data:CompleteRobotScan,
-    )->HeadsetData:
+    )->HeadsetRecording:
     """
     Uses the robot_data to add labels to an HeadsetData object
     :param headset_data: A HeadsetData instance that will be the blueprint for the new object
@@ -246,7 +246,7 @@ def create_robot_bound_headset_data(
 
     masked_headset_images = robot_data.marker_detector.remove_markers(list(headset_data.bgr_image_s))
 
-    return HeadsetData(
+    return HeadsetRecording(
         name=headset_data.name,
         bgr_image_s=np.array(masked_headset_images),
         intrinsic_cam_mtx=headset_data.intrinsic_cam_mtx,

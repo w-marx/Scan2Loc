@@ -1,18 +1,18 @@
 from .data_interfaces import *
 from .pnp import *
-from .pose_pred_ellipses import *
-from .pose_pred_points import *
-from .pose_pred_lines import *
-from .predictor_handling import *
+from .ellipse_localizer import *
+from .pnp_localizer import *
+from .pnpl_localizer import *
+from .localizer_handling import *
 from .utilities import *
 
 
 from .data_interfaces import __all__ as data_interfaces_all
 from .pnp import __all__ as pnp_all
-from .pose_pred_ellipses import __all__ as pose_pred_ellipses_all
-from .pose_pred_points import __all__ as pose_pred_points_all
-from .pose_pred_lines import __all__ as pose_pred_lines_all
-from .predictor_handling import __all__ as predictor_handling_all
+from .ellipse_localizer import __all__ as pose_pred_ellipses_all
+from .pnp_localizer import __all__ as pose_pred_points_all
+from .pnpl_localizer import __all__ as pose_pred_lines_all
+from .localizer_handling import __all__ as predictor_handling_all
 from .utilities import __all__ as utilities_all
 
 __all__ = [

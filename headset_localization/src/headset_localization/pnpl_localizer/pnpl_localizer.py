@@ -9,7 +9,7 @@ from typing import Literal, Any, Callable
 from shared.assertion_helpers import assert_intrinsic_mat, assert_mxnx3_np_uint8_image, assert_bgr_xyz_image_pair_batch, assert_homogeneous_mat
 
 from ..utilities.slam2mp4 import FeatureDrawing
-from ..predictor_handling.pose_predictor import PosePredictor
+from ..localizer_handling.headset_localizer import HeadsetLocalizer
 from ..pnp.extract_and_match_wrapper import ExtractAndMatchWrapperConfig, ExtractAndMatchWrapper
 from ..utilities.time_tracker import TimeTracker, TimeLabels
 from ..utilities.point_utilities import project_visible_points
@@ -106,7 +106,7 @@ def visualize_features_2d(
         )
 
 
-class LinePredictor(PosePredictor):
+class PnPLLocalizer(HeadsetLocalizer):
     def __init__(
             self,
             cam2_intrinsic_mtx:np.ndarray,
@@ -205,7 +205,7 @@ class LinePredictor(PosePredictor):
         For parameter info look at `__init__`
         :return: f(robot_env,time_tracker) -> LinePredictor
         """
-        creation_function = lambda robot_env, init_tt: LinePredictor(
+        creation_function = lambda robot_env, init_tt: PnPLLocalizer(
             cam2_intrinsic_mtx=cam2_intrinsic_mtx,
             cam1_bgr_images=robot_env.robot_bgr_images,
             cam1_xyz_images=robot_env.robot_xyz_images,

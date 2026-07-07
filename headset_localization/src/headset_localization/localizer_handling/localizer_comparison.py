@@ -12,26 +12,26 @@ from tqdm import tqdm
 
 
 from ..data_interfaces.scanned_3d_environment import Scanned3dEnvironment
-from ..data_interfaces.headset_data import HeadsetData
+from ..data_interfaces.headset_recording import HeadsetRecording
 
 from ..utilities.time_tracker import TimeTracker
 
 from .prediction_on_dataset import PredictionOnDataset, format_optional
-from .pose_predictor import PosePredictor
+from .headset_localizer import HeadsetLocalizer
 from .gripping_error import FastGrippingError
 
 
 @dataclass(frozen=True, kw_only=True)
-class GradablePosePredictor:
+class GradableLocalizer:
     """
     A dataclass to grade a Pose Predictor including its runtime
-    :param creator: A function that takes an Robot environment and a TimeTracker for the init and returns the PosePredictor
-    :param name: The identifying name of the PosePredictor (may appear on plots)
+    :param creator: A function that takes an Robot environment and a TimeTracker for the init and returns the HeadsetLocalizer
+    :param name: The identifying name of the HeadsetLocalizer (may appear on plots)
     :param number_retries: The number of times to retries passed to est_base_t_cam
     :param category: A category for the predictor (for most plots Category-Name can be used if wanted)
     :param index: An optional value for plotting different predictors on an axis
     """
-    creator:Callable[[Scanned3dEnvironment, TimeTracker], PosePredictor]
+    creator:Callable[[Scanned3dEnvironment, TimeTracker], HeadsetLocalizer]
     name: str
     number_retries: int = 1
     category: str = ""
@@ -191,9 +191,9 @@ TIME_SERIES_ERROR_LABELS = {
 class NPredictors1DatasetGrader:
     def __init__(
             self,
-            gradable_pose_predictors: list[GradablePosePredictor],
+            gradable_pose_predictors: list[GradableLocalizer],
             robot_env:Scanned3dEnvironment,
-            headset_data:HeadsetData,
+            headset_data:HeadsetRecording,
             use_tqdm_for_predictors:bool = False,
             use_tqdm_for_frames:bool = True,
             compute_gripping_error:bool = False,

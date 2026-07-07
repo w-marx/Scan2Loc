@@ -8,7 +8,7 @@ from shared.se3_utilities import compute_pose_pseudo_median, translational_diffe
 from shared.complete_robot_scan import CompleteRobotScan
 from shared.image_camera_manipulation import create_3d_camera
 
-from .headset_data import HeadsetData
+from .headset_recording import HeadsetRecording
 from .image_to_pointcloud import XYZImageGenerationConfig, ICPAlignmentConfig, create_aligned_xyz_images
 
 
@@ -246,7 +246,7 @@ class Scanned3dEnvironment:
         return self._robot_base_t_robot_camera_s
     
 
-def visualize_robot_camera_environment_combo(robot_env:Scanned3dEnvironment, headset_data:HeadsetData):
+def visualize_robot_camera_environment_combo(robot_env:Scanned3dEnvironment, headset_data:HeadsetRecording):
     to_vis_robot = robot_env.visualize_3d_data(visualize=False)
     to_vis_headset = headset_data.visualize_3d_data(visualize=False)
     o3d.visualization.draw_geometries(

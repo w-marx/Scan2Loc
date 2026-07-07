@@ -6,7 +6,7 @@ from ..utilities.time_tracker import TimeTracker
 from ..pnp.extract_and_match_wrapper import ExtractAndMatchWrapper
 
 
-class PosePredictor(ABC):
+class HeadsetLocalizer(ABC):
     def __init__(self):
         pass
 

@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pose-estimation"
+name = "headset-localization"
 version = "0.1.0"
-description = "Pose estimation with inference & evaluation in robot scanned environments"
+description = "Headset localization with inference & evaluation in robot scanned environments"
 requires-python = ">=3.12"
 
 dependencies = []

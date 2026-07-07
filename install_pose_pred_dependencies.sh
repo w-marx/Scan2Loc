@@ -34,7 +34,7 @@ pip install -e ./shared
 
 
 echo "Installing pose estimation"
-pip install -e ./pose_estimation
+pip install -e ./headset_localization
 
 
 echo "Installing LightGlue, LoMa, map-anything"

@@ -89,7 +89,7 @@ def wasserstein_distances_sq_torch(
     :returns an array of length N of the distances
     """
 
-    mean_dist_sq = torch.sum((mu1_s-mu2_s)**2, axis = 1)
+    mean_dist_sq = torch.sum((mu1_s-mu2_s)**2, dim = 1, keepdim=False)
     cross_sq = sigma2_s_sqrt @ sigma1_s @ sigma2_s_sqrt
     cross = sqrtm_2x2_torch(cross_sq)
     dist_sq = mean_dist_sq + (sigma1_s+sigma2_s-2*cross).diagonal(dim1 = -2, dim2 = -1).sum(-1)

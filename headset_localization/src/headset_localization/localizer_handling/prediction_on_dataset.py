@@ -8,12 +8,12 @@ from shared.se3_utilities import translational_difference, rotational_difference
 from shared.image_camera_manipulation import create_3d_camera
 
 from ..data_interfaces.scanned_3d_environment import Scanned3dEnvironment
-from ..data_interfaces.headset_data import HeadsetData
+from ..data_interfaces.headset_recording import HeadsetRecording
 from ..utilities.time_tracker import TimeTracker
 
 from ..utilities.slam2mp4 import VideoGenerator, InfoCard
 from .gripping_error import sample_pixel_neighborhood, FastGrippingError
-from .pose_predictor import PosePredictor
+from .headset_localizer import HeadsetLocalizer
 
 
 def format_optional(value:Real | float | int | np.floating | None, fmt=".1f", default = "N/A", factor:float = 1.0):
@@ -24,8 +24,8 @@ def format_optional(value:Real | float | int | np.floating | None, fmt=".1f", de
 
 class PredictionOnDataset:
     def __init__(self,
-                 predictor:PosePredictor,
-                 headset_data:HeadsetData,
+                 predictor:HeadsetLocalizer,
+                 headset_data:HeadsetRecording,
                  number_retry:int = 1,
                  vid_gen:VideoGenerator | None = None,
                  video_save_location:str = "test.mp4",
@@ -39,8 +39,8 @@ class PredictionOnDataset:
         :param number_retry: Max number of retries given to est_base_t_cam
         :param gripping_error: 
         """
-        assert isinstance(predictor, PosePredictor)
-        assert isinstance(headset_data, HeadsetData)
+        assert isinstance(predictor, HeadsetLocalizer)
+        assert isinstance(headset_data, HeadsetRecording)
         assert isinstance(number_retry, int) and number_retry > 0
 
 
