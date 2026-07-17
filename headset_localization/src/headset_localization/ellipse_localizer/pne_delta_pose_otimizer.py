@@ -57,13 +57,14 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
             config:PnEDeltaPoseLBFGSOptimizerConfig = PnEDeltaPoseLBFGSOptimizerConfig(),
             delta_pose_mapping:Literal["euler", "se3_exp"] = "se3_exp",
             time_tracker:TimeTracker = TimeTracker(),
-            accumulate_losses:bool = False
+            accumulate_losses:bool = False, 
+            opt_datatype:torch.dtype = torch.float32
         ) -> None:
         super().__init__(accumulate_losses = accumulate_losses)
         self.time_tracker = time_tracker
         self.config = config
         self.device = torch.device(config.device)
-
+        self.datatype = opt_datatype
         self.delta_pose_mapping_str = delta_pose_mapping
 
         if delta_pose_mapping == "se3_exp":
@@ -76,7 +77,7 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
 
 
     def __str__(self):
-        return f"PnE LBFGS on {self.device} w lr: {self.config.learning_rate:.5f} mx steps: {self.config.max_itterations}"
+        return f"PnE LBFGS on {self.device} lr: {self.config.learning_rate:.5f} max it: {self.config.max_itterations}, hist-size: {self.config.history_size}, dtype: {self.datatype}"
 
 
     def optimize_pne(
@@ -88,14 +89,14 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
         visualize_result:None | np.ndarray = None,
     )->np.ndarray:
         # Convert everything to torch & precompute
-        torch_intrinsic = torch.tensor(intrinsic_cam_mat, dtype = torch.float32, device=self.device)
-        dual_quadratics = torch.linalg.inv(torch.tensor(primal_quadratics, dtype = torch.float32, device=self.device))
-        obs_mu_s, obs_sigma_s = primal_conics_to_gaussian_ellipses_torch(torch.tensor(primal_conicals, dtype = torch.float32, device=self.device))
+        torch_intrinsic = torch.tensor(intrinsic_cam_mat, dtype = self.datatype, device=self.device)
+        dual_quadratics = torch.linalg.inv(torch.tensor(primal_quadratics, dtype = self.datatype, device=self.device))
+        obs_mu_s, obs_sigma_s = primal_conics_to_gaussian_ellipses_torch(torch.tensor(primal_conicals, dtype = self.datatype, device=self.device))
         obs_sqrt_sigma_s = sqrtm_2x2_torch(obs_sigma_s)
-        init_cam_t_base_torch = torch.tensor(initial_cam_t_base, dtype = torch.float32, device=self.device)
+        init_cam_t_base_torch = torch.tensor(initial_cam_t_base, dtype = self.datatype, device=self.device)
 
 
-        x_i = torch.zeros(6, dtype = torch.float32, requires_grad = True, device=self.device)
+        x_i = torch.zeros(6, dtype = self.datatype, requires_grad = True, device=self.device)
         optimizer = LBFGS([x_i],
                                lr=self.config.learning_rate, 
                                max_iter=self.config.max_itterations, 
@@ -152,13 +153,15 @@ class PnEDeltaPoseAdamOptimizer(PnEOptimizer):
             delta_pose_mapping:Literal["euler", "se3_exp"] = "se3_exp",
             device:Literal['cuda', 'cpu'] = 'cpu',
             time_tracker:TimeTracker = TimeTracker(),
-            accumulate_losses:bool = False
+            accumulate_losses:bool = False,
+            opt_datatype:torch.dtype = torch.float32
         ) -> None:
         super().__init__(accumulate_losses=accumulate_losses)
         self.time_tracker = time_tracker
         self.adam_cfg = adam_cfg
         self.device = torch.device(device)
         self.delta_pose_mapping_str = delta_pose_mapping
+        self.datatype = opt_datatype
 
         if delta_pose_mapping == "se3_exp":
             self.apply_delta_pose = compute_pose_exp_se3
@@ -169,7 +172,7 @@ class PnEDeltaPoseAdamOptimizer(PnEOptimizer):
 
 
     def __str__(self):
-        return f"PnE Adam on {self.device}, mappint: {self.delta_pose_mapping_str} w lr: {self.adam_cfg.learning_rate:.5f} mx steps: {self.adam_cfg.max_itterations}"
+        return f"PnE Adam on {self.device}, mapping: {self.delta_pose_mapping_str} lr: {self.adam_cfg.learning_rate:.5f} max it: {self.adam_cfg.max_itterations}, dtype: {self.datatype}"
 
 
     def optimize_pne(
@@ -181,12 +184,12 @@ class PnEDeltaPoseAdamOptimizer(PnEOptimizer):
         visualize_result:None | np.ndarray = None,
     ):
         # Convert everything to torch & precompute
-        torch_intrinsic = torch.tensor(intrinsic_cam_mat, dtype = torch.float32, device=self.device)
-        dual_quadratics = torch.linalg.inv(torch.tensor(primal_quadratics, dtype = torch.float32, device=self.device))
-        obs_mu_s, obs_sigma_s = primal_conics_to_gaussian_ellipses_torch(torch.tensor(primal_conicals, dtype = torch.float32, device=self.device))
+        torch_intrinsic = torch.tensor(intrinsic_cam_mat, dtype = self.datatype, device=self.device)
+        dual_quadratics = torch.linalg.inv(torch.tensor(primal_quadratics, dtype = self.datatype, device=self.device))
+        obs_mu_s, obs_sigma_s = primal_conics_to_gaussian_ellipses_torch(torch.tensor(primal_conicals, dtype = self.datatype, device=self.device))
         obs_sqrt_sigma_s = sqrtm_2x2_torch(obs_sigma_s)
-        init_cam_t_base_torch = torch.tensor(initial_cam_t_base, dtype = torch.float32, device=self.device)
-        x_i = torch.zeros(6, dtype = torch.float32, requires_grad = True, device=self.device)
+        init_cam_t_base_torch = torch.tensor(initial_cam_t_base, dtype = self.datatype, device=self.device)
+        x_i = torch.zeros(6, dtype = self.datatype, requires_grad = True, device=self.device)
 
         if visualize_result is not None:
             self.register_visualisation1(img_rgb=visualize_result, dual_quadratics=dual_quadratics,

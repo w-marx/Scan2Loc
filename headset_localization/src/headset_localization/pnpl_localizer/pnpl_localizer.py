@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from numbers import Number
 import torch
 from typing import Literal, Any, Callable
+from matplotlib.axes import Axes
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_mxnx3_np_uint8_image, assert_bgr_xyz_image_pair_batch, assert_homogeneous_mat
 
@@ -35,9 +36,10 @@ class LineFitting3dConfig:
     ransac_iterations:int = 100
     ransac_inlier_distance:float = 0.005
 
-    pca_iterations:int = 3
+    pca_iterations:int = 30
     pca_inlier_quantile:float = 0.95
-    
+    min_number_points:int = 10
+
 
     def __post_init__(self):
         if self.fitting_algorithm == 'ransac':
@@ -105,6 +107,84 @@ def visualize_features_2d(
             color=colors_lines[i], alpha=fd.sc.arrow_alpha, width=0.005
         )
 
+def draw_matched_lines(
+        bgr_img1:np.ndarray,
+        lines_img1:np.ndarray,
+        bgr_img2:np.ndarray,
+        lines_img2:np.ndarray,
+        axes:list[Axes] | None = None, 
+    ):
+        
+        n_matched_lines = lines_img1.shape[0]
+
+        if axes is None:
+            fig, axs = plt.subplots(1,2, figsize = (12, 6))
+        else:
+            axs = axes
+
+        axs[0].imshow(bgr_img1)
+        axs[1].imshow(bgr_img2)
+
+        colors_lines = plt.cm.jet(np.linspace(0,1, n_matched_lines))
+
+        for i,(x1, y1, x2, y2) in enumerate(lines_img1):
+            axs[0].plot([x1, x2], [y1, y2], color=colors_lines[i], linewidth=1)
+
+        for i,(x1, y1, x2, y2) in enumerate(lines_img2):
+            axs[1].plot([x1, x2], [y1, y2], color=colors_lines[i], linewidth=1)
+
+def visualize_lines_3d(
+        points:np.ndarray,
+        lines:np.ndarray
+):
+    """
+    :param points: Nx3 array
+    :param lines: Nx6 array
+    """
+    import open3d as o3d
+    points = points[~np.isnan(points).any(axis=1)]
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points)
+    pcd.paint_uniform_color([0.3, 0.3, 0.3])
+    
+
+    lines = lines[~np.isnan(lines).any(axis=1)]
+
+    print(f"lines: {lines.shape}")
+
+    line_points = []
+    line_indices = []
+    
+    for i, line in enumerate(lines):
+        start_point = line[:3]
+        end_point = line[3:]
+        line_points.append(start_point)
+        line_points.append(end_point)    
+        line_indices.append([2*i, 2*i + 1])
+    
+    line_set = o3d.geometry.LineSet()
+    line_set.points = o3d.utility.Vector3dVector(np.array(line_points))
+    line_set.lines = o3d.utility.Vector2iVector(np.array(line_indices))
+    line_set.paint_uniform_color([1.0, 0.0, 0.0]) 
+
+    print("=== LineSet Information ===")
+    print(f"Number of points: {len(line_set.points)}")
+    print(f"Number of lines: {len(line_set.lines)}")
+    print(f"Has colors: {line_set.has_colors()}")
+    if line_set.has_colors():
+        print(f"Colors shape: {np.array(line_set.colors).shape}")
+    
+    o3d.visualization.draw_geometries([pcd, line_set])
+
+
+def wrap_filter_points_with_threshold(points3d:np.ndarray, method:Callable[[np.ndarray], np.ndarray | None], min_points:int = 10)-> None | np.ndarray:
+    valid = np.isfinite(points3d).all(axis=1)
+    filtered_points = points3d[valid]
+    if len(filtered_points) < min_points:
+        return None
+    return method(filtered_points)
+
+
 
 class PnPLLocalizer(HeadsetLocalizer):
     def __init__(
@@ -120,6 +200,8 @@ class PnPLLocalizer(HeadsetLocalizer):
             line_fitting_3d_config:LineFitting3dConfig = LineFitting3dConfig(),
             pnpl_optimisation_conf:PnPLOptimizerConfig = PnPLOptimizerConfig(),
             debug_visualize_pnpl:bool = False,
+            debug_visualize_matching:bool = False,
+            debug_visualize_3d:bool = False
         ):
         """
         A predictor that uses points & lines as features
@@ -151,25 +233,33 @@ class PnPLLocalizer(HeadsetLocalizer):
 
         self.line_matching_config = line_matching_config
 
-
         if line_fitting_3d_config.fitting_algorithm == 'ransac':
-            self.line_fitting_3d_method = lambda points3d: line_segment_regression_3d_ransaac(
+            self.orig_method = lambda points3d: line_segment_regression_3d_ransaac(
                 xyz_points=points3d,
                 inlier_distance=line_fitting_3d_config.ransac_inlier_distance,
                 itterations=line_fitting_3d_config.ransac_iterations
             )
         elif line_fitting_3d_config.fitting_algorithm == 'robust_pca':
-            self.line_fitting_3d_method = lambda points3d: robust_pca_2d_3d_points_lineseg_regression(
+            self.orig_method = lambda points3d: robust_pca_2d_3d_points_lineseg_regression(
                 points=points3d,
                 line_distance_quantile=line_fitting_3d_config.pca_inlier_quantile,
                 itterations=line_fitting_3d_config.pca_iterations
             )
         else:
-            self.line_fitting_3d_method = lambda points3d: pca_2d_3d_points_lineseg_regression(points3d) 
+            self.orig_method = lambda points3d: pca_2d_3d_points_lineseg_regression(points3d) 
 
+        self.line_fitting_3d_method = lambda points3d: (
+            wrap_filter_points_with_threshold(
+                points3d=points3d,
+                method=self.orig_method,
+                min_points=line_fitting_3d_config.min_number_points
+            )
+        )
 
         self.pnpl_optimisation_conf = pnpl_optimisation_conf
         self.debug_visualize_pnpl = debug_visualize_pnpl
+        self.debug_visualize_matching = debug_visualize_matching
+        self.debug_visualize_3d = debug_visualize_3d
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         time_tracker_init.add_time_stamp(TimeLabels.SIMPLE_ATTRIBUTE_INIT)
 
@@ -182,11 +272,19 @@ class PnPLLocalizer(HeadsetLocalizer):
         )
         time_tracker_init.add_time_stamp(TimeLabels.EXTRACT_AND_MATCH_WRAPPER_INIT)
 
-        self.lines_4_images_cam1 = [
-            cam1_line_generator.get_lines(img) for img in cam1_bgr_images
-        ]
-        time_tracker_init.add_time_stamp(TimeLabels.LSD_AND_CLEANUP)
+        self.lines_4_images_cam1 = []
+        self.lines3d = []
 
+        for bgr_img, xyz_img in zip(cam1_bgr_images, cam1_xyz_images):
+            lines2d = cam1_line_generator.get_lines(bgr_img)
+            lines3d = [self.line_fitting_3d_method(line_seg_2d_to_3d_points(line2d, xyz_img)) for line2d in lines2d]
+
+            self.lines_4_images_cam1.append(np.asarray([l2d for l2d, l3d in zip(lines2d, lines3d) if l3d is not None]))
+            self.lines3d.append(np.asarray([l3d for l3d in lines3d if l3d is not None]))
+
+        #print(f"lines 3d: {len(self.lines3d)} x {[x.shape for x in self.lines3d]}")
+
+        time_tracker_init.add_time_stamp(TimeLabels.LSD_CLEANUP_2_3D)
 
 
     @staticmethod
@@ -199,6 +297,8 @@ class PnPLLocalizer(HeadsetLocalizer):
             line_fitting_3d_config:LineFitting3dConfig = LineFitting3dConfig(),
             pnpl_optimisation_conf:PnPLOptimizerConfig = PnPLOptimizerConfig(),
             debug_visualize_pnpl:bool = False,
+            debug_visualize_matching:bool = False,
+            debug_visualize_3d:bool = False
     ):
         """
         Returns a function with which a new LinePredictor may be created.
@@ -216,7 +316,9 @@ class PnPLLocalizer(HeadsetLocalizer):
             line_fitting_3d_config = line_fitting_3d_config,
             pnpl_optimisation_conf = pnpl_optimisation_conf,
             debug_visualize_pnpl = debug_visualize_pnpl,
-            time_tracker_init=init_tt
+            debug_visualize_matching = debug_visualize_matching,
+            time_tracker_init=init_tt,
+            debug_visualize_3d = debug_visualize_3d
         )
         return creation_function
 
@@ -254,43 +356,45 @@ class PnPLLocalizer(HeadsetLocalizer):
         
         
         base_t_cam_pnp, image_points_cam1, image_points_cam2, world_obj_points, inliers = base_t_cam_and_points
-        lines_img1 = self.lines_4_images_cam1[idx]
-
-        line_pairs = match_2d_line_segments(
-            lines_img1=lines_img1, 
+        line_indices = match_2d_line_segments(
+            lines_img1=self.lines_4_images_cam1[idx],
             lines_img2=lines_img2,
             points_img1=image_points_cam1,
             points_img2=image_points_cam2,
-            line_matching_config=self.line_matching_config
+            return_indices=True
         )
+        #print(f"image points cam1: {image_points_cam1.shape}, min: {np.min(image_points_cam1, axis=0)}")
+        #print(f"image points cam2: {image_points_cam2.shape}, min: {np.min(image_points_cam2, axis=0)}")
+
+        matched_lines_img1_2d = np.asarray([self.lines_4_images_cam1[idx][i1] for i1, _ in line_indices])
+        matched_lines_img1_3d = np.asarray([self.lines3d[idx][i1] for i1, _ in line_indices])
+        matched_lines_img2_2d = np.asarray([lines_img2[i2] for _, i2 in line_indices])
+
+        if self.debug_visualize_matching:
+            draw_matched_lines(
+                bgr_img1=cv2.cvtColor(self.cam1_bgr_images[idx], cv2.COLOR_BGR2RGB),
+                lines_img1=matched_lines_img1_2d,
+                bgr_img2=cam2_rgb_image,
+                lines_img2=matched_lines_img2_2d
+            )
+            plt.show()
+
+
         time_tracker.add_time_stamp(TimeLabels.LINE_MATCHING)
 
-        if line_pairs.shape[0] < 1:
+        if matched_lines_img2_2d.shape[0] < 1:
             return base_t_cam_pnp
 
-
-        matched_lines_2d = []
-        matched_lines_3d = []
-        
-        xyz_points_4_lines = [line_seg_2d_to_3d_points(line_pair[0], self.cam1_xyz_images[idx]) for line_pair in line_pairs]
-
-        for i, line_pair in enumerate(line_pairs):
-            line_segment_3d = self.line_fitting_3d_method(xyz_points_4_lines[i])
-            if line_segment_3d is not None:
-                matched_lines_3d.append(line_segment_3d)
-                matched_lines_2d.append(line_pair[1])
-        matched_lines_2d = np.array(matched_lines_2d) if len(matched_lines_2d) > 0 else np.empty((0,4))
-        matched_lines_3d = np.array(matched_lines_3d) if len(matched_lines_3d) > 0 else np.empty((0,6))
-
-        time_tracker.add_time_stamp(TimeLabels.LINE_2D_2_3D)
+        if self.debug_visualize_3d:
+            visualize_lines_3d(points=self.cam1_xyz_images[idx].reshape(-1, 3), lines=matched_lines_img1_3d)
 
         cam2_t_base_bundle_adjustment = optimize_pnpl(
             initial_cam_t_base=np.linalg.inv(base_t_cam_pnp).copy(),
             points_3d=world_obj_points[inliers].copy(),
             points_2d=image_points_cam2[inliers].copy(),
             intrinsic_cam_mat=self.cam2_intrinsic_mtx.copy(),
-            lines_2d = matched_lines_2d,
-            lines_3d = matched_lines_3d,
+            lines_2d = matched_lines_img2_2d,
+            lines_3d = matched_lines_img1_3d,
             config=self.pnpl_optimisation_conf,
             visualize_result= cam2_rgb_image if self.debug_visualize_pnpl else None
         )
@@ -300,8 +404,8 @@ class PnPLLocalizer(HeadsetLocalizer):
         if fd is not None:
             visualize_features_2d(
                 fd = fd,
-                obs_lines_matched_2d=matched_lines_2d,
-                proj_lines_matched_3d=matched_lines_3d,
+                obs_lines_matched_2d=matched_lines_img2_2d,
+                proj_lines_matched_3d=matched_lines_img1_3d,
                 cam_t_base=cam2_t_base_bundle_adjustment if cam2_t_base_bundle_adjustment is not None else base_t_cam_pnp,
                 intrinsic_mat= self.cam2_intrinsic_mtx
             )

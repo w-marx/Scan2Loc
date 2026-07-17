@@ -10,17 +10,18 @@ class TimeLabels(Enum):
     SIMPLE_ATTRIBUTE_INIT = "Attribute Initialisation"
 
     # Line based:
-    LSD_AND_CLEANUP = "Generation and cleanup of 2d lines"
-    LINE_MATCHING = "Matching the 2d lines"
+    LSD_AND_CLEANUP = "2D lines - Generate and Cleanup"
+    LSD_CLEANUP_2_3D = "Generation of clean 2D & 3D lines"
+    LINE_MATCHING = "Matching the 2D lines"
     LINE_2D_2_3D = "3D lines from 2D"
-    PNL_OPTIMIZATION = "Perspective n Points & Lines optimisation"
+    PNL_OPTIMIZATION = "PnP+L optimization"
 
     # Ellipsoid based
     CREATE_PRIMAL_QUADRATICS = "Primal quadratics creation"
-    CREATE_PRIMAL_CONICALS = "Create primal conicals"
-    GAUSSIAN_MATCHING_2D = "Matching the 2d gaussians"
-    PNE_OPTIMIZATION = "Perspective n Ellipsoids optimisation"
-    PRIMAL_QUAD_2_CONICAL = "Projecting 3d primal quad. to 2d. primal conicals"
+    CREATE_PRIMAL_CONICALS = "Primal conicals creation"
+    GAUSSIAN_MATCHING_2D = "2D gaussian matching"
+    PNE_OPTIMIZATION = "Perspective n Ellipsoids optimization"
+    PRIMAL_QUAD_2_CONICAL = "Projecting ellipsoids to ellipses"
     PRIMAL_CONICALS_2_GAUSSIANS = "Primal conicals to gaussians"
 
 

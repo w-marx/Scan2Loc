@@ -154,8 +154,10 @@ class ExtractAndMatchWrapper:
             if image_points_cam1.shape[0] < best_num_of_points:
                     continue
 
-
-            world_obj_points = np.array([self.cam1_xyz_images[idx][int(np.round(y)),int(np.round(x))] for x,y in image_points_cam1])
+            image_points_cam1 = np.round(image_points_cam1)
+            image_points_cam1[:, 0] = np.clip(image_points_cam1[:, 0], a_min=0, a_max=self.cam1_xyz_images[idx].shape[1]-1)
+            image_points_cam1[:, 1] = np.clip(image_points_cam1[:, 1], a_min=0, a_max=self.cam1_xyz_images[idx].shape[0]-1)
+            world_obj_points = np.array([self.cam1_xyz_images[idx][int(y),int(x)] for x,y in image_points_cam1])
             valid_points_mask = np.isfinite(world_obj_points).all(axis=1)
 
             if np.sum(valid_points_mask) > best_num_of_points:

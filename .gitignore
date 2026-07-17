@@ -123,3 +123,10 @@ notebooks/*.mp4
 
 processed_datasets/
 tum_datasets/
+
+img_env/
+img_scan/
+example_datasets/robot
+example_datasets/robot_cam_calibration.json
+notebooks/*.json
+notebooks/*.png

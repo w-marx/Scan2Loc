@@ -6,6 +6,7 @@ from pypose.optim.solver import Cholesky, PINV
 import numpy as np
 from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_homogeneous_mat
 
@@ -117,13 +118,15 @@ class Reproj(nn.Module):
         return torch.cat([u, v], dim=-1)
 
     
-    def visualize_2d(self, img_rgb:np.ndarray, observed_lines_2d:np.ndarray):
+    def visualize_2d(self, img_rgb:np.ndarray, observed_lines_2d:np.ndarray, ax:Axes | None = None, title:str = "PnPL errors"):
 
         proj_points = self.project_points().detach().cpu().numpy()
         obs_points = self.observed_points_2d.detach().cpu().numpy()
+        #print(f"obs points: {obs_points.shape[0]}, min: {np.min(obs_points, axis=0)}")
 
-        fig, ax = plt.subplots(figsize = (12, 8))
-        ax.set_title("PnPL errors")
+        if ax is None:
+            fig, ax = plt.subplots(figsize = (12, 8))
+        ax.set_title(title)
         ax.imshow(img_rgb)
 
 
@@ -158,8 +161,6 @@ class Reproj(nn.Module):
                         angles='xy', scale_units='xy', scale=1,
                         color=colors_lines[i], alpha=0.8, width=0.005)
         ax.legend()
-
-        plt.show()
 
 
 
@@ -241,6 +242,10 @@ def optimize_pnpl(
         line_relevance=config.line_relevance
     )
 
+    if visualize_result is not None:
+        fig, axes = plt.subplots(1,3, figsize = (18, 5))
+        model.visualize_2d(visualize_result, lines_2d, ax=axes[0], title="Pre Opt")
+
     inp = {}
 
     strategy = pp.optim.strategy.TrustRegion(up=2.0, down=0.5)
@@ -255,6 +260,11 @@ def optimize_pnpl(
     final_cam_t_base = model.cam_t_base_se3.matrix().detach().cpu().numpy()
 
     if visualize_result is not None:
-        model.visualize_2d(visualize_result, lines_2d)
+        model.visualize_2d(visualize_result, lines_2d, ax=axes[1], title="Post Opt")
+        axes[2].plot(losses)
+        axes[2].set_title("Loss over iterations")
+        axes[2].set_xlabel("Iteration")
+        axes[2].set_ylabel("Loss")
+        plt.show()
 
     return final_cam_t_base

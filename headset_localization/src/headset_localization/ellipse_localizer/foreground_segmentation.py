@@ -149,4 +149,7 @@ def display_image_masks(bgr_img:np.ndarray, masks:np.ndarray):
     axes[0].imshow(overlay.astype(int), alpha = 0.4)
     axes[1].imshow(overlay.astype(int))
 
+    axes[0].grid(False)
+    axes[1].grid(False)
+
     plt.show()

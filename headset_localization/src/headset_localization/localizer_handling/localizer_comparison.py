@@ -48,10 +48,10 @@ class GradableLocalizer:
 
 
 class SingleValueErrorType(Enum):
-    AVG_TRANSLATIONAL = "Average Translational error [mm]"
-    MED_TRANSLATIONAL = "Median Translational error [mm]"
-    AVG_ROTATIONAL = "Average Rotational error [deg]"
-    MED_ROTATIONAL = "Median Rotational error [deg]"
+    AVG_TRANSLATIONAL = "Avg. Translational Error [mm]"
+    MED_TRANSLATIONAL = "Med. Translational Error [mm]"
+    AVG_ROTATIONAL = "Avg. Rotational Error [deg]"
+    MED_ROTATIONAL = "Med. Rotational Error [deg]"
     ATE_RMSE_TRANSLATIONAL = "ATE RMSE [mm]"
     ATE_RMSE_ROTATIONAL = "ATE RMSE [deg]"
     RTE_RMSE_TRANSLATIONAL = "RTE RMSE [mm]"
@@ -323,6 +323,8 @@ class NPredictors1DatasetGrader:
                 "Med r_err [deg]": format_optional(grader.median_rotational_error, factor=180/np.pi, fmt=".1f"),
                 "Avg grip_err [mm]": format_optional(grader.avg_gripping_error, factor=1000, fmt=".1f"),
                 "Med gripp_err [mm]": format_optional(grader.median_gripping_error, factor=1000, fmt=".1f"),
+                "RMSE t_err [mm]":format_optional(grader.ate_translation_rmse, factor=1000, fmt=".1f"),
+                "RMSE r_err [deg]":format_optional(grader.ate_rot_rmse, factor=180/np.pi, fmt=".1f")
             })
 
         df = pd.DataFrame(rows)
@@ -336,7 +338,7 @@ class NPredictors1DatasetGrader:
         time_df: pd.DataFrame,
         title: str,
         plot_legend: bool = True,
-        rotate_x_labels:bool = True
+        rotate_x_labels:int|None = 45
     ):
         cols = sorted(c for c in time_df.columns if c != "rest")
         if "rest" in time_df.columns:
@@ -348,7 +350,8 @@ class NPredictors1DatasetGrader:
             kind="bar",
             stacked=True,
             ax=ax,
-            rot=0
+            rot=0,
+            legend=plot_legend
         )
 
         ax.set_ylabel("Time [ms]")
@@ -356,8 +359,8 @@ class NPredictors1DatasetGrader:
 
         if plot_legend:
             ax.legend()
-        if rotate_x_labels:
-            plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+        if rotate_x_labels is not None:
+            plt.setp(ax.get_xticklabels(), rotation=rotate_x_labels, ha="right")
 
         ax.grid(True, axis="y", alpha=0.3)
 
@@ -375,7 +378,7 @@ class NPredictors1DatasetGrader:
         print(self.get_creation_times().to_string(float_format="{:.1f}".format))
 
 
-    def plot_prediction_times(self, ax:Axes, plot_legend:bool = True, rotate_x_labels:bool = True):
+    def plot_prediction_times(self, ax:Axes, plot_legend:bool = True, rotate_x_labels:int | None = 45):
         NPredictors1DatasetGrader.plot_times(
             ax=ax,
             time_df=self.get_prediction_times(),
@@ -441,20 +444,16 @@ class NPredictors1DatasetGrader:
         name_key:str = "Name",
         full_name_key:str = "Predictor",
         plot_legend:bool = True,
-        plot_names:bool = True
+        plot_names:bool = True,
+        in_plot_text_size:int = 10,
+        adjust_texts:bool = True
     ):
         hue_key = category_key if use_category else full_name_key
         palette = sns.color_palette("tab10", n_colors=df[hue_key].nunique())
         color_map = dict(zip(sorted(df[hue_key].unique()), palette))
 
-        sns.scatterplot(data=df,
-            x=xkey,
-            y=ykey,
-            hue=hue_key,
-            palette=color_map,
-            ax=ax,
-            s=80,
-            alpha=0.7
+        sns.scatterplot(data=df, x=xkey, y=ykey, hue=hue_key,
+            palette=color_map, ax=ax, s=80, alpha=0.7, legend=plot_legend
         )
 
         if plot_frontier:
@@ -474,31 +473,27 @@ class NPredictors1DatasetGrader:
         if use_category:
             for category, cat_df in df.groupby("Category"):
                 cat_df = cat_df.sort_values(xkey)
+                ax.plot(cat_df[xkey], cat_df[ykey], linewidth=1, alpha=0.5, color = color_map[category])
 
-                ax.plot(
-                    cat_df[xkey],
-                    cat_df[ykey],
-                    linewidth=1,
-                    alpha=0.5,
-                    color = color_map[category],
-                )
         if plot_names:
+            y_offset = 0 if adjust_texts else (df[ykey].max() - df[ykey].min()) * 0.03
             texts = []
             for _, row in df.iterrows():
                 texts.append(
                     ax.text(
                         row[xkey],
-                        row[ykey],
+                        row[ykey]+y_offset,
                         (row[name_key] if use_category else row[full_name_key]),
-                        fontsize=8
+                        fontsize=in_plot_text_size
                     )
                 )
-
-            adjust_text(
-                texts,
-                ax=ax,
-                arrowprops=dict(arrowstyle="-", lw=0.5, alpha=0.5)
-            )
+            if adjust_texts:
+                adjust_text(
+                    texts,
+                    ax=ax,
+                    force_text=(0.5, 0.5),
+                    arrowprops=dict(arrowstyle="-", lw=1, alpha=0.0),
+                )
 
         ax.margins(x=0.15, y=0.2)
 
@@ -517,9 +512,13 @@ class NPredictors1DatasetGrader:
             self, 
             ax:Axes, 
             error_type:SingleValueErrorType,
+            custom_title:str | None = None,
             plot_frontier:bool = False, 
             use_category:bool = False,
-            invert_y:bool = True
+            invert_y:bool = True,
+            plot_legend:bool = True,
+            plot_names:bool = True,
+            adjust_texts:bool = True
         ):
         data = []
 
@@ -549,13 +548,16 @@ class NPredictors1DatasetGrader:
             df = df,
             xkey = "Hz [1/s]",
             ykey = error_ylabel,
-            title = f"FPS vs {error_type.value}",
+            title = f"FPS vs {error_type.value}" if custom_title is None else custom_title,
             plot_frontier = plot_frontier, 
             use_category = use_category,
             invert_y = invert_y,
             category_key = "Category",
             name_key = "Name",
-            full_name_key = "Predictor"
+            full_name_key = "Predictor",
+            plot_legend = plot_legend,
+            plot_names = plot_names,
+            adjust_texts = adjust_texts
         )
     
     
@@ -564,10 +566,14 @@ class NPredictors1DatasetGrader:
             ax:Axes, 
             error_type_1:SingleValueErrorType,
             error_type_2:SingleValueErrorType,
+            custom_title:str | None = None,
+            plot_legend:bool = True,
             plot_frontier:bool = False, 
             use_category:bool = False,
             invert_x:bool = False,
-            invert_y:bool = False
+            invert_y:bool = False,
+            use_in_plot_text:bool = True,
+            adjust_texts:bool = True
         ):
         data = []
 
@@ -601,7 +607,7 @@ class NPredictors1DatasetGrader:
             df = df,
             xkey = error1_label,
             ykey = error2_label,
-            title = f"{error_type_1.value} vs {error_type_2.value}",
+            title = f"{error_type_1.value} vs {error_type_2.value}" if custom_title is None else custom_title,
             plot_frontier = plot_frontier, 
             use_category = use_category,
             invert_y = invert_y,
@@ -609,6 +615,9 @@ class NPredictors1DatasetGrader:
             name_key = "Name",
             full_name_key = "Predictor",
             invert_x = invert_x,
+            plot_names = use_in_plot_text,
+            plot_legend = plot_legend,
+            adjust_texts = adjust_texts
         )
 
 
@@ -621,7 +630,8 @@ class NPredictors1DatasetGrader:
             plot_frontier:bool = False,
             use_category:bool = False,
             plot_legend:bool = False,
-            plot_names:bool = False
+            plot_names:bool = False,
+            adjust_texts:bool = True
         ):
         data = []
 
@@ -658,7 +668,8 @@ class NPredictors1DatasetGrader:
             name_key = "Name",
             full_name_key = "Predictor",
             plot_legend=plot_legend,
-            plot_names = plot_names
+            plot_names = plot_names,
+            adjust_texts = adjust_texts
         )
 
 

@@ -1,7 +1,7 @@
 import pypose as pp
 from pypose.optim import LM
 import torch, torch.nn as nn
-from pypose.optim.solver import Cholesky, PINV
+from pypose.optim.solver import Cholesky, PINV, LSTSQ
 from dataclasses import dataclass
 from typing import Literal
 import numpy as np
@@ -73,7 +73,7 @@ class PyposePnEOptimizerConfig:
     lm_reject:float = 30
     lm_strat_up:float = 3.0
     lm_strat_down:float = 0.5
-    solver:Literal["PINV", "Cholesky"] = "PINV"
+    solver:Literal["PINV", "Cholesky", "LSTSQ"] = "PINV"
     convergence_threshold:float = 1e-6
     device: Literal["cpu", "cuda"] = "cpu"
     
@@ -94,7 +94,7 @@ class PyposePNEOptimizer(PnEOptimizer):
 
         self.strategy = pp.optim.strategy.TrustRegion(up = self.config.lm_strat_up, down=self.config.lm_strat_down)
 
-        solvers = {"PINV":PINV, "Cholesky":Cholesky}
+        solvers = {"PINV":PINV, "Cholesky":Cholesky, "LSTSQ":LSTSQ}
         self.solver = solvers[config.solver]()
         self.number_fw_calls = []
         self.device = torch.device(config.device)

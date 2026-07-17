@@ -279,7 +279,7 @@ def project_primal_quadratics_to_primal_conicals(
     return cam_primal_conic
 
 
-def filter_good_primal_conicals(primal_conicals:np.ndarray, cond:float = 1e10, atol:float = 1e-8)->np.ndarray:
+def filter_good_primal_conicals(primal_conicals:np.ndarray, cond:float = 1e10, atol:float = 1e-8)->tuple[np.ndarray, np.ndarray]:
     """
     Takes a batch of Bx3x3 primal conics and returns those that are real ellipses and numerical good conditioned
     :param primal_conic_s: A batch of Bx3x3 primal conics
@@ -310,8 +310,11 @@ def filter_good_primal_conicals(primal_conicals:np.ndarray, cond:float = 1e10, a
     if np.any(~validmask) or np.any(~symmetric_mask):
         logging.debug(f"removed {np.sum(~validmask)} / {primal_conicals_norm.shape[0]} primal conicals for bad numerical behaviour")
         logging.debug(f"conicals: {primal_conicals_norm}")
+
+    full_mask = np.zeros(primal_conicals.shape[0], dtype=bool)
+    full_mask[np.where(before_norm_mask)[0][validmask]] = True
     
-    return primal_conicals_norm[validmask]
+    return full_mask, primal_conicals_norm[validmask]
 
 
 
@@ -474,11 +477,12 @@ def create_ellipsoid_lineset(
 
 
 
-def fit_primal_conic_to_2d_point_cloud(point_cloud:np.ndarray)->np.ndarray | None:
+def fit_primal_conic_to_2d_point_cloud(point_cloud:np.ndarray, eps:float = 1e-7)->np.ndarray | None:
     """
     Creates a primal conic and base_t_ellipsoid matrix from a 2d point cloud.
     Is very sensitive to outliers.
     :param point_cloud: A Nx2 point cloud
+    :param eps: Tolerance for min semi-axis length
     :return The fitted (3x3) primal conic
     """
     assert point_cloud.ndim == 2 and point_cloud.shape[-1] == 2, f"shape: {point_cloud.shape}"
@@ -498,6 +502,10 @@ def fit_primal_conic_to_2d_point_cloud(point_cloud:np.ndarray)->np.ndarray | Non
     ellipsoid_pts_centered = (base_t_ellipsoid[:2, :2].T @ base_pts_centered.T).T
     a = np.max(np.abs(ellipsoid_pts_centered[:, 0]))
     b = np.max(np.abs(ellipsoid_pts_centered[:, 1]))
+
+    if a <= eps or b <= eps:
+        logging.info(f"skipped primal conic")
+        return None
 
     ellipsoid_t_base = np.linalg.inv(base_t_ellipsoid)
     primal_conic = ellipsoid_t_base.T @ np.diag([1/a**2, 1/b**2, -1.0]) @ ellipsoid_t_base
@@ -552,7 +560,7 @@ def visualize_primal_quadratics(
 
     assert avg_colors is None or avg_colors.shape == (base_t_ellipsoid_s.shape[0], 3), f"Wrong color shape: {avg_colors.shape}"
 
-    base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
+    base_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
 
     to_vis = [base_frame]
 
@@ -767,6 +775,7 @@ def match_gaussians_hungarian_on_wasserstein(
     mu1_s, sigma1_s = gauss_ellipse_mat_batch_to_tuple(proj_sigma_mu_s)
     mu2_s, sigma2_s = gauss_ellipse_mat_batch_to_tuple(obs_sigma_mu_s)
     adjecency_mat[:n, :m] = pairwise_sq_wasserstein_distance(mu1_s, sigma1_s, mu2_s, sigma2_s)
+    adjecency_mat[~np.isfinite(adjecency_mat)] = config.dummy_value
 
     row_ind, col_ind = linear_sum_assignment(adjecency_mat)
     valid_ind = (col_ind < m) & (row_ind < n)

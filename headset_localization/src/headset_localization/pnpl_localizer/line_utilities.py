@@ -273,8 +273,9 @@ def match_2d_line_segments(
         lines_img2:np.ndarray,
         points_img1:np.ndarray, 
         points_img2:np.ndarray,
-        line_matching_config:LineMatchingConfig = LineMatchingConfig()
-    )->np.ndarray:
+        line_matching_config:LineMatchingConfig = LineMatchingConfig(),
+        return_indices:bool = False
+    )->np.ndarray | list[tuple[int, int]]:
     """
     Returns the best matching line segment pairs (only matches one to one)
     :param lines_img1: Lx4 numpy array of the structure: (x1, y1, x2, y2), of lines in image 1
@@ -305,7 +306,15 @@ def match_2d_line_segments(
         if best_l2_matching_values[best_l2_index] * line_matching_config.better_factor <= agreement_matrix[i, best_l2_index]:
                 best_l2_matching_values[best_l2_index] = agreement_matrix[i, best_l2_index]
                 best_l2_matchings[best_l2_index] = i
-        
+    
+    if return_indices:
+        line_pairs = []
+        for l2_idx, l1_idx in enumerate(best_l2_matchings): 
+            if l1_idx >= 0:
+                line_pairs.append((l1_idx, l2_idx))
+        return line_pairs
+
+
     line_pairs = []
     for l2_idx, l1_idx in enumerate(best_l2_matchings): 
         if l1_idx >= 0:

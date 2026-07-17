@@ -146,7 +146,7 @@ class PnEOptimizer(ABC):
         self.accumulated_losses = [] if accumulate_losses else None
 
 
-    def visualize_opt_losses(self, ax:Axes):
+    def visualize_opt_losses(self, ax:Axes, log_scale:bool = True):
         if self.accumulated_losses is None:
             return
 
@@ -156,6 +156,9 @@ class PnEOptimizer(ABC):
                 rows.append({"run": run_idx, "iteration": iteration, "loss": loss,})
         df = pd.DataFrame(rows)
         sns.lineplot(data=df, ax = ax, x="iteration", y="loss",hue="run")
+
+        if log_scale:
+            ax.set_yscale("log")
 
 
     @abstractmethod
@@ -326,17 +329,18 @@ class PnEOptimizer(ABC):
         ax.axis('off')
 
 
-def visualize_multiple_pne_optimizer_losses(ax: Axes, optimizers: list[PnEOptimizer]):
+def visualize_multiple_pne_optimizer_losses(ax: Axes, optimizers: list[PnEOptimizer], use_log_scale:bool = True, names:list[str] | None = None):
     rows = []
 
-    for optimizer in optimizers:
+    for opt_idx, optimizer in enumerate(optimizers):
         if optimizer.accumulated_losses is None:
             continue
-
+        max_len = max([len(losses) for losses in optimizer.accumulated_losses])
         for run_idx, losses in enumerate(optimizer.accumulated_losses):
-            for iteration, loss in enumerate(losses):
+            padded_losses = losses + [losses[-1]] * (max_len - len(losses))
+            for iteration, loss in enumerate(padded_losses):
                 rows.append({
-                    "optimizer": str(optimizer),
+                    "optimizer": (str(optimizer) if names is None else names[opt_idx]),
                     "run": run_idx,
                     "iteration": iteration,
                     "loss": loss,
@@ -344,6 +348,8 @@ def visualize_multiple_pne_optimizer_losses(ax: Axes, optimizers: list[PnEOptimi
 
     df = pd.DataFrame(rows)
     if not df.empty:
-        sns.lineplot(data=df, x="iteration", y="loss", hue="optimizer", ax=ax)
-        ax.set_yscale("log")
+        sns.lineplot(data=df, x="iteration", y="loss", hue="optimizer", 
+             estimator="mean", errorbar=("ci", 95), ax=ax)
+        if use_log_scale:
+            ax.set_yscale("log")
     

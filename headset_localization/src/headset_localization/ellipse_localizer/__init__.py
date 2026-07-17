@@ -5,7 +5,7 @@ from .pne_optimizer import PnEOptimizer, visualize_multiple_pne_optimizer_losses
 from .ellipsoid_localizer import EllipsoidLocalizer
 from .pypose_pne_optimizer import PyposePNEOptimizer, PyposePnEOptimizerConfig
 from .foreground_segmentation import YOLOv26Segmenter, Sam3Prompt, SAM3Segmenter
-from .ellipsoid_utilities_numpy import GaussianMatchingConfig, create_ellipsoid_lineset
+from .ellipsoid_utilities_numpy import GaussianMatchingConfig, create_ellipsoid_lineset, visualize_primal_quadratics
 
 __all__ = [
     "EllipsoidFitter",
@@ -25,5 +25,6 @@ __all__ = [
     "SAM3Segmenter",
     "GaussianMatchingConfig",
     "visualize_multiple_pne_optimizer_losses",
-    "create_ellipsoid_lineset"
+    "create_ellipsoid_lineset",
+    "visualize_primal_quadratics"
 ]

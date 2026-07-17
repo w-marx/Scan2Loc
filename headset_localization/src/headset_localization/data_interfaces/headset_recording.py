@@ -162,7 +162,7 @@ class HeadsetRecording:
                 with open(f"{headset_folder}/label.json", 'w') as f:
                     json.dump(self.robot_base_t_headset_s[i].tolist(), f, indent=4)
 
-    def visualize_3d_data(self, visualize:bool = True):
+    def visualize_3d_data(self, visualize:bool = True, visualize_cameras:bool = True, camera_frame_size:float = 0.05):
         """
         Visualizes the headset trajectory using open3d
         :param visualize: If true, visualizes the camera poses
@@ -173,15 +173,17 @@ class HeadsetRecording:
         to_vis = [base_frame]
         for b_t_c in self.robot_base_t_headset_s:
             if b_t_c is not None:
-                cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+                cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=camera_frame_size)
                 cam_frame.transform(b_t_c)
                 to_vis.append(cam_frame)
-                to_vis.append(create_3d_camera(
-                    base_t_camera=b_t_c,
-                    intrinsics=self.intrinsic_cam_mtx,
-                    hxw_img=self.bgr_image_s[0],
-                    scale=0.1
-                ))
+
+                if visualize_cameras:
+                    to_vis.append(create_3d_camera(
+                        base_t_camera=b_t_c,
+                        intrinsics=self.intrinsic_cam_mtx,
+                        hxw_img=self.bgr_image_s[0],
+                        scale=camera_frame_size
+                    ))
         if visualize:
             o3d.visualization.draw_geometries(to_vis, f"Headset Recording: {self.name} visualization")
         return to_vis

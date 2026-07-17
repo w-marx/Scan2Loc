@@ -146,7 +146,7 @@ class Scanned3dEnvironment:
             robot_base_t_robot_camera_s = robot_base_t_robot_camera_s,
             robot_bgr_images = np.array(robot_bgr_images),
             robot_depth_images = np.array(robot_depth_images),
-            intrinsic_camera_matrix = robot_data.cam_intrinsic_mtx,
+            intrinsic_camera_matrix = robot_data.cam_intrinsic_mtx.copy(),
             image_gen_config = est3d_xyz_image_gen_config,
             icp_config = est3d_xyz_icp_config,
         )
@@ -246,9 +246,15 @@ class Scanned3dEnvironment:
         return self._robot_base_t_robot_camera_s
     
 
-def visualize_robot_camera_environment_combo(robot_env:Scanned3dEnvironment, headset_data:HeadsetRecording):
-    to_vis_robot = robot_env.visualize_3d_data(visualize=False)
-    to_vis_headset = headset_data.visualize_3d_data(visualize=False)
+def visualize_robot_camera_environment_combo(
+        robot_env:Scanned3dEnvironment, 
+        headset_data:HeadsetRecording, 
+        vis_robot_cameras:bool = True,
+        vis_headset_camera_wireframes:bool = True,
+        headset_frame_size:float = 0.05
+    ):
+    to_vis_robot = robot_env.visualize_3d_data(visualize=False, visualize_robot_cameras=vis_robot_cameras)
+    to_vis_headset = headset_data.visualize_3d_data(visualize=False, visualize_cameras=vis_headset_camera_wireframes, camera_frame_size = headset_frame_size)
     o3d.visualization.draw_geometries(
         to_vis_robot+to_vis_headset, 
         f"Robot: {robot_env.name} x Headset: {headset_data.name} visualization"

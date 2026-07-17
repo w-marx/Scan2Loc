@@ -98,7 +98,8 @@ def image_to_primal_conics(
     :param bgr_image: the bgr image
     :param segmenter: how to segment the image
     :param debug_vis_masks: If true will show the used mask
-    :return: the primal conics (Nx3x3) in (0-1) coordinates and avg colors or None
+    :param segment_at_res: (w,h) image resolution to which the image will be resized for segmentation, if None will use original resolution
+    :return: the primal conics (Nx3x3) in (0-1) coordinates
     """
     assert assert_mxnx3_np_uint8_image(bgr_image)
 
@@ -121,15 +122,18 @@ def image_to_primal_conics(
         rows = rows/seg_diag
         cols = cols/seg_diag
         pc_2d = np.column_stack((cols, rows))
-        primal_conic_s.append(fit_primal_conic_to_2d_point_cloud(pc_2d))
+        prim_conical = fit_primal_conic_to_2d_point_cloud(pc_2d)
+        if prim_conical is not None:
+            primal_conic_s.append(prim_conical)
 
     if debug_vis_masks:
         mu_s, sigma_s = primal_conics_to_gaussian_ellipses(np.array(primal_conic_s))
-        e_s = gaussian_ellipse_s_to_matplotlib_ellipse_s(gauss_ellipse_batch_tuple_to_mat_batch(mu_s=mu_s, sigma_s=sigma_s), line_style="-")
+        e_s = gaussian_ellipse_s_to_matplotlib_ellipse_s(gauss_ellipse_batch_tuple_to_mat_batch(mu_s=mu_s, sigma_s=sigma_s), line_style="-", colors="blue", line_widths=2)
         fig, ax = plt.subplots(figsize = (12,8))
+        ax.grid(False)
         for e in e_s:
             ax.add_patch(e)
-        ax.imshow(bgr_image)
+        ax.imshow(cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB), extent=(0, seg_image.shape[1]/seg_diag, seg_image.shape[0]/seg_diag, 0))
         plt.show()
 
     return np.array(primal_conic_s)    
@@ -149,7 +153,7 @@ def visualize_pose_prediction(
     :param dual_quadratics: The dual quadratics to project (Nx4x4)
     :param cam_t_base: The 4x4 SE3 cam-T_base matrix
     :param intrinsic_mtx: The 3x3 intrinsic matrix
-    :param obs_gaussians_sigma_s: Mx2x3 array of gaussians: [[sigma_0 | mu_0], ...]
+    :param obs_gaussians_sigma_mu_s: Mx2x3 array of gaussians: [[sigma_0 | mu_0], ...]
     :param proj_match_indices: List of length n, where dual_quadratics[proj_match_indices[i]] ~ obs_gaussians_sigma_mu_s[obs_match_indices[i]]
     :param obs_match_indices: List of length n
     """
@@ -405,6 +409,8 @@ class EllipsoidLocalizer(HeadsetLocalizer):
         :param cam2_bgr_image: HxWx3 bgr image
         :param rough_base_t_cam2: A rough base_t_cam2 estimate.
         :param time_tracker: a time-tracker object, that will be used by the Pose Predictor to note the runtimes
+        :param fd: A feature drawing instance or None, will draw the features used on it, if not None
+        :return: The optimized cam2_t_base, as a 4x4 hom matrix or None
         """
         if self.base_t_ellipsoid_s.shape[0] < self.min_number_matched_ellipsoids_for_opt:
             return None
@@ -427,7 +433,7 @@ class EllipsoidLocalizer(HeadsetLocalizer):
             cam_t_base=rough_cam_t_base,
             intrinsic_mtx=diag_one_intrinsic_mat,
         )
-        proj_primal_conics = filter_good_primal_conicals(primal_conicals=proj_primal_conics)
+        valid_mask, proj_primal_conics = filter_good_primal_conicals(primal_conicals=proj_primal_conics)
 
         time_tracker.add_time_stamp(TimeLabels.PRIMAL_QUAD_2_CONICAL)
 
@@ -466,7 +472,7 @@ class EllipsoidLocalizer(HeadsetLocalizer):
 
         cam2_t_base_opt = self.pne_optimizer.optimize_pne(
             initial_cam_t_base=rough_cam_t_base,
-            primal_quadratics=self.primal_quadratic_s[proj_match_idx_s],
+            primal_quadratics=self.primal_quadratic_s[valid_mask][proj_match_idx_s],
             primal_conicals= np.array(observed_primal_conics)[obs_match_idx_s],
             intrinsic_cam_mat=diag_one_intrinsic_mat,
             visualize_result= cv2.cvtColor(cam2_bgr_image, cv2.COLOR_BGR2RGB) if self.visualize_pne_optimisation else None,

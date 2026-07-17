@@ -30,7 +30,7 @@ def load_bgr_images(folder:str)->tuple[np.ndarray, np.ndarray]:
 
     return timestamps, bgr_images
 
-def load_depth_images(folder:str)->tuple[np.ndarray, np.ndarray]:
+def load_depth_images(folder:str, replace_invalid_with_nan:bool = True)->tuple[np.ndarray, np.ndarray]:
     df = pd.read_csv(
         f"{folder}/depth.txt", comment = '#', names=["timestamp", "location"], sep=r"\s+"
     )
@@ -44,10 +44,10 @@ def load_depth_images(folder:str)->tuple[np.ndarray, np.ndarray]:
     depth_images_unnorm = np.stack(df['image'].values, axis = 0)
 
     depth_images = depth_images_unnorm/5000
-    depth_images[depth_images_unnorm == 0] = np.nan
+    if replace_invalid_with_nan:
+        depth_images[depth_images_unnorm == 0] = np.nan
 
     assert assert_mxn_np_float_image_batch(depth_images)
-
     return timestamps, depth_images
 
 
@@ -118,14 +118,15 @@ INTRINSIC_FREIBURG_MATRICES = {
     
 
 
-def robot_environment_and_headset_data_from_tum(
+def scanned_3d_environment_and_headset_recording_from_tum(
         folder:str,
         rgb_camera_name:Literal["freiburg1", "freiburg2", "freiburg3"],
         time_tolerance:float = 0.1,
         n_robot_images:int = 10,
         xyz_image_generation_config:XYZImageGenerationConfig = XYZImageGenerationConfig(crop_square=False),
         xyz_image_alginment_config:ICPAlignmentConfig = ICPAlignmentConfig(),
-        intervall: tuple[float, float] | None = None
+        intervall: tuple[float, float] | None = None,
+        replace_invalid_with_nan = False
 )-> tuple[Scanned3dEnvironment, HeadsetRecording]:
     
     assert rgb_camera_name in ["freiburg1", "freiburg2", "freiburg3"]
@@ -137,7 +138,7 @@ def robot_environment_and_headset_data_from_tum(
         raise FileNotFoundError(f"folder: {folder} doesnt exist")
 
     timestamps_bgr, bgr_images = load_bgr_images(folder=folder)
-    timestamps_depth, depth_images = load_depth_images(folder=folder)
+    timestamps_depth, depth_images = load_depth_images(folder=folder, replace_invalid_with_nan = replace_invalid_with_nan)
     timestamps_world_t_c, world_t_cam_s = load_labels(f"{folder}/groundtruth.txt")
     
     synchronized_timestamps = synchronize_timestamps([timestamps_bgr, timestamps_depth, timestamps_world_t_c], tolerance=time_tolerance)
@@ -217,7 +218,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     
-    robot_env, headset_data = robot_environment_and_headset_data_from_tum(
+    robot_env, headset_data = scanned_3d_environment_and_headset_recording_from_tum(
         folder=args.input_folder,
         rgb_camera_name=args.rgb_camera_name,
         time_tolerance= args.time_tolerance,
