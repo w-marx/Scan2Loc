@@ -349,7 +349,7 @@ def visualize_multiple_pne_optimizer_losses(ax: Axes, optimizers: list[PnEOptimi
     df = pd.DataFrame(rows)
     if not df.empty:
         sns.lineplot(data=df, x="iteration", y="loss", hue="optimizer", 
-             estimator="mean", errorbar=("ci", 95), ax=ax)
+             estimator="mean", errorbar="se", ax=ax)
         if use_log_scale:
             ax.set_yscale("log")
     
