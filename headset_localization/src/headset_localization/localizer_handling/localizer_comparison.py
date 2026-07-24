@@ -1,4 +1,4 @@
-from typing import Callable, SupportsFloat
+from typing import Callable, SupportsFloat, Literal
 import open3d as o3d
 from dataclasses import dataclass
 import numpy as np
@@ -16,10 +16,9 @@ from ..data_interfaces.headset_recording import HeadsetRecording
 
 from ..utilities.time_tracker import TimeTracker
 
-from .prediction_on_dataset import PredictionOnDataset, format_optional
+from .prediction_on_dataset import PredictionOnDataset, format_optional, fmt_mae, fmt_median, fmt_rmse
 from .headset_localizer import HeadsetLocalizer
-from .gripping_error import FastGrippingError
-
+from .ray_intersection_error import FastRayIntersectionError
 
 @dataclass(frozen=True, kw_only=True)
 class GradableLocalizer:
@@ -207,7 +206,7 @@ class NPredictors1DatasetGrader:
         self.robot_env = robot_env
 
         if compute_gripping_error:
-            gripping_error_calculator = FastGrippingError(points=robot_env.robot_xyz_images, intrinsics=headset_data.intrinsic_cam_mtx)
+            gripping_error_calculator = FastRayIntersectionError(points=robot_env.robot_xyz_images, intrinsics=headset_data.intrinsic_cam_mtx)
         else:
             gripping_error_calculator = None
 
@@ -283,13 +282,18 @@ class NPredictors1DatasetGrader:
 
         return pd.DataFrame.from_dict(rows, orient="index").fillna(0)
     
-    def print_translational_error_under_limits(self, limits_m:list[float]):
-        
+
+    def print_error_under_limits(self, limits_m:list[float], error_type:Literal['ATE', 'ARE', 'RIE']):
+
         rows = []
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
             dict = {"Name": gpp.c_name}
-
-            t_error_s = grader.translational_errors
+            err_s = {
+                'ATE':grader.translational_errors,
+                'ARE':grader.rotational_errors,
+                'RIE':grader.gripping_error_s
+            }
+            t_error_s = err_s[error_type]
             if t_error_s is None:
                 continue
             t_error_s = np.array(t_error_s)
@@ -297,12 +301,14 @@ class NPredictors1DatasetGrader:
             for limit in limits_m:
                 limit_mask = t_error_s < limit
                 valid_errors = t_error_s[limit_mask]
-                avg_error = format_optional(np.mean(valid_errors), fmt=".4f") if valid_errors.shape[0] > 0 else "N/A"
-                success = format_optional(np.sum(limit_mask)/grader.number_attempted_predictions, factor=100)
-                dict[str(limit)] = f"{avg_error}m, {success}%"
+                avg_error = fmt_mae(valid_errors, fmt=".4f")
+                success = format_optional(np.sum(limit_mask)/grader.number_attempted_predictions, factor=100, fmt="5.1f")
+                dict[str(limit)] = avg_error+f"m, {success}%"
+            
             rows.append(dict)
                 
         df = pd.DataFrame(rows)
+        print(f"{error_type} under limits")
         print(df.to_string(index=False))
 
 
@@ -311,20 +317,25 @@ class NPredictors1DatasetGrader:
         Print a summary of the PosePredictor performances.
         """
         rows = []
-
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
+            grader.translational_errors
             rows.append({
                 "Name": gpp.c_name,
                 "Success [%]": format_optional(grader.success_ratio, factor=100),
                 "T/frame [ms]": format_optional(grader.time_per_successful_prediction, factor=1000),
-                "Avg t_err [mm]": format_optional(grader.avg_translational_error, factor=1000, fmt=".1f"),
-                "Avg r_err [deg]": format_optional(grader.avg_translational_error, factor=180/np.pi, fmt=".1f"),
-                "Med t_err [mm]": format_optional(grader.median_translational_error, factor=1000, fmt=".1f"),
-                "Med r_err [deg]": format_optional(grader.median_rotational_error, factor=180/np.pi, fmt=".1f"),
-                "Avg grip_err [mm]": format_optional(grader.avg_gripping_error, factor=1000, fmt=".1f"),
-                "Med gripp_err [mm]": format_optional(grader.median_gripping_error, factor=1000, fmt=".1f"),
-                "RMSE t_err [mm]":format_optional(grader.ate_translation_rmse, factor=1000, fmt=".1f"),
-                "RMSE r_err [deg]":format_optional(grader.ate_rot_rmse, factor=180/np.pi, fmt=".1f")
+
+                "Avg ATE [mm]": fmt_mae(errors=grader.translational_errors, factor=1000),
+                "Avg ARE [deg]": fmt_mae(grader.rotational_errors, factor=180/np.pi, fmt=".1f"),
+
+                "Med ATE [mm]": fmt_median(grader.translational_errors, factor=1000, fmt=".1f"),
+                "Med ARE [deg]": fmt_median(grader.rotational_errors, factor=180/np.pi, fmt=".1f"),
+
+                "RMSE ATE [mm]":fmt_rmse(grader.translational_errors, factor=1000, fmt=".1f"),
+                "RMSE ARE [deg]":fmt_rmse(grader.rotational_errors, factor=180/np.pi, fmt=".1f"),
+
+                "Avg RIE [mm]": fmt_mae(grader.gripping_error_s, factor=1000, fmt=".1f"),
+                "Med RIE [mm]": fmt_median(grader.gripping_error_s, factor=1000, fmt=".1f"),
+                "RMSE RIE [mm]": fmt_rmse(grader.gripping_error_s, factor=1000, fmt=".1f")
             })
 
         df = pd.DataFrame(rows)
@@ -346,13 +357,7 @@ class NPredictors1DatasetGrader:
 
         time_df = time_df[cols]
 
-        time_df.plot(
-            kind="bar",
-            stacked=True,
-            ax=ax,
-            rot=0,
-            legend=plot_legend
-        )
+        time_df.plot(kind="bar", stacked=True, ax=ax, rot=0, legend=plot_legend)
 
         ax.set_ylabel("Time [ms]")
         ax.set_title(title)
@@ -374,6 +379,7 @@ class NPredictors1DatasetGrader:
             plot_legend=plot_legend
         )
 
+
     def print_creation_times(self):
         print(self.get_creation_times().to_string(float_format="{:.1f}".format))
 
@@ -386,6 +392,7 @@ class NPredictors1DatasetGrader:
             plot_legend=plot_legend,
             rotate_x_labels=rotate_x_labels
         )
+
 
     def print_prediction_times(self):
         print(self.get_prediction_times().to_string(float_format="{:.1f}".format))
@@ -460,15 +467,7 @@ class NPredictors1DatasetGrader:
             pareto_df = NPredictors1DatasetGrader.compute_pareto_frontier(df, key1=xkey, key2=ykey,  smaller_better_2=invert_y)
             pareto_df = pareto_df.sort_values(xkey)
 
-            ax.plot(
-                pareto_df[xkey],
-                pareto_df[ykey],
-                color="black",
-                linewidth=1,
-                linestyle = "--",
-                alpha=0.4,
-                label="Frontier"
-            )
+            ax.plot(pareto_df[xkey], pareto_df[ykey], color="black", linewidth=1, linestyle = "--", alpha=0.4, label="Frontier")
 
         if use_category:
             for category, cat_df in df.groupby("Category"):
@@ -488,12 +487,7 @@ class NPredictors1DatasetGrader:
                     )
                 )
             if adjust_texts:
-                adjust_text(
-                    texts,
-                    ax=ax,
-                    force_text=(0.5, 0.5),
-                    arrowprops=dict(arrowstyle="-", lw=1, alpha=0.0),
-                )
+                adjust_text(texts, ax=ax, force_text=(0.5, 0.5), arrowprops=dict(arrowstyle="-", lw=1, alpha=0.0))
 
         ax.margins(x=0.15, y=0.2)
 
@@ -686,11 +680,7 @@ class NPredictors1DatasetGrader:
 
             for frame in range(self.headset_data.n_frames):
                 error = error_dict.get(frame, np.nan)
-                data.append({
-                    'Frame': frame,
-                    error_type.ylabel: error,
-                    'Predictor': predictor_name
-                })
+                data.append({'Frame': frame, error_type.ylabel: error, 'Predictor': predictor_name})
         
         df = pd.DataFrame(data)
         df = df.sort_values(['Predictor','Frame'])
@@ -698,12 +688,7 @@ class NPredictors1DatasetGrader:
         for predictor, group in df.groupby('Predictor'):
             group = group.sort_values('Frame')
 
-            ax.plot(
-                group['Frame'],
-                group[error_type.ylabel],
-                label=predictor,
-                linewidth=2
-            )
+            ax.plot(group['Frame'], group[error_type.ylabel], label=predictor, linewidth=2)
 
         ax.legend()
 

@@ -2,6 +2,7 @@ import numpy as np
 from typing import Literal
 import open3d as o3d
 import matplotlib.pyplot as plt
+from scipy.ndimage import generic_filter
 
 from shared.assertion_helpers import assert_intrinsic_mat, assert_homogeneous_mat
 
@@ -176,7 +177,7 @@ def sample_pixel_neighborhood(center:tuple[int, int], size:int = 5)->np.ndarray:
     return pixels
 
 
-class FastGrippingError:
+class FastRayIntersectionError:
     def __init__(
             self, 
             points:np.ndarray, 
@@ -228,6 +229,11 @@ class FastGrippingError:
         base_t_cam: np.ndarray,
         pixels: np.ndarray,
     ) -> np.ndarray:
+        """
+        :param base_t_cam: 4x4 SE(3) matrix
+        :param pixels: Nx2 batch of  [u,v] coordinates
+        :return: Nx3 batch of hitpoints [x,y,z] in the mesh reference frame
+        """
 
         origin, directions = pixels_to_rays(
             intrinsics=self.intrinsics,
@@ -270,8 +276,6 @@ class FastGrippingError:
         """
         b = base_t_cam_s.shape[0]
         hit_points = np.asarray([self._pixels_to_hitpoints(b_t_c, pixels) for b_t_c, pixels in zip(base_t_cam_s, pixels_batch)]) #[B, N, 3]
-        
-        
         errors = np.full((b,b), np.nan)
 
         for i in range(b):
@@ -324,3 +328,29 @@ class FastGrippingError:
             )
 
         return errors
+    
+    def compute_ray_intersection_error_img(self, base_t_cam1:np.ndarray, base_t_cam2:np.ndarray, dim:tuple[int, int], size:int = 5)->np.ndarray:
+        """
+        :param base_t_cam1: 4x4 SE(3) matrix
+        :param base_t_cam2: second 4x4 SE(3) matrix
+        :param dim: (w,h) size of the image, and resulting size of the map
+        :param size: will calculate the median of the sizexsize sorroundings of each pixel
+        :return: hxw matrix with the ray intersection error for each pixel (nan if not computable)
+        """
+        assert assert_homogeneous_mat(base_t_cam1)
+        assert assert_homogeneous_mat(base_t_cam2)
+        assert size > 0 and size % 2 == 1
+
+        w,h = dim
+        cols = np.arange(w)
+        rows = np.arange(h)
+        pixel_tensor = np.stack(np.meshgrid(cols, rows, indexing='xy'), axis=-1).reshape(-1, 2)
+
+        locations_m1 = self._pixels_to_hitpoints(base_t_cam=base_t_cam1, pixels=pixel_tensor)
+        locations_m2 = self._pixels_to_hitpoints(base_t_cam=base_t_cam2, pixels=pixel_tensor)
+        intersection_diff = np.linalg.norm(locations_m1-locations_m2, axis=-1).reshape(h,w)
+
+        if size > 1:
+            intersection_diff = generic_filter(intersection_diff, function=np.nanmedian, size=size, mode='constant', cval=np.nan)
+
+        return intersection_diff

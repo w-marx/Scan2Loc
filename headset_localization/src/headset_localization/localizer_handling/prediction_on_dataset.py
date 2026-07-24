@@ -3,6 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from numbers import Real
+from typing import Sequence
+from matplotlib.axes import Axes
+import pandas as pd
+import seaborn as sns
 
 from shared.se3_utilities import translational_difference, rotational_difference, ate_rmse, rte_rotational_errors_rmse, rte_translational_errors_rmse
 from shared.image_camera_manipulation import create_3d_camera
@@ -12,14 +16,81 @@ from ..data_interfaces.headset_recording import HeadsetRecording
 from ..utilities.time_tracker import TimeTracker
 
 from ..utilities.slam2mp4 import VideoGenerator, InfoCard
-from .gripping_error import sample_pixel_neighborhood, FastGrippingError
+from .ray_intersection_error import sample_pixel_neighborhood, FastRayIntersectionError
 from .headset_localizer import HeadsetLocalizer
 
 
-def format_optional(value:Real | float | int | np.floating | None, fmt=".1f", default = "N/A", factor:float = 1.0):
+def format_optional(value:float | int | np.number | None, fmt=".1f", default = "N/A", factor:float = 1.0)->str:
     if value is None:
         return default
     return f"{(value*factor):{fmt}}"
+
+def fmt_rmse(errors:Sequence[float| None] | None | np.ndarray, fmt=".1f", default = "N/A", factor:float = 1.0)->str:
+    if errors is None:
+        return default
+    clean_errors = np.array([e for e in errors if e is not None])
+    if len(clean_errors) == 0:
+        return default
+    return format_optional(
+        value=np.sqrt(1/clean_errors.shape[0] * np.sum((clean_errors*factor)**2)), fmt=fmt, default=default
+    )
+
+def fmt_mae(errors:Sequence[float | None] | None | np.ndarray, fmt=".1f",default = "N/A", factor:float = 1.0, add_se:bool = True)->str:
+    if errors is None:
+        return default
+    clean_errors = np.array([e*factor for e in errors if e is not None])
+    if len(clean_errors) == 0:
+        return default
+    ret = format_optional(value=np.mean(clean_errors), fmt=fmt, default=default)
+    if add_se and ret != default:
+        ret += "±"+format_optional(value=np.std(clean_errors, ddof = 1)/np.sqrt(clean_errors.shape[0]), fmt = fmt, default=default)
+    return ret
+
+def fmt_median(errors:Sequence[float | None] | None | np.ndarray, fmt=".1f", default = "N/A", factor:float = 1.0)->str:
+    if errors is None:
+        return default
+    clean_errors = np.array([e*factor for e in errors if e is not None])
+    if len(clean_errors) == 0:
+        return default
+    return format_optional(value=np.median(clean_errors), fmt=fmt, default=default)
+
+
+def calculate_ray_missalignment_errors(timed_pred_gt_s:list[tuple[int, np.ndarray, np.ndarray]])->list[tuple[int, float, float, float, float]]:
+    """
+    Calculates the missalignments of the predicted pose in relation to the z-axis of the GD pose
+    :param timed_pred_gt_s: List of (i, pred, GT) tuples, with i being the frame idx (unique), and pred, GT in SE(3)
+    :return: A list [i, x_error, y_error, x_angle_error, y_angle_error] with x_error and y_error being the translational difference from GT to pred
+    and y_ang_error being the angle between the pred. z-axis projected onto the GT x-z plane and the GT z-axis (same for x_ang_error)
+    """
+    timed_errors = []
+
+    for t, r_t_predh, r_t_gth in timed_pred_gt_s:
+        gth_t_predh = np.linalg.inv(r_t_gth) @ r_t_predh
+
+        x_err = gth_t_predh[0,3]
+        y_err = gth_t_predh[1,3]
+
+        z_proj_xz = np.array([gth_t_predh[0,2], gth_t_predh[2,2]])
+        z_proj_yz = np.array([gth_t_predh[1,2], gth_t_predh[2,2]])
+
+        norm_xz = np.linalg.norm(z_proj_xz)
+        norm_yz = np.linalg.norm(z_proj_yz)
+
+        if norm_xz > 1e-10:
+            z_proj_xz = z_proj_xz / norm_xz
+            x_angle_error = np.arctan2(z_proj_xz[0], z_proj_xz[1])
+        else:
+            x_angle_error = 0.0
+
+        if norm_yz > 1e-10:
+            z_proj_yz = z_proj_yz / norm_yz
+            y_angle_error = np.arctan2(z_proj_yz[0], z_proj_yz[1])
+        else:
+            y_angle_error = 0.0
+
+        timed_errors.append((t, x_err, y_err, x_angle_error, y_angle_error))
+
+    return timed_errors
 
 
 class PredictionOnDataset:
@@ -29,7 +100,7 @@ class PredictionOnDataset:
                  number_retry:int = 1,
                  vid_gen:VideoGenerator | None = None,
                  video_save_location:str = "test.mp4",
-                 gripping_error:FastGrippingError | None = None,
+                 gripping_error:FastRayIntersectionError | None = None,
                  use_tqdm:bool = True
             ):
         """
@@ -50,7 +121,6 @@ class PredictionOnDataset:
         self._per_frame_prediction_time_tracker = TimeTracker()
 
         self._predictions_whole_time_tracker = TimeTracker()
-
 
         self.predicted_base_t_headset_s = []
 
@@ -135,6 +205,7 @@ class PredictionOnDataset:
                 if np.isfinite(e):
                     self.timed_gripping_errors.append((i, e))
 
+        self.gripping_error_s = [e for _, e in self.timed_gripping_errors]
         self.avg_gripping_error = np.mean([e for _, e in self.timed_gripping_errors]) if len(self.timed_gripping_errors) > 0 else None
         self.median_gripping_error = np.median([e for _, e in self.timed_gripping_errors]) if len(self.timed_gripping_errors) > 0 else None
 
@@ -198,6 +269,51 @@ class PredictionOnDataset:
         print(f"RTE RMSE: {self.rte_translation_rmse * 1000:.1f} mm and {np.rad2deg(self.rte_rotational_rmse):.1f}°")
         print(f"avg gripping error: {format_optional(self.avg_gripping_error, fmt=".1f", factor=1000)} mm")
         print(f"median gripping error: {format_optional(self.median_gripping_error, fmt=".1f", factor=1000)} mm")
+
+    def plot_ray_misalignment(self, ax_t:Axes | None = None, ax_r:Axes | None = None, name:str = ""):
+        """
+        :param ax_t: The ax to plot the translational errors onto
+        :param ax_r: The ax to plot the rotational errors onto
+        """
+        if ax_t is None or ax_r is None:
+            fig, axes = plt.subplots(1,2, figsize = (12, 5))
+            fig.suptitle(f"Ray Misalignment Errors {name}", fontsize=14)
+            ax_t, ax_r = axes
+
+        timed_errors = calculate_ray_missalignment_errors(timed_pred_gt_s=self.comparable_poses)
+
+        times = [t for t, _, _, _, _ in timed_errors]
+        x_t_errs = [x_t_e*1000 for _, x_t_e, _, _, _ in timed_errors]
+        y_t_errs = [y_t_e*1000 for _, _, y_t_e, _, _ in timed_errors]
+        x_r_errs = [np.rad2deg(x_r_e) for _, _, _, x_r_e, _ in timed_errors]
+        y_r_errs = [np.rad2deg(y_r_e) for _, _, _, _, y_r_e in timed_errors]
+
+        df_t = pd.DataFrame({'Time': times, 'X Error': x_t_errs, 'Y Error': y_t_errs})
+        df_r = pd.DataFrame({'Time': times, 'X Rotation': x_r_errs, 'Y Rotation': y_r_errs})
+
+        scatter_t = sns.lineplot(data=df_t, x='X Error', y='Y Error', hue='Time', ax=ax_t, marker='s', markersize=5, legend=False, palette="viridis")
+        scatter_r = sns.lineplot(data=df_r, x='X Rotation', y='Y Rotation', hue='Time', ax=ax_r, marker='s', markersize=5, legend=False, palette="viridis")
+
+        ax_t.set_title("Translational errors of prediction on GT xy-plane")
+        ax_t.set_xlabel("xy-plane x error [mm]")
+        ax_t.set_ylabel("xy-plane y error [mm]")
+        ax_t.set_aspect('equal')
+        t_lim = max(np.max(np.abs(x_t_errs)), np.max(np.abs(y_t_errs)))*1.1
+        ax_t.set_xlim(-t_lim, t_lim)
+        ax_t.set_ylim(-t_lim, t_lim)
+        ax_t.axhline(y=0, color='black', linestyle='--', alpha=0.3, linewidth=0.5)
+        ax_t.axvline(x=0, color='black', linestyle='--', alpha=0.3, linewidth=0.5)
+
+        ax_r.set_title("Rotational errors of prediction on xz and yz plane")
+        ax_r.set_xlabel("xz-plane error [deg]")
+        ax_r.set_ylabel("yz-plane error [deg]")
+        ax_r.set_aspect('equal')
+        r_lim = max(np.max(np.abs(x_r_errs)), np.max(np.abs(y_r_errs)))*1.1
+        ax_r.set_xlim(-r_lim, r_lim)
+        ax_r.set_ylim(-r_lim, r_lim)
+        ax_r.axhline(y=0, color='black', linestyle='--', alpha=0.3, linewidth=0.5)
+        ax_r.axvline(x=0, color='black', linestyle='--', alpha=0.3, linewidth=0.5)
+
     
 
     def visualize_predictions(self, robot_env:Scanned3dEnvironment|None = None, show_label:bool = False, vis_robot_cams:bool = False)->None:
