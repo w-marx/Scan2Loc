@@ -25,34 +25,55 @@ def format_optional(value:float | int | np.number | None, fmt=".1f", default = "
         return default
     return f"{(value*factor):{fmt}}"
 
+
+def clean_errors(errors:Sequence[float| None] | None | np.ndarray)->np.ndarray | None:
+    if errors is None or len(errors) < 1:
+        return None
+    errors = np.array([e for e in errors if e is not None])
+    errors = errors[np.isfinite(errors)]
+    if len(errors) < 1:
+        return None
+    return errors
+
+
+def safe_rmse(errors:Sequence[float| None] | None | np.ndarray, factor:float = 1)->float|None:
+    c_errors = clean_errors(errors=errors)
+    if c_errors is None:
+        return None
+    return np.sqrt(1/c_errors.shape[0] * np.sum((c_errors)**2))*factor
+
+
+def safe_mae(errors:Sequence[float| None] | None | np.ndarray, factor:float = 1)->float|None:
+    c_errors = clean_errors(errors=errors)
+    if c_errors is None:
+        return None
+    return float(np.mean(c_errors))*factor
+
+
+def safe_median(errors:Sequence[float| None] | None | np.ndarray, factor:float = 1)->float|None:
+    c_errors = clean_errors(errors=errors)
+    if c_errors is None:
+        return None
+    return float(np.median(c_errors))*factor
+
+
 def fmt_rmse(errors:Sequence[float| None] | None | np.ndarray, fmt=".1f", default = "N/A", factor:float = 1.0)->str:
-    if errors is None:
-        return default
-    clean_errors = np.array([e for e in errors if e is not None])
-    if len(clean_errors) == 0:
-        return default
-    return format_optional(
-        value=np.sqrt(1/clean_errors.shape[0] * np.sum((clean_errors*factor)**2)), fmt=fmt, default=default
-    )
+    return format_optional(value=safe_rmse(errors), fmt=fmt, default=default, factor=factor)
+
 
 def fmt_mae(errors:Sequence[float | None] | None | np.ndarray, fmt=".1f",default = "N/A", factor:float = 1.0, add_se:bool = True)->str:
-    if errors is None:
+    c_errors = clean_errors(errors)
+    if c_errors is None:
         return default
-    clean_errors = np.array([e*factor for e in errors if e is not None])
-    if len(clean_errors) == 0:
-        return default
-    ret = format_optional(value=np.mean(clean_errors), fmt=fmt, default=default)
+    c_errors = c_errors*factor
+    ret = format_optional(value=safe_mae(c_errors), fmt=fmt, default=default)
     if add_se and ret != default:
-        ret += "±"+format_optional(value=np.std(clean_errors, ddof = 1)/np.sqrt(clean_errors.shape[0]), fmt = fmt, default=default)
+        ret += "±"+format_optional(value=np.std(c_errors, ddof = 1)/np.sqrt(c_errors.shape[0]), fmt = fmt, default=default)
     return ret
 
+
 def fmt_median(errors:Sequence[float | None] | None | np.ndarray, fmt=".1f", default = "N/A", factor:float = 1.0)->str:
-    if errors is None:
-        return default
-    clean_errors = np.array([e*factor for e in errors if e is not None])
-    if len(clean_errors) == 0:
-        return default
-    return format_optional(value=np.median(clean_errors), fmt=fmt, default=default)
+    return format_optional(value=safe_median(errors), fmt=fmt, default=default, factor=factor)
 
 
 def calculate_ray_missalignment_errors(timed_pred_gt_s:list[tuple[int, np.ndarray, np.ndarray]])->list[tuple[int, float, float, float, float]]:
@@ -119,8 +140,8 @@ class PredictionOnDataset:
 
         self._est_base_t_cam_time_tracker = TimeTracker()
         self._per_frame_prediction_time_tracker = TimeTracker()
-
         self._predictions_whole_time_tracker = TimeTracker()
+
 
         self.predicted_base_t_headset_s = []
 
@@ -191,33 +212,30 @@ class PredictionOnDataset:
         ]
 
         h, w = headset_data.bgr_image_s[0].shape[:2]
-        middle_pixels = sample_pixel_neighborhood((w//2, h//2), size=5)
-
-        self.timed_gripping_errors = []
-
+        
+        self.rie_s = []
+        self.timed_rie_errors = []
         if gripping_error is not None:
             for i, m1, m2 in self.comparable_poses:
-                e = gripping_error.calculate_gripping_differences_4_pixels(
-                    base_t_cam_s= np.array([m1, m2]),
-                    pixels_batch= np.array([middle_pixels, middle_pixels]),
-                    distance_type='median',
-                )[0,1]
-                if np.isfinite(e):
-                    self.timed_gripping_errors.append((i, e))
+                errors = gripping_error.compute_ray_intersection_error_img(
+                    base_t_cam1=m1,
+                    base_t_cam2=m2,
+                    dim=(w, h),
+                    size=1,
+                    stride=7
+                ).reshape(-1)
+                errors = errors[np.isfinite(errors)]
+                self.rie_s.append(errors)
+                self.timed_rie_errors.append((i, np.median(errors)))
+            self.rie_s = np.concatenate(self.rie_s)
+        
+        self.median_ray_intersection_error = np.median(self.rie_s) if len(self.rie_s) > 0 else None
+        self.mean_ray_intersection_error = np.mean(self.rie_s) if len(self.rie_s) > 0 else None
+        self.rmse_ray_intersection_error = safe_rmse(self.rie_s) if len(self.rie_s) > 0 else None
 
-        self.gripping_error_s = [e for _, e in self.timed_gripping_errors]
-        self.avg_gripping_error = np.mean([e for _, e in self.timed_gripping_errors]) if len(self.timed_gripping_errors) > 0 else None
-        self.median_gripping_error = np.median([e for _, e in self.timed_gripping_errors]) if len(self.timed_gripping_errors) > 0 else None
 
         self.translational_errors = [e for _, e in self.timed_translational_errors]
         self.rotational_errors = [e for _, e in self.timed_rotational_errors]
-
-        self.avg_translational_error = np.mean(self.translational_errors) if len(self.translational_errors) > 0 else None
-        self.avg_rotational_error = np.mean(self.rotational_errors) if len(self.rotational_errors) > 0 else None
-
-        self.median_translational_error = np.median(self.translational_errors) if len(self.translational_errors) > 0 else None
-        self.median_rotational_error = np.median(self.rotational_errors) if len(self.rotational_errors) > 0 else None
-
 
         if len(self.comparable_poses) > 0:
             timestamps_sync = [i for i, _, _ in self.comparable_poses]
@@ -263,12 +281,13 @@ class PredictionOnDataset:
         print(f"est_base_t_cam subcomponent times:\n")
         self._est_base_t_cam_time_tracker.print_report()
 
-        print(f"\n\nAvg. error: {format_optional(self.avg_translational_error, factor=1000)} mm and {format_optional(self.avg_rotational_error, factor=180/np.pi)}°")
-        print(f"Median. error: {format_optional(self.median_translational_error, factor=1000)} mm and {format_optional(self.median_rotational_error, factor=180/np.pi)}°")
-        print(f"ATE RMSE: {self.ate_translation_rmse * 1000:.1f} mm and {np.rad2deg(self.ate_rot_rmse):.1f}°")
+        print(f"\n\nAvg. error: {fmt_mae(self.translational_errors, factor=1000)} mm and {fmt_mae(self.translational_errors, factor=180/np.pi)}°")
+        print(f"Median. error: {fmt_median(errors=self.translational_errors, factor=1000)} mm and {fmt_median(self.translational_errors, factor=180/np.pi)}°")
+        print(f"ATE RMSE: {fmt_rmse(self.translational_errors, factor=1000)} mm and {fmt_rmse(self.translational_errors, factor=180/np.pi)}°")
         print(f"RTE RMSE: {self.rte_translation_rmse * 1000:.1f} mm and {np.rad2deg(self.rte_rotational_rmse):.1f}°")
-        print(f"avg gripping error: {format_optional(self.avg_gripping_error, fmt=".1f", factor=1000)} mm")
-        print(f"median gripping error: {format_optional(self.median_gripping_error, fmt=".1f", factor=1000)} mm")
+        print(f"avg gripping error: {format_optional(self.mean_ray_intersection_error, fmt=".1f", factor=1000)} mm")
+        print(f"median gripping error: {format_optional(self.median_ray_intersection_error, fmt=".1f", factor=1000)} mm")
+
 
     def plot_ray_misalignment(self, ax_t:Axes | None = None, ax_r:Axes | None = None, name:str = ""):
         """

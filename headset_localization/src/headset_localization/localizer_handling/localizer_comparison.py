@@ -16,7 +16,7 @@ from ..data_interfaces.headset_recording import HeadsetRecording
 
 from ..utilities.time_tracker import TimeTracker
 
-from .prediction_on_dataset import PredictionOnDataset, format_optional, fmt_mae, fmt_median, fmt_rmse
+from .prediction_on_dataset import PredictionOnDataset, format_optional, fmt_mae, fmt_median, fmt_rmse, safe_mae, safe_median, safe_rmse
 from .headset_localizer import HeadsetLocalizer
 from .ray_intersection_error import FastRayIntersectionError
 
@@ -58,8 +58,9 @@ class SingleValueErrorType(Enum):
     SUCCESS_RATE = "Success Rate [%]"
     AVG_NUMBER_POINTS_INLIERS = "Average number of PnP inliers"
     AVG_NUMBER_OF_TRIES = "Average number of Point extract & match tries"
-    AVG_GRIPPING_ERROR = "Average translational error for point grip"
-    MEDIAN_GRIPPING_ERROR = "Median translational error for point grip"
+    AVG_RAY_INTERSECTION_ERROR = "Average translational error for point grip"
+    MEDIAN_RAY_INTERSECTION_ERROR = "Median translational error for point grip"
+    RMSE_RAY_INTERSECTION_ERROR = "RMSE translational error for point grip"
 
     
     @property
@@ -72,22 +73,10 @@ class SingleValueErrorType(Enum):
 
 
 SINGLE_VALUE_ERROR_CALCULATORS:dict[SingleValueErrorType, Callable[[PredictionOnDataset], SupportsFloat | None]] = {
-    SingleValueErrorType.AVG_TRANSLATIONAL: lambda grader: (
-        None if grader.avg_translational_error is None 
-        else grader.avg_translational_error * 1000
-    ),
-    SingleValueErrorType.MED_TRANSLATIONAL: lambda grader: (
-        None if grader.median_translational_error is None 
-        else grader.median_translational_error * 1000
-    ),
-    SingleValueErrorType.AVG_ROTATIONAL: lambda grader: (
-        None if grader.avg_rotational_error is None 
-        else np.rad2deg(grader.avg_rotational_error)
-    ),
-    SingleValueErrorType.MED_ROTATIONAL: lambda grader: (
-        None if grader.median_rotational_error is None 
-        else np.rad2deg(grader.median_rotational_error)
-    ),
+    SingleValueErrorType.AVG_TRANSLATIONAL: lambda grader: safe_mae(grader.translational_errors, factor=1000),
+    SingleValueErrorType.MED_TRANSLATIONAL: lambda grader: safe_median(grader.translational_errors, factor=1000),
+    SingleValueErrorType.AVG_ROTATIONAL: lambda grader: safe_mae(grader.rotational_errors, factor= 180/np.pi),
+    SingleValueErrorType.MED_ROTATIONAL: lambda grader: safe_median(grader.rotational_errors, factor= 180/np.pi),
     SingleValueErrorType.ATE_RMSE_TRANSLATIONAL: lambda grader: (
         None if grader.ate_translation_rmse is None 
         else grader.ate_translation_rmse * 1000
@@ -116,15 +105,9 @@ SINGLE_VALUE_ERROR_CALCULATORS:dict[SingleValueErrorType, Callable[[PredictionOn
         None if grader.avg_number_of_tries is None 
         else grader.avg_number_of_tries
     ),
-    SingleValueErrorType.AVG_GRIPPING_ERROR: lambda grader: (
-        None if grader.avg_gripping_error is None 
-        else grader.avg_gripping_error * 1000
-    ),
-    SingleValueErrorType.MEDIAN_GRIPPING_ERROR: lambda grader: (
-        None if grader.median_gripping_error is None 
-        else grader.median_gripping_error * 1000
-    ),
-    
+    SingleValueErrorType.AVG_RAY_INTERSECTION_ERROR: lambda grader: safe_mae(grader.rie_s, factor=1000),
+    SingleValueErrorType.MEDIAN_RAY_INTERSECTION_ERROR: lambda grader: safe_mae(grader.rie_s, factor=1000),
+    SingleValueErrorType.RMSE_RAY_INTERSECTION_ERROR: lambda grader: safe_rmse(grader.rie_s, factor=1000),
 }
 
 SINGLE_VALUE_ERROR_LABELS = {
@@ -139,8 +122,9 @@ SINGLE_VALUE_ERROR_LABELS = {
     SingleValueErrorType.SUCCESS_RATE: "Rate [%]",
     SingleValueErrorType.AVG_NUMBER_POINTS_INLIERS: "Number point inliers [1]",
     SingleValueErrorType.AVG_NUMBER_OF_TRIES: "Number of tries [1]",
-    SingleValueErrorType.AVG_GRIPPING_ERROR: "Error [mm]",
-    SingleValueErrorType.MEDIAN_GRIPPING_ERROR: "Error [mm]"
+    SingleValueErrorType.AVG_RAY_INTERSECTION_ERROR: "Error [mm]",
+    SingleValueErrorType.MEDIAN_RAY_INTERSECTION_ERROR: "Error [mm]",
+    SingleValueErrorType.RMSE_RAY_INTERSECTION_ERROR: "Error [mm]"
 }
 
 
@@ -168,7 +152,7 @@ TIME_SERIES_ERROR_CALCULATORS:dict[TimeSeriesErrorType, Callable[[PredictionOnDa
         [(idx, np.rad2deg(error)) for idx,error in grader.timed_rotational_errors]
     ),
     TimeSeriesErrorType.ABS_GRIPPING: lambda grader: (
-        [(idx, error*1000) for idx,error in grader.timed_gripping_errors]
+        [(idx, error*1000) for idx,error in grader.timed_rie_errors]
     ),
     TimeSeriesErrorType.RTE_TRANSLATIONAL: lambda grader: (
         [(idx, error*1000) for idx,error in enumerate(grader.rte_translation_errors) if np.isfinite(error)]
@@ -291,7 +275,7 @@ class NPredictors1DatasetGrader:
             err_s = {
                 'ATE':grader.translational_errors,
                 'ARE':grader.rotational_errors,
-                'RIE':grader.gripping_error_s
+                'RIE':grader.rie_s
             }
             t_error_s = err_s[error_type]
             if t_error_s is None:
@@ -333,9 +317,9 @@ class NPredictors1DatasetGrader:
                 "RMSE ATE [mm]":fmt_rmse(grader.translational_errors, factor=1000, fmt=".1f"),
                 "RMSE ARE [deg]":fmt_rmse(grader.rotational_errors, factor=180/np.pi, fmt=".1f"),
 
-                "Avg RIE [mm]": fmt_mae(grader.gripping_error_s, factor=1000, fmt=".1f"),
-                "Med RIE [mm]": fmt_median(grader.gripping_error_s, factor=1000, fmt=".1f"),
-                "RMSE RIE [mm]": fmt_rmse(grader.gripping_error_s, factor=1000, fmt=".1f")
+                "Avg RIE [mm]": fmt_mae(grader.rie_s, factor=1000, fmt=".1f"),
+                "Med RIE [mm]": fmt_median(grader.rie_s, factor=1000, fmt=".1f"),
+                "RMSE RIE [mm]": fmt_rmse(grader.rie_s, factor=1000, fmt=".1f")
             })
 
         df = pd.DataFrame(rows)
