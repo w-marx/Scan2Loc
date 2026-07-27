@@ -114,6 +114,38 @@ def calculate_ray_missalignment_errors(timed_pred_gt_s:list[tuple[int, np.ndarra
     return timed_errors
 
 
+def calculate_signed_errors(timed_pred_gt_s:list[tuple[int, np.ndarray, np.ndarray]])->np.ndarray:
+    """
+    Calculates the following signed errors in the ground truth frames:
+    XYZ-translational errors
+    Rotational error on the xy, yz and xz plane (rotational difference to the frame projected onto the plane)
+    :return: Bx6 error array: [[x, y, z , x_rot, y_rot, z_rot], ...]
+    """
+    if len(timed_pred_gt_s) < 1:
+        return np.empty((0,6))
+
+    errors = []
+    for _, r_t_predh, r_t_gth in timed_pred_gt_s:
+        gth_t_predh = np.linalg.inv(r_t_gth) @ r_t_predh
+
+        # proj xy, yz, xz
+        y_proj_yz = gth_t_predh[[1,2], 1]
+        x_proj_xz = gth_t_predh[[0,2], 0]
+        x_proj_xy = gth_t_predh[[0,1], 0]
+
+        vecs = np.array([y_proj_yz, x_proj_xz, x_proj_xy])
+        vecs_n = np.linalg.norm(vecs, axis=-1)
+
+        rot_errors = np.asarray([
+            np.arctan2(vecs[i, 1], vecs[i, 0]) if vecs_n[i] > 1e-8 else 0
+            for i in range(3)
+        ])
+        errors.append(np.concatenate([gth_t_predh[:3, 3], rot_errors]))
+
+    return np.asarray(errors)
+
+
+
 class PredictionOnDataset:
     def __init__(self,
                  predictor:HeadsetLocalizer,
@@ -198,6 +230,8 @@ class PredictionOnDataset:
             for i, (predicted, label) in enumerate(zip(self.predicted_base_t_headset_s, headset_data.robot_base_t_headset_s))
             if predicted is not None and label is not None
         ]
+        self.signed_errors = calculate_signed_errors(self.comparable_poses)
+
 
         self.number_error_computable_poses = len(self.comparable_poses)
 
@@ -232,7 +266,6 @@ class PredictionOnDataset:
         self.median_ray_intersection_error = np.median(self.rie_s) if len(self.rie_s) > 0 else None
         self.mean_ray_intersection_error = np.mean(self.rie_s) if len(self.rie_s) > 0 else None
         self.rmse_ray_intersection_error = safe_rmse(self.rie_s) if len(self.rie_s) > 0 else None
-
 
         self.translational_errors = [e for _, e in self.timed_translational_errors]
         self.rotational_errors = [e for _, e in self.timed_rotational_errors]
@@ -287,6 +320,40 @@ class PredictionOnDataset:
         print(f"RTE RMSE: {self.rte_translation_rmse * 1000:.1f} mm and {np.rad2deg(self.rte_rotational_rmse):.1f}°")
         print(f"avg gripping error: {format_optional(self.mean_ray_intersection_error, fmt=".1f", factor=1000)} mm")
         print(f"median gripping error: {format_optional(self.median_ray_intersection_error, fmt=".1f", factor=1000)} mm")
+
+
+    def plot_signed_error_s(self, axes:list[Axes] | None = None, explain = False):
+        
+        if axes is None:
+            _, axs = plt.subplots(1, 6, figsize=(18, 6), sharey=False)
+        else:
+            axs = axes
+
+        names = ["TE-X", "TE-Y", "TE-Z", "RE-X", "RE-Y", "RE-Z"]
+        if explain:
+            names = ["TE-X, >0 → to right", "TE-Y, >0 → to down", "TE-Z, >0 → to close", "RE-X, >0 → looking up", "RE-Y, >0 → looking right", "RE-Z, >0 → slanted head right"]
+
+
+        for i, (name, ax) in enumerate(zip(names, axs)):
+            error_unit = "[mm]" if i < 3 else "[deg]"
+            error_multiplyer = 1000 if i < 3 else 180/np.pi
+
+            mult_error = self.signed_errors[:, i]*error_multiplyer
+
+            x_limit = np.max(np.abs(mult_error))*1.1
+
+            sns.histplot(
+                data=mult_error, ax=ax, kde=True, alpha=0.5, stat='density'
+            )
+            ax.set_title(name, fontweight='bold')
+            ax.set_xlabel(f'Error {error_unit}')
+            ax.set_ylabel('Density' if i == 0 else '', fontsize=9)
+            ax.set_xlim(-x_limit, x_limit)
+            ax.axvline(x=0, color='black', linestyle='--', alpha=0.3, linewidth=1)
+
+        plt.suptitle('Distribution of the signed errors', fontweight='bold', y=1.02)
+        plt.tight_layout()
+        plt.show()
 
 
     def plot_ray_misalignment(self, ax_t:Axes | None = None, ax_r:Axes | None = None, name:str = ""):

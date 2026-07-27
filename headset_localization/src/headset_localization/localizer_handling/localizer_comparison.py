@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
+from matplotlib.patches import Patch
+
 import pandas as pd
 import seaborn as sns
 from adjustText import adjust_text
@@ -682,6 +684,48 @@ class NPredictors1DatasetGrader:
         ax.set_title(f"{error_type.value} over time")
         ax.set_xlabel("Frame")
         ax.set_ylabel(error_type.ylabel)
+
+
+    def plot_signed_error_comparison(self, axes:list[Axes] | None = None, explain = False):
+        
+        if axes is None:
+            _, axs = plt.subplots(1, 6, figsize=(18, 6), sharey=False)
+        else:
+            axs = axes
+
+        names = ["TE-X", "TE-Y", "TE-Z", "RE-X", "RE-Y", "RE-Z"]
+        if explain:
+            names = ["TE-X, >0 → to right", "TE-Y, >0 → to down", "TE-Z, >0 → to close", "RE-X, >0 → looking up", "RE-Y, >0 → looking right", "RE-Z, >0 → slanted head right"]
+
+        color_palette = sns.color_palette("muted", len(self.gradable_pose_predictors))
+
+        for error_idx, (error_name, ax) in enumerate(zip(names, axs)):
+            error_unit = "[mm]" if error_idx < 3 else "[deg]"
+            error_multiplyer = 1000 if error_idx < 3 else 180/np.pi
+
+            x_limit = 1e-6
+
+            for i, (gpp, grader) in enumerate(zip(self.gradable_pose_predictors, self.graders)):
+                mult_error = grader.signed_errors[:, error_idx]*error_multiplyer
+                x_limit = max(x_limit, np.max(np.abs(mult_error))*1.1)
+
+                sns.kdeplot(
+                    data=mult_error, ax=ax, linewidth = 2, label = gpp.c_name, color=color_palette[i], legend=True
+                )
+
+            ax.set_title(error_name, fontweight='bold')
+            ax.set_xlabel(f'Error {error_unit}')
+            ax.set_ylabel('Density' if error_idx == 0 else '', fontsize=9)
+            ax.set_xlim(-x_limit, x_limit)
+            ax.axvline(x=0, color='black', linestyle='--', alpha=0.3, linewidth=1)
+
+        axs[0].legend(
+            [Patch(facecolor=color_palette[i], label=gpp.c_name) for i, gpp in enumerate(self.gradable_pose_predictors)], 
+            [gpp.c_name for gpp in self.gradable_pose_predictors],
+            title='Localizers'
+        )
+        plt.tight_layout()
+        plt.show()
         
 
     def visualize_predictions_3d(self):
