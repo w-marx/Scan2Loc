@@ -329,7 +329,7 @@ class PnEOptimizer(ABC):
         ax.axis('off')
 
 
-def visualize_multiple_pne_optimizer_losses(ax: Axes, optimizers: list[PnEOptimizer], use_log_scale:bool = True, names:list[str] | None = None):
+def visualize_multiple_pne_optimizer_losses(ax: Axes, optimizers: list[PnEOptimizer], use_log_scale:bool = True, names:list[str] | None = None, se_alpha:float = 0.1):
     rows = []
 
     for opt_idx, optimizer in enumerate(optimizers):
@@ -349,7 +349,7 @@ def visualize_multiple_pne_optimizer_losses(ax: Axes, optimizers: list[PnEOptimi
     df = pd.DataFrame(rows)
     if not df.empty:
         sns.lineplot(data=df, x="iteration", y="loss", hue="optimizer", 
-             estimator="mean", errorbar="se", ax=ax)
+             estimator="mean", errorbar="se", ax=ax, err_kws={'alpha':se_alpha})
         if use_log_scale:
             ax.set_yscale("log")
     

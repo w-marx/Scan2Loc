@@ -16,7 +16,7 @@ from shared.assertion_helpers import assert_homogeneous_mat
 
 from .ellipsoid_utilities_numpy import create_ellipsoid_lineset, assert_primal_quadratic_hom_ellipsoid
 
-from ..utilities.pose_optimisation import AdamConfig, compute_pose_exp_se3, compute_pose_euler
+from ..utilities.pose_optimisation import AdamConfig, compute_pose_exp_se3, compute_pose_rpy
 from ..utilities.point_utilities import remove_outliers_from_point_cloud
 
 
@@ -151,7 +151,7 @@ class LeastShellDistanceEllipsoidFitter(EllipsoidFitter):
             use_cnvx_hull:bool = True,
             adam_config:AdamConfig = AdamConfig(learning_rate=0.001, max_itterations=1000),
             size_penalty:float = 0.95,
-            delta_pose_mapping:Literal["euler", "se3_exp"] = "se3_exp",
+            delta_pose_mapping:Literal["rpy", "se3_exp"] = "se3_exp",
             distance_p_norm: Literal['-inf', 'inf'] | int = 1,
             size_p_norm: Literal['-inf', 'inf'] | int = 1,
             device:Literal['cuda', 'cpu'] = 'cpu',
@@ -171,7 +171,7 @@ class LeastShellDistanceEllipsoidFitter(EllipsoidFitter):
         if delta_pose_mapping == "se3_exp":
             self.apply_delta_pose = compute_pose_exp_se3
         else:
-            self.apply_delta_pose = compute_pose_euler
+            self.apply_delta_pose = compute_pose_rpy
         
         self.device = torch.device(device)
 

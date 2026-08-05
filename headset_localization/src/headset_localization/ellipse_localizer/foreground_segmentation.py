@@ -87,6 +87,7 @@ class YOLOv26Segmenter(Segmenter):
             prompts:list[str] = [
                 "brick", "pen", "sphere", "round object", "tool", "toy", "plastic object", "metal object", "duplo", "lego", "pen"
             ],
+            conf:float = 0.25
         ) -> None:
         from ultralytics import YOLO
 
@@ -97,11 +98,13 @@ class YOLOv26Segmenter(Segmenter):
 
         self.model = YOLO(model)
         self.model.set_classes(prompts)
+        self.conf = conf
     
     def get_object_masks(self, bgr_image:np.ndarray, visualize:bool = False)->np.ndarray:
         results = self.model.predict(
             cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB),
-            imgsz = max(bgr_image.shape[0], bgr_image.shape[1])
+            imgsz = max(bgr_image.shape[0], bgr_image.shape[1]),
+            conf = self.conf
         )[0]
 
         if results.masks is None:

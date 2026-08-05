@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 from .pne_optimizer import PnEOptimizer, primal_conics_to_gaussian_ellipses_torch, sqrtm_2x2_torch, full_error_calculation, full_error_calculation_compiled
 from ..utilities.time_tracker import TimeTracker, TimeLabels
-from ..utilities.pose_optimisation import compute_pose_exp_se3, compute_pose_euler, AdamConfig
+from ..utilities.pose_optimisation import compute_pose_exp_se3, compute_pose_rpy, AdamConfig
 
 
 def get_compiled_ellipsoid_loss_fn(
@@ -55,7 +55,7 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
     def __init__(
             self, 
             config:PnEDeltaPoseLBFGSOptimizerConfig = PnEDeltaPoseLBFGSOptimizerConfig(),
-            delta_pose_mapping:Literal["euler", "se3_exp"] = "se3_exp",
+            delta_pose_mapping:Literal["rpy", "se3_exp"] = "se3_exp",
             time_tracker:TimeTracker = TimeTracker(),
             accumulate_losses:bool = False, 
             opt_datatype:torch.dtype = torch.float32
@@ -70,7 +70,7 @@ class PnEDeltaPoseLBFGSOptimizer(PnEOptimizer):
         if delta_pose_mapping == "se3_exp":
             self.apply_delta_pose = compute_pose_exp_se3
         else:
-            self.apply_delta_pose = compute_pose_euler
+            self.apply_delta_pose = compute_pose_rpy
 
         self.loss_fn = get_compiled_ellipsoid_loss_fn(self.apply_delta_pose)
 
@@ -150,7 +150,7 @@ class PnEDeltaPoseAdamOptimizer(PnEOptimizer):
     def __init__(
             self, 
             adam_cfg:AdamConfig = AdamConfig(learning_rate=0.001, max_itterations=100),
-            delta_pose_mapping:Literal["euler", "se3_exp"] = "se3_exp",
+            delta_pose_mapping:Literal["rpy", "se3_exp"] = "se3_exp",
             device:Literal['cuda', 'cpu'] = 'cpu',
             time_tracker:TimeTracker = TimeTracker(),
             accumulate_losses:bool = False,
@@ -166,7 +166,7 @@ class PnEDeltaPoseAdamOptimizer(PnEOptimizer):
         if delta_pose_mapping == "se3_exp":
             self.apply_delta_pose = compute_pose_exp_se3
         else:
-            self.apply_delta_pose = compute_pose_euler
+            self.apply_delta_pose = compute_pose_rpy
 
         self.loss_fn = get_compiled_ellipsoid_loss_fn(self.apply_delta_pose)
 

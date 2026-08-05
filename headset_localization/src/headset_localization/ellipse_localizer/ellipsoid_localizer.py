@@ -234,7 +234,7 @@ class EllipsoidLocalizer(HeadsetLocalizer):
             cam1_segmenter:Segmenter | None = None,
             cam2_segmenter:Segmenter | None = None,
             pne_optimizer:PnEOptimizer | None = None,
-            min_number_matched_ellipsoids_for_opt:int = 1,
+            min_number_matched_ellipsoids_for_opt:int = 3,
             ellipsoid_refinement_at_res: None | tuple[int, int] = None,
             matching_config:GaussianMatchingConfig = GaussianMatchingConfig(),
             ellipsoid_matching_config:PointCloudMatchingConfig = PointCloudMatchingConfig(),

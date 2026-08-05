@@ -181,7 +181,7 @@ class NPredictors1DatasetGrader:
             headset_data:HeadsetRecording,
             use_tqdm_for_predictors:bool = False,
             use_tqdm_for_frames:bool = True,
-            compute_gripping_error:bool = False,
+            compute_ray_intersection_error:bool = False,
     )->None:
         """
         :param gradable_pose_predictors: A list of N gradable PosePredictors
@@ -191,7 +191,7 @@ class NPredictors1DatasetGrader:
         self.gradable_pose_predictors = gradable_pose_predictors
         self.robot_env = robot_env
 
-        if compute_gripping_error:
+        if compute_ray_intersection_error:
             gripping_error_calculator = FastRayIntersectionError(points=robot_env.robot_xyz_images, intrinsics=headset_data.intrinsic_cam_mtx)
         else:
             gripping_error_calculator = None
@@ -269,7 +269,9 @@ class NPredictors1DatasetGrader:
         return pd.DataFrame.from_dict(rows, orient="index").fillna(0)
     
 
-    def print_error_under_limits(self, limits_m:list[float], error_type:Literal['ATE', 'ARE', 'RIE']):
+    def print_error_under_limits(self, limits_m:list[float], error_type:Literal['ATE', 'ARE'], avg_error_fmt = ".4f"):
+        unit_s = {'ATE':"m", 'ARE':"°"}
+        factor_s = {'ATE':1, 'ARE':180/np.pi}
 
         rows = []
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
@@ -277,19 +279,18 @@ class NPredictors1DatasetGrader:
             err_s = {
                 'ATE':grader.translational_errors,
                 'ARE':grader.rotational_errors,
-                'RIE':grader.rie_s
             }
             t_error_s = err_s[error_type]
             if t_error_s is None:
                 continue
-            t_error_s = np.array(t_error_s)
+            t_error_s = np.array(t_error_s).reshape(-1)*factor_s[error_type]
 
             for limit in limits_m:
                 limit_mask = t_error_s < limit
                 valid_errors = t_error_s[limit_mask]
-                avg_error = fmt_mae(valid_errors, fmt=".4f")
+                avg_error = fmt_mae(valid_errors, avg_error_fmt)
                 success = format_optional(np.sum(limit_mask)/grader.number_attempted_predictions, factor=100, fmt="5.1f")
-                dict[str(limit)] = avg_error+f"m, {success}%"
+                dict[str(limit)] = avg_error+f"{unit_s[error_type]}, {success}%"
             
             rows.append(dict)
                 
@@ -686,7 +687,7 @@ class NPredictors1DatasetGrader:
         ax.set_ylabel(error_type.ylabel)
 
 
-    def plot_signed_error_comparison(self, axes:list[Axes] | None = None, explain = False):
+    def plot_signed_error_comparison(self, axes:list[Axes] | None = None, explain = False, symmetric = True):
         
         if axes is None:
             _, axs = plt.subplots(1, 6, figsize=(18, 6), sharey=False)
@@ -716,8 +717,10 @@ class NPredictors1DatasetGrader:
             ax.set_title(error_name, fontweight='bold')
             ax.set_xlabel(f'Error {error_unit}')
             ax.set_ylabel('Density' if error_idx == 0 else '', fontsize=9)
-            ax.set_xlim(-x_limit, x_limit)
-            ax.axvline(x=0, color='black', linestyle='--', alpha=0.3, linewidth=1)
+
+            if symmetric:
+                ax.set_xlim(-x_limit, x_limit)
+                ax.axvline(x=0, color='black', linestyle='--', alpha=0.3, linewidth=1)
 
         axs[0].legend(
             [Patch(facecolor=color_palette[i], label=gpp.c_name) for i, gpp in enumerate(self.gradable_pose_predictors)], 
@@ -728,19 +731,26 @@ class NPredictors1DatasetGrader:
         plt.show()
         
 
-    def visualize_predictions_3d(self):
+    def visualize_predictions_3d(self, vis_robot_cams:bool = False):
         """
         Visualizes the predictions made by the predictors using open3d
         :param robot_env: RobotEnvironment or None, if not None will be added to the plot
         :param show_label: whether to show the label camera frames or not
         """
-        to_vis = self.robot_env.visualize_3d_data(visualize=False)
+        to_vis = self.robot_env.visualize_3d_data(visualize=False, visualize_robot_cameras=vis_robot_cams)
 
-        colors = plt.cm.plasma(np.linspace(0, 1, len(self.graders)))[:, :3]
-        colors = [[0, 1.0, 0]] + list(colors)
+        colors = plt.cm.gist_rainbow(np.linspace(0, 1, len(self.graders)+1))[:, :3]
 
         trajectories = [[b_t_h for b_t_h in self.headset_data.robot_base_t_headset_s if b_t_h is not None]]
         trajectories += [g.predicted_base_t_headset_s_no_none for g in self.graders]
+
+        print("Color mapping:")
+        for i, color in enumerate(colors):
+            rgb = np.asarray(color * 255).astype(np.uint8)
+            color_code = f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m"
+            reset_code = "\033[0m"
+            label = "Ground Truth" if i == 0 else f"Grader {self.gradable_pose_predictors[i-1].c_name}"
+            print(f"{color_code}■{reset_code} {label}: RGB({rgb[0]};{rgb[1]};{rgb[2]})")
 
 
         for i, trajectory in enumerate(trajectories):
@@ -754,3 +764,4 @@ class NPredictors1DatasetGrader:
             to_vis.append(traj_line_set)
 
         o3d.visualization.draw_geometries(to_vis, f"Predicted trajectories visualisation")
+

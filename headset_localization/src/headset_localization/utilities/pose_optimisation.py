@@ -53,7 +53,7 @@ def exp_se3(s:torch.Tensor, eps = 1e-8):
     return T
 
 
-def euler_to_matrix(angles):
+def rpy_to_matrix(angles):
     """
     angles: (3,) tensor with requires_grad=True
     return: (3,3) rotation matrix, fully differentiable w.r.t. angles
@@ -89,11 +89,11 @@ def compute_pose_exp_se3(x_i:torch.Tensor, cam_t_base:torch.Tensor)->torch.Tenso
     return exp_se3(x_i) @ cam_t_base
 
 
-def compute_pose_euler(x_i:torch.Tensor, cam_t_base:torch.Tensor)->torch.Tensor:
+def compute_pose_rpy(x_i:torch.Tensor, cam_t_base:torch.Tensor)->torch.Tensor:
     angles = x_i[:3]
     t = x_i[3:]
 
-    r_delta = euler_to_matrix(angles)
+    r_delta = rpy_to_matrix(angles)
 
     delta_pose = torch.eye(4, dtype=x_i.dtype, device=x_i.device)
     delta_pose[:3, :3] = r_delta
