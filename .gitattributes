@@ -1,4 +1,2 @@
-*.ipynb filter=nbstripout
 *.ipynb diff=ipynb
-
 *.vrs filter=lfs
