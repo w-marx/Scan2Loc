@@ -269,9 +269,9 @@ class NPredictors1DatasetGrader:
         return pd.DataFrame.from_dict(rows, orient="index").fillna(0)
     
 
-    def print_error_under_limits(self, limits_m:list[float], error_type:Literal['ATE', 'ARE'], avg_error_fmt = ".4f"):
-        unit_s = {'ATE':"m", 'ARE':"°"}
-        factor_s = {'ATE':1, 'ARE':180/np.pi}
+    def print_error_under_limits(self, limits_m:list[float], error_type:Literal['ATE', 'ARE'], avg_error_fmt = ".1f"):
+        unit_s = {'ATE':"mm", 'ARE':"°"}
+        factor_s = {'ATE':1000, 'ARE':180/np.pi}
 
         rows = []
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):

@@ -84,7 +84,7 @@ class Scanned3dEnvironment:
         number_of_sampled_datapoints: int = 10,
         sample_datapoints_based_on_aruco_corectness:bool = False,
         only_sample_robot_datapoints_w_marker_estimates: bool = False,
-        markers_use_advanced_removal: bool = False,
+        markers_use_advanced_removal: bool = True,
         est3d_xyz_image_gen_config:XYZImageGenerationConfig | None = XYZImageGenerationConfig(),
         est3d_xyz_icp_config:ICPAlignmentConfig | None = ICPAlignmentConfig(),
     )->'Scanned3dEnvironment':

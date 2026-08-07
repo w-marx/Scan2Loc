@@ -261,7 +261,7 @@ class PredictionOnDataset:
                 errors = errors[np.isfinite(errors)]
                 self.rie_s.append(errors)
                 self.timed_rie_errors.append((i, np.median(errors)))
-            self.rie_s = np.concatenate(self.rie_s)
+            self.rie_s = np.concatenate(self.rie_s) if len(self.rie_s) > 0 else np.array([])
         
         self.median_ray_intersection_error = np.median(self.rie_s) if len(self.rie_s) > 0 else None
         self.mean_ray_intersection_error = np.mean(self.rie_s) if len(self.rie_s) > 0 else None
