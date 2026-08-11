@@ -11,7 +11,7 @@ import seaborn as sns
 from adjustText import adjust_text
 from enum import Enum
 from tqdm import tqdm
-
+import os, logging, shutil, json
 
 from ..data_interfaces.scanned_3d_environment import Scanned3dEnvironment
 from ..data_interfaces.headset_recording import HeadsetRecording
@@ -214,11 +214,23 @@ class NPredictors1DatasetGrader:
                 predictor=predictor,
                 headset_data=headset_data,
                 number_retry=gradable_pose_predictor.number_retries,
-                gripping_error=gripping_error_calculator,
+                gaze_intersection_error=gripping_error_calculator,
                 use_tqdm=use_tqdm_for_frames
             )
             self.graders.append(grader)
 
+    def save_results(self, location:str="./results", name:str = "results"):
+        os.makedirs(name=location, exist_ok=True)
+
+        save_dict = {}
+        for grader, gpp in zip(self.graders, self.gradable_pose_predictors):
+            save_dict[gpp.c_name] = grader.create_results_dict()
+
+        # save to normal json
+        json_path = os.path.join(location, f"{name}.json")
+        with open(json_path, 'w') as f:
+            json.dump(save_dict, f, indent=4)
+        
 
     def get_creation_times(self)->pd.DataFrame:
         """

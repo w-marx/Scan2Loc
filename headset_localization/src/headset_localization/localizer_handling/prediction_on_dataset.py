@@ -153,7 +153,7 @@ class PredictionOnDataset:
                  number_retry:int = 1,
                  vid_gen:VideoGenerator | None = None,
                  video_save_location:str = "test.mp4",
-                 gripping_error:FastRayIntersectionError | None = None,
+                 gaze_intersection_error:FastRayIntersectionError | None = None,
                  use_tqdm:bool = True
             ):
         """
@@ -207,7 +207,72 @@ class PredictionOnDataset:
         if vid_gen is not None:
             vid_gen.save_video(location=video_save_location)
 
+        h, w = headset_data.bgr_image_s[0].shape[:2]
 
+        self.comparable_poses = [
+            (i, predicted, label)
+            for i, (predicted, label) in enumerate(zip(self.predicted_base_t_headset_s, headset_data.robot_base_t_headset_s))
+            if predicted is not None and label is not None
+        ]
+        
+        self.rie_s = []
+        self.timed_rie_errors = []
+        if gaze_intersection_error is not None:
+            for i, m1, m2 in self.comparable_poses:
+                errors = gaze_intersection_error.compute_ray_intersection_error_img(
+                    base_t_cam1=m1,
+                    base_t_cam2=m2,
+                    dim=(w, h),
+                    size=1,
+                    stride=7
+                ).reshape(-1)
+                errors = errors[np.isfinite(errors)]
+                self.rie_s.append(errors)
+                self.timed_rie_errors.append((i, np.median(errors)))
+            self.rie_s = np.concatenate(self.rie_s) if len(self.rie_s) > 0 else np.array([])
+
+        # Extract and match metrics:
+        self.avg_number_of_tries = None
+        self.avg_number_of_inliers = None
+        if predictor.extract_and_match_wrapper is not None:
+            self.avg_number_of_tries = predictor.extract_and_match_wrapper.get_avg_number_of_tries()
+            self.avg_number_of_inliers = predictor.extract_and_match_wrapper.get_avg_number_of_inliers()
+
+        self.calculate_metrics()
+
+
+    def create_results_dict(self) -> dict[str, float | None | list[dict[str, int | list[list[float]]]]]:
+        res_dict = {
+            "number_attempted_predictions": int(self.number_attempted_predictions),
+            "number_successful_predictions": int(self.number_successful_predictions),
+            "success_ratio": float(self.success_ratio),
+
+            # Time
+            "time_per_successful_prediction": self.time_per_successful_prediction,
+            "avg_time_for_frame_prediction": self.avg_time_for_frame_prediction,
+
+            # ATE
+            "avg_ate":safe_mae(self.translational_errors),
+            "avg_are":safe_mae(self.rotational_errors),
+            "median_ate":safe_median(self.translational_errors),
+            "median_are":safe_median(self.rotational_errors),
+            "rmse_ate":self.ate_translation_rmse, 
+            "rmse_are":self.ate_rot_rmse,
+
+            # GIE
+            "median_gaze_intersection_error":format_optional(self.median_ray_intersection_error, fmt=".7f"),
+            "average_gaze_intersection_error":format_optional(self.mean_ray_intersection_error, fmt=".7f"),
+            "rmse_gaze_intersection_error":format_optional(self.rmse_ray_intersection_error, fmt=".7f"),
+
+            # Rest of results for recalculation
+            "comparable poses": [{"frame":i, "pred": pred.tolist(), "ground_truth": label.tolist()}for i, pred, label in self.comparable_poses],
+        }
+        return res_dict
+
+        
+
+
+    def calculate_metrics(self):
         self.predicted_base_t_headset_s_no_none = [
             b_t_h
             for b_t_h in self.predicted_base_t_headset_s if b_t_h is not None
@@ -225,11 +290,6 @@ class PredictionOnDataset:
         self.avg_time_for_frame_prediction = self._per_frame_prediction_time_tracker.get_timestamp_name_avg_time("predicted 1 frame")
 
         # Accuracy metrics
-        self.comparable_poses = [
-            (i, predicted, label)
-            for i, (predicted, label) in enumerate(zip(self.predicted_base_t_headset_s, headset_data.robot_base_t_headset_s))
-            if predicted is not None and label is not None
-        ]
         self.signed_errors = calculate_signed_errors(self.comparable_poses)
 
 
@@ -244,24 +304,6 @@ class PredictionOnDataset:
             (i, rotational_difference(m1, m2))
             for i, m1, m2 in self.comparable_poses
         ]
-
-        h, w = headset_data.bgr_image_s[0].shape[:2]
-        
-        self.rie_s = []
-        self.timed_rie_errors = []
-        if gripping_error is not None:
-            for i, m1, m2 in self.comparable_poses:
-                errors = gripping_error.compute_ray_intersection_error_img(
-                    base_t_cam1=m1,
-                    base_t_cam2=m2,
-                    dim=(w, h),
-                    size=1,
-                    stride=7
-                ).reshape(-1)
-                errors = errors[np.isfinite(errors)]
-                self.rie_s.append(errors)
-                self.timed_rie_errors.append((i, np.median(errors)))
-            self.rie_s = np.concatenate(self.rie_s) if len(self.rie_s) > 0 else np.array([])
         
         self.median_ray_intersection_error = np.median(self.rie_s) if len(self.rie_s) > 0 else None
         self.mean_ray_intersection_error = np.mean(self.rie_s) if len(self.rie_s) > 0 else None
@@ -293,13 +335,6 @@ class PredictionOnDataset:
             predicted=predicted_sync,
             actual=actual_sync
         )
-
-        # Extract and match metrics:
-        self.avg_number_of_tries = None
-        self.avg_number_of_inliers = None
-        if predictor.extract_and_match_wrapper is not None:
-            self.avg_number_of_tries = predictor.extract_and_match_wrapper.get_avg_number_of_tries()
-            self.avg_number_of_inliers = predictor.extract_and_match_wrapper.get_avg_number_of_inliers()
 
 
     def get_prediction_times(self)->tuple[float | None, list[tuple[str, float]]]:

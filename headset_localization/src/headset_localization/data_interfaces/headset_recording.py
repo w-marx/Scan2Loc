@@ -162,6 +162,7 @@ class HeadsetRecording:
                 with open(f"{headset_folder}/label.json", 'w') as f:
                     json.dump(self.robot_base_t_headset_s[i].tolist(), f, indent=4)
 
+
     def visualize_3d_data(self, visualize:bool = True, visualize_cameras:bool = True, camera_frame_size:float = 0.05):
         """
         Visualizes the headset trajectory using open3d
