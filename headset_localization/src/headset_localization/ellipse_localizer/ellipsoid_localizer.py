@@ -141,12 +141,14 @@ def image_to_primal_conics(
 
 def visualize_pose_prediction(
         fd:FeatureDrawing,
+        base_t_ellipsoid_s:np.ndarray,
         dual_quadratics:np.ndarray,
         cam_t_base:np.ndarray,
         intrinsic_mtx:np.ndarray,
         obs_gaussians_sigma_mu_s:np.ndarray,
         proj_match_indices:list[int],
         obs_match_indices:list[int],
+        headset_intrinsic_mat:np.ndarray
     ):
     """
     :param fd: The feature drawing with the axis to draw upon and the style guide
@@ -157,70 +159,27 @@ def visualize_pose_prediction(
     :param proj_match_indices: List of length n, where dual_quadratics[proj_match_indices[i]] ~ obs_gaussians_sigma_mu_s[obs_match_indices[i]]
     :param obs_match_indices: List of length n
     """
-    
+    primal_quadratics = np.linalg.inv(dual_quadratics)
+
     proj_primal_conincals = project_primal_quadratics_to_primal_conicals(
-        primal_quadratics=np.linalg.inv(dual_quadratics),
+        primal_quadratics=primal_quadratics,
         cam_t_base=cam_t_base,
         intrinsic_mtx=intrinsic_mtx
     )
     proj_mu_s, proj_sigma_s = primal_conics_to_gaussian_ellipses(proj_primal_conincals)
     proj_sigma_mu_s = gauss_ellipse_batch_tuple_to_mat_batch(mu_s=proj_mu_s, sigma_s=proj_sigma_s)
 
-    n_obs = obs_gaussians_sigma_mu_s.shape[0]
-    n_proj = proj_sigma_mu_s.shape[0]
+    fd.visualize_ellipsoid_features(
+        observed_gaussians=obs_gaussians_sigma_mu_s, 
+        projected_gaussians=proj_sigma_mu_s,
+        proj_match_indices=proj_match_indices,
+        obs_match_indices=obs_match_indices,
+        base_t_ellipsoid_s = base_t_ellipsoid_s,
+        primal_quadratic_s=primal_quadratics,
+        base_t_cam=np.linalg.inv(cam_t_base),
+        headset_intrinsic_mat = headset_intrinsic_mat
+    )
 
-    unmatched_obs = list(set(range(n_obs))-set(obs_match_indices))
-    unmatched_proj = list(set(range(n_proj))-set(proj_match_indices))
-    # Plot unmatched ones:
-    ellipses_unmatched = gaussian_ellipse_s_to_matplotlib_ellipse_s(
-        gaussian_ellipse_s=proj_sigma_mu_s[unmatched_proj],
-        colors=fd.sc.unmatched_color,
-        line_style=fd.sc.proj_line_style
-    ) + gaussian_ellipse_s_to_matplotlib_ellipse_s(
-        gaussian_ellipse_s=obs_gaussians_sigma_mu_s[unmatched_obs],
-        colors=fd.sc.unmatched_color,
-        line_style=fd.sc.obs_line_style
-    )
-    for e in ellipses_unmatched:
-        fd.ax.add_patch(e)
-
-
-    # Plot matched ones
-    n = len(obs_match_indices)
-    colors = plt.cm.jet(np.linspace(0,1, n))
-    proj_ellipses_matched = gaussian_ellipse_s_to_matplotlib_ellipse_s(
-        gaussian_ellipse_s=proj_sigma_mu_s[proj_match_indices],
-        colors=colors,
-        line_style=fd.sc.proj_line_style
-    )
-    obs_ellipses_matched = gaussian_ellipse_s_to_matplotlib_ellipse_s(
-        gaussian_ellipse_s=obs_gaussians_sigma_mu_s[obs_match_indices],
-        colors=colors,
-        line_style=fd.sc.obs_line_style
-    )
-    for proj_e, obs_e in zip(proj_ellipses_matched, obs_ellipses_matched):
-        fd.ax.add_patch(proj_e)
-        fd.ax.add_patch(obs_e)
-    fd.ax.scatter(
-        obs_gaussians_sigma_mu_s[obs_match_indices,0,2],
-        obs_gaussians_sigma_mu_s[obs_match_indices,1,2],
-        color=colors, s=fd.sc.point_size, alpha=fd.sc.point_alpha, marker = fd.sc.obs_point_style)
-    
-    fd.ax.scatter(
-        proj_sigma_mu_s[proj_match_indices,0,2],
-        proj_sigma_mu_s[proj_match_indices,1,2],
-        color=colors, s=fd.sc.point_size, alpha=fd.sc.point_alpha, marker = fd.sc.proj_point_style)
-    
-    fd.ax.quiver(
-        proj_sigma_mu_s[proj_match_indices,0,2],
-        proj_sigma_mu_s[proj_match_indices,1,2],
-        obs_gaussians_sigma_mu_s[obs_match_indices,0,2]-proj_sigma_mu_s[proj_match_indices,0,2], 
-        obs_gaussians_sigma_mu_s[obs_match_indices,1,2]-proj_sigma_mu_s[proj_match_indices,1,2],
-        angles='xy', scale_units='xy', scale=1,
-        color=colors,
-        alpha=fd.sc.arrow_alpha,
-        width=0.005
-    )
     
 
 class EllipsoidLocalizer(HeadsetLocalizer):
@@ -484,12 +443,14 @@ class EllipsoidLocalizer(HeadsetLocalizer):
             obs_gauss_ellipses_rs = rescale_gaussians(obs_gauss_ellipses, old_res=img_size_new, new_res=(w_orig, h_orig))
             visualize_pose_prediction(
                 fd=fd,
+                base_t_ellipsoid_s=self.base_t_ellipsoid_s,
                 dual_quadratics=np.linalg.inv(self.primal_quadratic_s),
                 cam_t_base=cam2_t_base_opt if cam2_t_base_opt is not None else rough_cam_t_base,
                 intrinsic_mtx=self.cam2_intrinsic_mtx,
                 obs_gaussians_sigma_mu_s=obs_gauss_ellipses_rs,
                 proj_match_indices=list(proj_match_idx_s),
-                obs_match_indices=list(obs_match_idx_s)
+                obs_match_indices=list(obs_match_idx_s),
+                headset_intrinsic_mat = self.cam2_intrinsic_mtx
             )
 
         return cam2_t_base_opt

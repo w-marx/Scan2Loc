@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 
 from shared.assertion_helpers import assert_mxnx3_np_uint8_image
 
@@ -43,13 +44,12 @@ class ExtractAndMatch(ABC):
 
 
     @staticmethod
-    def plot_matched_points(img1_rgb:np.ndarray, img2_rgb:np.ndarray, points1:np.ndarray, points2:np.ndarray):
+    def plot_matched_points(img1_rgb:np.ndarray, img2_rgb:np.ndarray, points1:np.ndarray, points2:np.ndarray, ax:Axes|None = None):
         """
         :param img1_rgb: An RGB image as HxWx3-uint8 numpy array
         :param img2_rgb: An RGB image as HxWx3-uint8 numpy array
         :param points1: Nx2 array of 2d points of the form [[x1,y1], ...] in img1_rgb points1[i] is matched to points2[i]
         :param points1: Nx2 array of 2d points
-        :return: a tuple of image Points as 2 Nx2 numpy arrays (in the x-y format)
         """
         _ = assert_mxnx3_np_uint8_image(img1_rgb)
         _ = assert_mxnx3_np_uint8_image(img2_rgb)
@@ -67,8 +67,9 @@ class ExtractAndMatch(ABC):
         canvas[h1_off:h1+h1_off, :w1] = img1_rgb
         canvas[h2_off:h2+h2_off, w1+x_offset:cnvs_w] = img2_rgb
 
-        fig, ax = plt.subplots(figsize = (12, 8))
-        ax.set_title("Matched image points")
+        if ax is None:
+            fig, ax = plt.subplots(figsize = (12, 8))
+            ax.set_title("Matched image points")
         ax.imshow(canvas)
 
         colors = plt.cm.jet(np.linspace(0,1, points1.shape[0]))
@@ -87,6 +88,7 @@ class ExtractAndMatch(ABC):
             )
         ax.axis('off')
         plt.show()
+
 
 class ExtractAndLightGlue(ExtractAndMatch):
     def __init__(

@@ -612,6 +612,7 @@ def plot_ellipses(
     plt.tight_layout()
     plt.show()
 
+
 def pairwise_sq_wasserstein_distance(
         mu1_s:np.ndarray,
         sigma1_s:np.ndarray,

@@ -60,7 +60,7 @@ class ExtractAndMatchWrapper:
         self.debug_number_inliers = []
 
         self.display_matching = config.display_matching
-        self.cam1_bgr_images_for_vis = cam1_bgr_images if config.display_matching else None
+        self.cam1_bgr_images_for_vis = cam1_bgr_images
 
 
     def est_base_t_cam2_with_retry(self,cam2_bgr_image: np.ndarray, number_retry:int = 1, fd:FeatureDrawing|None = None) -> np.ndarray | None:
@@ -113,8 +113,24 @@ class ExtractAndMatchWrapper:
                 cam2_rgb_image_features = augmented_images_features,
                 backward_transformations_names=map_points_to_unaugmented_functions_and_names,
                 augmented_images=np.asarray(augmented_images),
-                fd=fd
             )
+
+            if fd is not None:
+                if est_base_t_cam_and_points is not None:
+                    _, best_image_points_cam1, best_image_points_cam2, _, inlier_indices = est_base_t_cam_and_points
+                    fd.plot_matched_points(
+                        robot_img_rgb=cv2.cvtColor(self.cam1_bgr_images_for_vis[idx], code=cv2.COLOR_BGR2RGB),
+                        headset_img_rgb=cam2_rgb_image,
+                        points1=best_image_points_cam1[inlier_indices],
+                        points2=best_image_points_cam2[inlier_indices]
+                    )
+                else:
+                    fd.set_images(
+                        robot_img_rgb=cv2.cvtColor(self.cam1_bgr_images_for_vis[idx], code=cv2.COLOR_BGR2RGB),
+                        headset_img_rgb=cam2_rgb_image
+                    )
+
+
             self.sheduler.adjust(idx, est_base_t_cam_and_points is not None)
             number_tries += 1
         self.debug_used_number_of_tries.append(number_tries)
@@ -127,7 +143,6 @@ class ExtractAndMatchWrapper:
             cam2_rgb_image_features:list[Any],
             backward_transformations_names:list[tuple[str, Callable[[np.ndarray], np.ndarray]]],
             augmented_images:np.ndarray | None = None,
-            fd:FeatureDrawing | None = None
         ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int]] | None:
         """
         :return: None or base T_cam, points_image_1, points_image_2, world_obj_points, inliers
@@ -181,7 +196,6 @@ class ExtractAndMatchWrapper:
             img_points=best_image_points_cam2,
             intrinsic_matrix=self.cam2_mtx,
             config=self.ransac_config,
-            fd = fd
         )
 
         if cam2_t_base__inliers is None:

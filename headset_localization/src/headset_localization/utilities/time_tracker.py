@@ -2,6 +2,7 @@ import time
 import numpy as np
 from enum import Enum
 from  typing import Union
+import copy
 
 class TimeLabels(Enum):
     EXTRACT_AND_MATCH_WRAPPER_INIT = "Point based pred. init"
@@ -27,9 +28,12 @@ class TimeLabels(Enum):
 
 
 class TimeTracker:
-    def __init__(self):
+    def __init__(self, tracked_times: None | dict[str, list[float]] = None):
         self.last_time = time.perf_counter()
-        self.tracked_times = {}
+        if tracked_times is None:
+            self.tracked_times = {}
+        else:
+            self.tracked_times = tracked_times
     
     def _get_elapsed_time(self):
         return time.perf_counter()-self.last_time
@@ -99,3 +103,9 @@ class TimeTracker:
         """
         for key, avg in self.return_averaged_times():
             print(f"{key:<40} {avg*1000:.3f} ms")
+
+    def return_dict(self):
+        """
+        Returns a copy of its dictionary
+        """
+        return copy.deepcopy(self.tracked_times)

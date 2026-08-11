@@ -5,7 +5,6 @@ from enum import Enum
 
 from shared.se3_utilities import r_t_to_hom
 
-from ..utilities.slam2mp4 import FeatureDrawing
 from ..utilities.point_utilities import project_visible_points
 
 
@@ -70,7 +69,6 @@ def estimate_point_pose_ransac(
         world_points:np.ndarray,
         intrinsic_matrix:np.ndarray, 
         config:RansacPoseEstimationConfig,
-        fd:FeatureDrawing | None = None
     )->tuple[np.ndarray, np.ndarray]|None:
     """
     Solves for the cam_t_world position using ransac
@@ -104,11 +102,5 @@ def estimate_point_pose_ransac(
         return None
     
     cam_t_base = r_t_to_hom(cv2.Rodrigues(r_img_t_obj)[0], t_img_t_obj.flatten())
-
-    if fd is not None:
-        fd.draw_point_pairs(
-            points_observed=img_points[inliers.flatten()], 
-            points_projected=project_visible_points(world_points[inliers.flatten()], cam_t_base=cam_t_base, intrinsic_mat=intrinsic_matrix)
-        )
 
     return cam_t_base, inliers.flatten()

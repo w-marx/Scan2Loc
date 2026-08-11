@@ -182,7 +182,7 @@ class PredictionOnDataset:
             headset_image = headset_data.bgr_image_s[i]
 
             if vid_gen is not None:
-                vid_gen.start_new_frame(headset_image)
+                vid_gen.start_new_frame()
 
             self._predictions_whole_time_tracker.reset_elapsed_time()
             est_base_t_cam = predictor.est_base_t_cam2(
@@ -300,6 +300,7 @@ class PredictionOnDataset:
         if predictor.extract_and_match_wrapper is not None:
             self.avg_number_of_tries = predictor.extract_and_match_wrapper.get_avg_number_of_tries()
             self.avg_number_of_inliers = predictor.extract_and_match_wrapper.get_avg_number_of_inliers()
+
 
     def get_prediction_times(self)->tuple[float | None, list[tuple[str, float]]]:
         summed_time = self._per_frame_prediction_time_tracker.get_timestamp_name_avg_time("predicted 1 frame success")

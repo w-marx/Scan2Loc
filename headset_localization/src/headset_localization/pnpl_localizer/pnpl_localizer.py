@@ -347,8 +347,24 @@ class PnPLLocalizer(HeadsetLocalizer):
             cam2_rgb_image_features=cam2_rgb_image_features, 
             backward_transformations_names = backward_transformations_names,
             augmented_images=cam2_augmented_images,
-            fd=fd
         )
+
+        if fd is not None:
+            if base_t_cam_and_points is not None:
+                _, best_image_points_cam1, best_image_points_cam2, _, inlier_indices = base_t_cam_and_points
+                fd.plot_matched_points(
+                    robot_img_rgb=cv2.cvtColor(self._extract_and_match_wrapper.cam1_bgr_images_for_vis[idx], code=cv2.COLOR_BGR2RGB),
+                    headset_img_rgb=cam2_rgb_image,
+                    points1=best_image_points_cam1[inlier_indices],
+                    points2=best_image_points_cam2[inlier_indices]
+                )
+            else:
+                fd.set_images(
+                    robot_img_rgb=cv2.cvtColor(self._extract_and_match_wrapper.cam1_bgr_images_for_vis[idx], code=cv2.COLOR_BGR2RGB),
+                    headset_img_rgb=cam2_rgb_image
+                )
+
+
         time_tracker.add_time_stamp(TimeLabels.EXTRACT_AND_MATCH_WRAPPER_CALL)
 
         if base_t_cam_and_points is None:
@@ -402,12 +418,9 @@ class PnPLLocalizer(HeadsetLocalizer):
         time_tracker.add_time_stamp(TimeLabels.PNL_OPTIMIZATION)
 
         if fd is not None:
-            visualize_features_2d(
-                fd = fd,
-                obs_lines_matched_2d=matched_lines_img2_2d,
-                proj_lines_matched_3d=matched_lines_img1_3d,
-                cam_t_base=cam2_t_base_bundle_adjustment if cam2_t_base_bundle_adjustment is not None else base_t_cam_pnp,
-                intrinsic_mat= self.cam2_intrinsic_mtx
+            fd.visualize_line_features(
+                robot_lines_2d=matched_lines_img1_2d,
+                headset_lines_2d=matched_lines_img2_2d
             )
 
         return np.linalg.inv(cam2_t_base_bundle_adjustment)

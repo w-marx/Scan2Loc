@@ -12,7 +12,8 @@ def assert_nd_line_batch(lines:np.ndarray, dim:int = 2):
     Asserts that something is a line batch:
     [[x0, y0, ...], ... ]
     """
-    assert lines.ndim == 2 and lines.shape[-1] == dim, f"Shape: {lines.shape} != (B, {dim})"
+    assert lines.ndim == 2 and lines.shape[-1] == dim*2, f"Shape: {lines.shape} != (B, {dim*2})"
+    return True
 
 
 
