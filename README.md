@@ -1,9 +1,21 @@
-# AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline
+# Scan2Loc 
+### AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline
+---
 
 ## Overview
-This repo provides an complete benchmark pipeline for evaluating localization in robot scanned workspaces. In detail it offers the following:
+**Scan2Loc** provides a complete benchmark pipeline for evaluating marker-free AR headset localization in robot-scanned workspaces. This repository accompanies the bachelor thesis *"AR Headset Localization in Robot Scanned Workspaces: A Benchmark Pipeline"*.
 
-### Datasets
+#### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Datasets** | Desktop datasets with `.vrs` recordings + TUM-RGBD integration |
+| **Dataset Creation** | Scripts for generating new robot-scanned environments |
+| **Three Localizers** | PnP, PnP+L (lines), and Ellipsoid-based refinement |
+| **Evaluation Suite** | ATE/RPE metrics, timing analysis, and gaze-intersection error  |
+
+
+## Datasets
 <p align="center">
   <img width="300" style="margin: 10px;" alt="image" src="https://github.com/user-attachments/assets/12635292-cf01-457a-af56-5c45c6874a94" />
   <img width="300" style="margin: 10px;" alt="tum_first10_percent(1)" src="https://github.com/user-attachments/assets/eb786e5a-7f29-463e-a99e-012c5561c02d" />
@@ -11,45 +23,63 @@ This repo provides an complete benchmark pipeline for evaluating localization in
   <em> Figure: own dataset (left) and tum dataset (right).</em>
 </p>
 
-Multiple desktop datasets are provided in the `example_datasets` folder. Consisting of multiple scenes and matching `.vrs` recordings in them. In addition integration with the TUM-RGBD datasets (https://cvg.cit.tum.de/data/datasets/rgbd-dataset) is provided.
+Multiple desktop datasets are provided in [`example_datasets/`](./example_datasets), including:
+- Scenes with ArUco/ChArUco markers for ground truth
+- Matching `.vrs` recordings from Meta Aria Gen1 glasses
+  
+Furthermore this repo supports the [TUM RGB-D Dataset](https://cvg.cit.tum.de/data/datasets/rgbd-dataset)
 
 
-### Dataset creation
-The scripts in the `data_gathering` folder along with the `shared` package allows the creation of new datasets. A guide on this is provided in `notebooks/DataGathering.ipynb`. 
+## Dataset creation
+Create new robot-scanned datasets with:
+- Automated scanning using Franka Emika Panda + Intel RealSense D435
+- Hand-eye calibration and ground truth trajectory generation via fiducial markers
+- Direct dataset creation using Meta Aria glasses
 
-### Three Inference ready localizer families:
+A guide on this is provided in `notebooks/DataGathering.ipynb`.
+
+
+## Localization:
+**Scan2Loc** provides 3D reconstruction from robot scans and 3 localizer families to locate a camera in them.
+#### Reconstruction
+Direct scene reconstruction via [MapAnything](https://github.com/facebookresearch/map-anything.git) is provided, supporting depth images.
+Furthermore ICP alignment and scene cleanup are directly provided.
+
+#### Three Localizer Families
 <p align="center">
   <img width="800" alt="example localization using the ellipsoid localizer" src="https://github.com/user-attachments/assets/0d9bde49-3df4-4dac-9ff5-abbc087f7ad8" />
   <br>
   <em>Figure: Example localization using the ellipsoid localizer</em>
 </p>
 
-**PnP Localizer**: using simple PnP for localization, this repo offers direct support for LightGlue, LoMa and E-LoFTR.  
+**PnP Localizer**: using simple PnP for localization, this repo offers direct support for [LightGlue](https://github.com/cvg/LightGlue.git), [LoMa](https://github.com/davnords/LoMa.git) and [E-LoFTR](https://github.com/zju3dv/efficientloftr).  
 **PnP+L Localizer**: using PnP for localization and refines it using lines.  
 **Ellipsoid Localizer**: leveraging ellipse-ellipsoid bounding boxes to refine the localization.
 
-### Evaluation Framework
-The `headset_localization` package can be used to evaluate those localizers on new datasets and to finetune them. Providing metrics such as absolute and relative pose error, offline and online timings and 6D signed errors for failure type analysis. Furthermore it provides the gaze-intersection error, for intuitive assessment of localizers for the task of gaze based HRI.
+## Evaluation Framework
+The [`headset_localization`](./headset_localization) package provides comprehensive evaluation tools for benchmarking localizer performance. Including comparison to the ground truth and other localizers.
+
+#### Available Metrics
+| Metric | Description |
+|--------|-------------|
+| **Absolute Trajectory Error** | Translational & rotational error for trajectories and frames |
+| **Relative Pose Error (RPE)** | Drift between consecutive poses (SLAM-style) |
+| **6D Signed Errors** | Per-axis breakdown for failure analysis |
+| **Gaze-Intersection Error (GIE)** | Intuitive gaze based HRI metric (ray-scene intersection) |
+| **Timing Profiling** | Online/offline inference speed per component |
+| **Sucess rates** | Fraction of successful localization (with definable success thresholds) |
+
 
 ## Getting Started
-#### For dataset creation
-To create your own dataset the following dependencies need to be installed:
-```bash
-cd data_gathering
-conda env create -f environment.yml -p ./data_gather_env
-conda activate ./data_gather_env
-pip install -e ../shared
-```
-This environment needs access to a working deoxys installation (https://github.com/UT-Austin-RPL/deoxys_control) to be able to control a Franka Panda Emika robot.
-For example usage refer to `notebooks/DataGathering.ipynb`.
-
-#### For Inference and Evaluation
+### For Inference and Evaluation
 All utilities for inference and evaluation are provided by the `headset_localization` package.
-The dependencies to run the `headset_localization` package are provided in the `env_3090.yml` file. Those work on a NVIDIA GeForce RTX 3090 with CUDA 12.2 . Other CUDA versions and graphics cards might require different library versions.
+The dependencies to run the `headset_localization` package are provided in the `env_3090.yml` file.
 ```bash
+# Create environment (RTX23090, CUDA 12.2)
 conda env create -f env_3090.yml -p ./env
 conda activate ./env
 ```
+Note: Other CUDA versions / GPUs may require different libarary versions.  
 The `headset_localization` package can then be installed using the `install_pose_pred_dependencies.sh` script into any environment. 
 ```bash
 bash install_pose_pred_dependencies.sh 
@@ -83,11 +113,25 @@ print(base_t_cam)
 
 For detailed usage examples including evaluation refer to the notebooks in the `notebooks` folder, especially `notebooks/Quickstart.ipynb`. Some notebooks require the `fr2/desk` dataset in a `./tum_datasets` folder. Download: https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download.
 
+#### For dataset creation only
+To create your own dataset the following dependencies, which don't require CUDA, need to be installed.
+```bash
+cd data_gathering
+conda env create -f environment.yml -p ./data_gather_env
+conda activate ./data_gather_env
+pip install -e ../shared
+```
+This environment needs access to a working [deoxys](https://github.com/UT-Austin-RPL/deoxys_control) installation to be able to control a Franka Panda Emika robot.
+For example usage refer to `notebooks/DataGathering.ipynb`.
+
+
+## License
 For the licences please refer to the conda installation process and the License agreements of the installed repos in `external/*`.
+
 
 ## File Formats
 Different datasets and environment representations can directly be created from folders, this section defines the file formats.
-The folders from each frame are sorted alphabetically, so best practice is e.g. `0-8`, `000-115`.
+**Note**: Folders are sorted alphabetically. Use padding for proper ordering e.g. `0-8`, `000-115`.
 #### Raw Robot Scan
 
 ```
@@ -160,4 +204,3 @@ folder
 ```
 
 The `label.json` contains only the 4x4 robot->headset ground truth transformation matrix as a row-colum nested list of floats. 
-
