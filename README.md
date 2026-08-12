@@ -52,6 +52,7 @@ For the licences refer to the conda installation process and the License agreeme
 
 ## File Formats
 Different datasets and environment representations can directly be created from folders, this section defines the file formats.
+The folders from each frame are sorted alphabetically, so best practice is e.g. `0-8`, `000-115`.
 #### Raw Robot Scan
 
 ```
@@ -63,9 +64,9 @@ folder
 │       └──  depth.npz
 └── robot_cam_calibration.json
 ```
-robot_cam_calibration.json has the following attributes:
-- `camera_intrinsic_matrix`: the intrinsic camera matrix of the camera,
-- `camera_distortion_coefficients`: the distortion coefficients of the camera
+robot_cam_calibration.json has to have the following attributes:
+- `camera_intrinsic_matrix`: the intrinsic camera matrix of the camera: `[[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]]`
+- `camera_distortion_coefficients`: the distortion coefficients of the camera e.g.`[0.0, 0.0, 0.0, 0.0, 0.0]`
 
 #### Complete Robot Scan
 ```
@@ -80,15 +81,23 @@ folder
 └── robot_cam_calibration.json
 ```
 
-The robot_cam_calibration.json file should contain the fields:
-`camera_intrinsic_matrix`
+robot_cam_calibration.json has to have the same attributes as for the raw robot scan. 
 
-The `poses.json` files should contain the field:
--`base_t_gripper`
-And may contain the field:
--`camera_t_marker`
+the depth.npz files contain a metric `HxWxnp.float32` depth image, under the key `depth`
 
-The marker_detector_config.json file should contain the fields to build an aruco marker detector.
+marker_detector_config.json has to have the following attributes:
+- `"marker_type"`: the marker type: `Aruco` | `Charuco` | `null`
+- `"marker_side_length"`: ArUco marker side length in meters
+- `"aruco_marker_dictionary"`: A string describing the dict, e.g. "6X6_250"
+- `"board_size"`: `null` | `[length1, length2]`
+- `"square_size"`: Size of the chessboard squares in meters
+- `"min_fraction_of_markers"`: fraction from 0.0-1.0 of how much of the board must be visible for detection.
+
+
+The `poses.json` files have to contain the following attributes:
+- `base_t_gripper`: 4x4 transformation matrix as a row-colum nested list of floats
+- `camera_t_marker`: 4x4 transformation matrix as a row-colum nested list of floats | `null`
+
 
 #### Scanned 3D Environment
 ```
@@ -96,13 +105,13 @@ folder
 ├── robot_cam_calibration.json
 └── robot
    └── multiple folders (0 - N) with the contents:
-       ├── A xyz.npy
-       ├── A robot_base_t_robot_camera.json
-       └── A rgb.png image
+       ├── xyz.npy
+       ├── robot_base_t_robot_camera.json
+       └── rgb.png image
 ```
 
-The `xyz.npy` files contain metric 3D images.
-The `robot_base_t_robot_camera.json` files contain the 4x4 transformation matrix between robot base and camera.
+The `xyz.npy` files contain the metric 3D images (Each HxWx3).
+The `robot_base_t_robot_camera.json` contains only the 4x4 robot->robot_camera transformation matrix as a row-colum nested list of floats.
 
 #### Headset Recording
 
@@ -111,9 +120,9 @@ folder
 ├── headset_cam_calibration.json
 └── headset
     └── multiple folders (0 - N) with the contents:
-        ├── A label.json
-        └── A rgb.png
+        ├── label.json (optional)
+        └── rgb.png
 ```
 
-The `label.json` files containe the robot base -> headset pose gt (optional)
+The `label.json` contains only the 4x4 robot->headset ground truth transformation matrix as a row-colum nested list of floats. 
 
