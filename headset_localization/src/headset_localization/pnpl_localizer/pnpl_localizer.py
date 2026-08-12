@@ -112,6 +112,8 @@ def draw_matched_lines(
         lines_img1:np.ndarray,
         bgr_img2:np.ndarray,
         lines_img2:np.ndarray,
+        lines_img1_unmatched:np.ndarray | None = None,
+        lines_img2_unmatched:np.ndarray | None = None,
         axes:list[Axes] | None = None, 
     ):
         
@@ -125,13 +127,32 @@ def draw_matched_lines(
         axs[0].imshow(bgr_img1)
         axs[1].imshow(bgr_img2)
 
+        h1, w1 = bgr_img1.shape[:2]
+        h2, w2 = bgr_img2.shape[:2]
+        axs[0].set_xlim(0, w1)
+        axs[0].set_ylim(h1, 0)
+        axs[1].set_xlim(0, w2)
+        axs[1].set_ylim(h2, 0)
+
+        if lines_img1_unmatched is not None:
+            for i,(x1, y1, x2, y2) in enumerate(lines_img1_unmatched):
+                axs[0].plot([x1, x2], [y1, y2], color="gray", linewidth=1)
+
+        if lines_img2_unmatched is not None:
+            for i,(x1, y1, x2, y2) in enumerate(lines_img2_unmatched):
+                axs[1].plot([x1, x2], [y1, y2], color="gray", linewidth=1)
+
         colors_lines = plt.cm.jet(np.linspace(0,1, n_matched_lines))
 
         for i,(x1, y1, x2, y2) in enumerate(lines_img1):
-            axs[0].plot([x1, x2], [y1, y2], color=colors_lines[i], linewidth=1)
+            axs[0].plot([x1, x2], [y1, y2], color=colors_lines[i], linewidth=2)
 
         for i,(x1, y1, x2, y2) in enumerate(lines_img2):
-            axs[1].plot([x1, x2], [y1, y2], color=colors_lines[i], linewidth=1)
+            axs[1].plot([x1, x2], [y1, y2], color=colors_lines[i], linewidth=2)
+
+
+
+
 
 def visualize_lines_3d(
         points:np.ndarray,
@@ -391,7 +412,9 @@ class PnPLLocalizer(HeadsetLocalizer):
                 bgr_img1=cv2.cvtColor(self.cam1_bgr_images[idx], cv2.COLOR_BGR2RGB),
                 lines_img1=matched_lines_img1_2d,
                 bgr_img2=cam2_rgb_image,
-                lines_img2=matched_lines_img2_2d
+                lines_img2=matched_lines_img2_2d,
+                lines_img1_unmatched=self.lines_4_images_cam1[idx],
+                lines_img2_unmatched = lines_img2
             )
             plt.show()
 

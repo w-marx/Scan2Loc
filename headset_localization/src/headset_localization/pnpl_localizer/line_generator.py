@@ -236,6 +236,12 @@ def visualize_line_cleanup(
     ax_before.grid(False)
     ax_after.grid(False)
 
+    height, width = background_image.shape
+    ax_before.set_xlim(0, width)
+    ax_before.set_ylim(height, 0)
+    ax_after.set_xlim(0, width)
+    ax_after.set_ylim(height, 0)
+
     lines_xy_raw = [((line[0], line[1]), (line[2], line[3])) for line in lines_before]
     lc1_raw = LineCollection(lines_xy_raw, linewidths=2, alpha=0.8, color = plt.cm.jet(np.linspace(0, 1, lines_before.shape[0])))
     ax_before.add_collection(lc1_raw)

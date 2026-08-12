@@ -19,6 +19,7 @@ class FeatureStyleConfig:
     point_size:int = 5
     point_alpha:float = 0.8
     arrow_alpha:float = 0.6
+    line_widht:int = 1
 
     connection_line_thickness:int = 1
     connection_line_alpha:float = 0.5
@@ -149,8 +150,8 @@ class FeatureDrawing:
             x1_, y1_ = self.map_robot_img_coordinates(x1, y1)   
             x2_, y2_ = self.map_headset_img_coordinates(x2, y2)         
 
-            self.ax.scatter(x1_, y1_, color=colors[i], s=5, alpha=0.8)
-            self.ax.scatter(x2_, y2_, color=colors[i], s=5, alpha=0.8)
+            self.ax.scatter(x1_, y1_, color=colors[i], s=self.sc.point_size, alpha=self.sc.point_alpha)
+            self.ax.scatter(x2_, y2_, color=colors[i], s=self.sc.point_size, alpha=self.sc.point_alpha)
 
             self.ax.plot([x1_, x2_], [y1_, y2_], color=colors[i],
                 linewidth=self.sc.connection_line_thickness,
@@ -175,11 +176,11 @@ class FeatureDrawing:
 
         for i,(x1, y1, x2, y2) in enumerate(robot_lines_2d):
             (x1_, y1_), (x2_, y2_) = self.map_robot_img_coordinates(x1, y1), self.map_robot_img_coordinates(x2, y2)            
-            self.ax.plot([x1_, x2_], [y1_, y2_], color=colors_lines[i], linewidth=1)
+            self.ax.plot([x1_, x2_], [y1_, y2_], color=colors_lines[i], linewidth=self.sc.line_widht)
 
         for i,(x1, y1, x2, y2) in enumerate(headset_lines_2d):
             (x1_, y1_), (x2_, y2_) = self.map_headset_img_coordinates(x1, y1), self.map_headset_img_coordinates(x2, y2)            
-            self.ax.plot([x1_, x2_], [y1_, y2_], color=colors_lines[i], linewidth=1)
+            self.ax.plot([x1_, x2_], [y1_, y2_], color=colors_lines[i], linewidth=self.sc.line_widht)
 
 
     def transform_gaussians(self, gaussians:np.ndarray)->np.ndarray:
