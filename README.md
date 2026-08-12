@@ -1,20 +1,24 @@
 # AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline
 
-
 ## Overview
 This repo provides an complete benchmark pipeline for evaluating localization in robot scanned workspaces. In detail it offers the following:
 
-#### Datasets
+### Datasets
 Multiple desktop datasets are provided in the `example_datasets` folder. Consisting of multiple scenes and matching `.vrs` recordings in them.
 
-#### Dataset creation
+### Dataset creation
 The scripts in the `data_gathering` folder along with the `shared` package allows the creation of new datasets. A guide on this is provided in `notebooks/DataGathering.ipynb`. 
 
-#### Three Inference ready Localizers
-Furthermore it offers three inference ready localizers: a baseline PnP approach using keypoint matching, a PnP+L variant that refines estimates with line features, and a PnP+Ellipsoids variant leveraging object bounding boxes. 
+### Three Inference ready Localizers
+Furthermore it offers three inference ready localizer families:
 
-#### Evaluation Framework
-The `headset_localization` package can be used to evaluate those localizers on new datasets and to finetune them.
+**PnP Localizer**: using simple PnP for localization, this repo offers direct support for LightGlue, LoMa and E-LoFTR.
+**PnP+L Localizer**: using PnP for localization and refines it using lines.
+**Ellipsoid Localizer**: leveraging ellipse-ellipsoid bounding boxes to refine the localization.
+
+
+### Evaluation Framework
+The `headset_localization` package can be used to evaluate those localizers on new datasets and to finetune them. Providing metrics such as absolute and relative pose error, offline and online timings and 6D signed errors for failure type analysis. Furthermore it provides the gaze-intersection error, for intuitive assessment of localizers for the task of gaze based HRI.
 
 ## Getting Started
 #### For dataset creation
