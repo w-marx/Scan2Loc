@@ -78,11 +78,13 @@ The [`headset_localization`](./headset_localization) package provides comprehens
 All utilities for inference and evaluation are provided by the [`headset_localization`](./headset_localization) package. The dependencies to run the package are provided in the [`env_3090.yml`](./env_3090.yml) file.
 
 ```bash
-# Create environment (RTX23090, CUDA 12.2)
+# Create environment (RTX 3090, CUDA 12.2)
 conda env create -f env_3090.yml -p ./env
 conda activate ./env
 ```
-Note: Other CUDA versions / GPUs may require different libarary versions.  
+Note: Other CUDA versions / GPUs may require different libarary versions.
+
+
 The `headset_localization` package can then be installed using the [`install_pose_pred_dependencies.sh`](./install_pose_pred_dependencies.sh) script into any environment. 
 ```bash
 bash install_pose_pred_dependencies.sh 
