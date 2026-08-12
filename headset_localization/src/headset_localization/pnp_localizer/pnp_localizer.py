@@ -16,7 +16,7 @@ class PnPLocalizer(HeadsetLocalizer):
             cam2_intrinsic_mtx:np.ndarray,
             cam1_bgr_images:np.ndarray,
             cam1_xyz_images:np.ndarray,
-            extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig,
+            extract_and_match_wrapper_config:ExtractAndMatchWrapperConfig = ExtractAndMatchWrapperConfig(),
             time_tracker_init:TimeTracker = TimeTracker()
         ):
         """
