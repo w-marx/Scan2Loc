@@ -98,7 +98,7 @@ bash install_pose_pred_dependencies.sh
 This script also installs [MapAnything](https://github.com/facebookresearch/map-anything.git), [LightGlue](https://github.com/cvg/LightGlue.git) and [LoMa](https://github.com/davnords/LoMa.git). Both the LightGlue and LoMa installations are optional and only necessary if you wish to use them.
 
 
-Using a localizer to predict the pose of a camera in a scanned environment (inference only):
+**Example:** Using a localizer to predict the pose of a camera in a scanned environment (inference only):
 ```python
 from headset_localization import HeadsetRecording, Scanned3dEnvironment, PnPLocalizer
 from shared import CompleteRobotScan
@@ -124,7 +124,8 @@ print(base_t_cam)
 
 For detailed usage examples including evaluation refer to the [notebooks](./notebooks), especially [`Quickstart.ipynb`](./notebooks/Quickstart.ipynb). Some notebooks require the `fr2/desk` dataset in a `./tum_datasets` folder [Download](https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download).
 
-#### For dataset creation only
+
+### For dataset creation only
 To create your own dataset, the following dependencies, which don't require CUDA, need to be installed.
 
 ```bash
