@@ -4,19 +4,29 @@
 This repo provides an complete benchmark pipeline for evaluating localization in robot scanned workspaces. In detail it offers the following:
 
 ### Datasets
-Multiple desktop datasets are provided in the `example_datasets` folder. Consisting of multiple scenes and matching `.vrs` recordings in them.
+<p align="center">
+  <img width="300" style="margin: 10px;" alt="image" src="https://github.com/user-attachments/assets/12635292-cf01-457a-af56-5c45c6874a94" />
+  <img width="300" style="margin: 10px;" alt="tum_first10_percent(1)" src="https://github.com/user-attachments/assets/eb786e5a-7f29-463e-a99e-012c5561c02d" />
+  <br>
+  <em> Figure: own dataset (left) and tum dataset (right).</em>
+</p>
+
+Multiple desktop datasets are provided in the `example_datasets` folder. Consisting of multiple scenes and matching `.vrs` recordings in them. In addition integration with the TUM-RGBD datasets (https://cvg.cit.tum.de/data/datasets/rgbd-dataset) is provided.
+
 
 ### Dataset creation
 The scripts in the `data_gathering` folder along with the `shared` package allows the creation of new datasets. A guide on this is provided in `notebooks/DataGathering.ipynb`. 
 
-### Three Inference ready Localizers
-Furthermore it offers three inference ready localizer families:
+### Three Inference ready localizer families:
+<p align="center">
+  <img width="800" alt="example localization using the ellipsoid localizer" src="https://github.com/user-attachments/assets/0d9bde49-3df4-4dac-9ff5-abbc087f7ad8" />
+  <br>
+  <em>Figure: Example localization using the ellipsoid localizer</em>
+</p>
 
-**PnP Localizer**: using simple PnP for localization, this repo offers direct support for LightGlue, LoMa and E-LoFTR. <br>
-**PnP+L Localizer**: using PnP for localization and refines it using lines. <br>
-**Ellipsoid Localizer**: leveraging ellipse-ellipsoid bounding boxes to refine the localization. <br>
-
-
+**PnP Localizer**: using simple PnP for localization, this repo offers direct support for LightGlue, LoMa and E-LoFTR.  
+**PnP+L Localizer**: using PnP for localization and refines it using lines.  
+**Ellipsoid Localizer**: leveraging ellipse-ellipsoid bounding boxes to refine the localization.
 
 ### Evaluation Framework
 The `headset_localization` package can be used to evaluate those localizers on new datasets and to finetune them. Providing metrics such as absolute and relative pose error, offline and online timings and 6D signed errors for failure type analysis. Furthermore it provides the gaze-intersection error, for intuitive assessment of localizers for the task of gaze based HRI.
