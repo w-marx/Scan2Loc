@@ -39,6 +39,7 @@ Furthermore this repo supports the [TUM RGB-D Dataset](https://cvg.cit.tum.de/da
 Create new robot-scanned datasets with:
 - Automated scanning using Franka Emika Panda + Intel RealSense D435
 - Hand-eye calibration and ground truth trajectory generation via fiducial markers
+- Advanced marker removal using [LaMa](https://github.com/advimman/lama.git) 
 - Direct dataset creation using Meta Aria glasses
 
 **Guide**: [`DataGathering.ipynb`](./notebooks/DataGathering.ipynb).
