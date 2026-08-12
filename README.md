@@ -51,10 +51,11 @@ conda env create -f env_3090.yml -p ./env
 conda activate ./env
 ```
 The `headset_localization` package can then be installed using the `install_pose_pred_dependencies.sh` script into any environment. 
-This script also installs MapAnything (https://github.com/facebookresearch/map-anything.git), LightGlue (https://github.com/cvg/LightGlue.git), LoMa (https://github.com/davnords/LoMa.git). Both the LightGlue and LoMa installations are optional and only necessary if you wish to use them.
 ```bash
 bash install_pose_pred_dependencies.sh 
 ```
+This script also installs MapAnything (https://github.com/facebookresearch/map-anything.git), LightGlue (https://github.com/cvg/LightGlue.git), LoMa (https://github.com/davnords/LoMa.git). Both the LightGlue and LoMa installations are optional and only necessary if you wish to use them.
+
 
 Using a localizer to predict the pose of a camera in a scanned environment (inference only):
 ```python
@@ -80,7 +81,7 @@ base_t_cam = localizer.est_base_t_cam2(query_image)
 print(base_t_cam)
 ```
 
-For detailed usage examples including evaluation refer to `notebooks`, especially`notebooks/Quickstart.ipynb`. Some notebooks require the `fr2/desk` dataset in a `./tum_datasets` folder. Download: https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download.
+For detailed usage examples including evaluation refer to the notebooks in the `notebooks` folder, especially `notebooks/Quickstart.ipynb`. Some notebooks require the `fr2/desk` dataset in a `./tum_datasets` folder. Download: https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download.
 
 For the licences please refer to the conda installation process and the License agreements of the installed repos in `external/*`.
 
