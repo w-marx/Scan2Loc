@@ -12,7 +12,7 @@
 | **Datasets** | Desktop datasets with `.vrs` recordings + TUM-RGBD integration |
 | **Dataset Creation** | Scripts for generating new robot-scanned environments |
 | **Three Localizers** | PnP, PnP+L (lines), and Ellipsoid-based refinement |
-| **Evaluation Suite** | ATE/RPE metrics, timing analysis, and gaze-intersection error  |
+| **Evaluation Suite** | ATE/RPE metrics, timing analysis, and gaze-intersection error |
 
 
 ## Datasets
@@ -20,17 +20,17 @@
   <img width="300" style="margin: 10px;" alt="image" src="https://github.com/user-attachments/assets/12635292-cf01-457a-af56-5c45c6874a94" />
   <img width="300" style="margin: 10px;" alt="tum_first10_percent(1)" src="https://github.com/user-attachments/assets/eb786e5a-7f29-463e-a99e-012c5561c02d" />
   <br>
-  <em> Figure: own dataset (left) and tum dataset (right).</em>
+  <em>Figure: own dataset (left) and TUM dataset (right).</em>
 </p>
 
 Multiple desktop datasets are provided in [`example_datasets/`](./example_datasets), including:
 - Scenes with ArUco/ChArUco markers for ground truth
 - Matching `.vrs` recordings from Meta Aria Gen1 glasses
   
-Furthermore this repo supports the [TUM RGB-D Dataset](https://cvg.cit.tum.de/data/datasets/rgbd-dataset)
+Furthermore this repo supports the [TUM RGB-D Dataset](https://cvg.cit.tum.de/data/datasets/rgbd-dataset).
 
 
-## Dataset creation
+## Dataset Creation
 Create new robot-scanned datasets with:
 - Automated scanning using Franka Emika Panda + Intel RealSense D435
 - Hand-eye calibration and ground truth trajectory generation via fiducial markers
@@ -39,11 +39,11 @@ Create new robot-scanned datasets with:
 A guide on this is provided in `notebooks/DataGathering.ipynb`.
 
 
-## Localization:
+## Localization
 **Scan2Loc** provides 3D reconstruction from robot scans and 3 localizer families to locate a camera in them.
+
 #### Reconstruction
-Direct scene reconstruction via [MapAnything](https://github.com/facebookresearch/map-anything.git) is provided, supporting depth images.
-Furthermore ICP alignment and scene cleanup are directly provided.
+Direct scene reconstruction via [MapAnything](https://github.com/facebookresearch/map-anything.git) is provided, supporting depth images. Furthermore ICP alignment and scene cleanup are directly provided.
 
 #### Three Localizer Families
 <p align="center">
@@ -52,28 +52,31 @@ Furthermore ICP alignment and scene cleanup are directly provided.
   <em>Figure: Example localization using the ellipsoid localizer</em>
 </p>
 
-**PnP Localizer**: using simple PnP for localization, this repo offers direct support for [LightGlue](https://github.com/cvg/LightGlue.git), [LoMa](https://github.com/davnords/LoMa.git) and [E-LoFTR](https://github.com/zju3dv/efficientloftr).  
-**PnP+L Localizer**: using PnP for localization and refines it using lines.  
-**Ellipsoid Localizer**: leveraging ellipse-ellipsoid bounding boxes to refine the localization.
+| Localizer | Description | Key Features |
+|-----------|-------------|--------------|
+| **PnP** | Baseline keypoint matching | [LightGlue](https://github.com/cvg/LightGlue.git) · [LoMa](https://github.com/davnords/LoMa.git) · [E-LoFTR](https://github.com/zju3dv/efficientloftr) |
+| **PnP+L** | Points + Lines refinement | Line segment detection & matching |
+| **Ellipsoid** | Object-level refinement | Ellipse-ellipsoid bounding boxes |
 
 ## Evaluation Framework
-The [`headset_localization`](./headset_localization) package provides comprehensive evaluation tools for benchmarking localizer performance. Including comparison to the ground truth and other localizers.
+The [`headset_localization`](./headset_localization) package provides comprehensive evaluation tools for benchmarking localizer performance, including comparison to ground truth and other localizers.
 
 #### Available Metrics
+
 | Metric | Description |
 |--------|-------------|
 | **Absolute Trajectory Error** | Translational & rotational error for trajectories and frames |
 | **Relative Pose Error (RPE)** | Drift between consecutive poses (SLAM-style) |
 | **6D Signed Errors** | Per-axis breakdown for failure analysis |
-| **Gaze-Intersection Error (GIE)** | Intuitive gaze based HRI metric (ray-scene intersection) |
+| **Gaze-Intersection Error (GIE)** | Intuitive gaze-based HRI metric (ray-scene intersection) |
 | **Timing Profiling** | Online/offline inference speed per component |
-| **Sucess rates** | Fraction of successful localization (with definable success thresholds) |
+| **Success Rates** | Fraction of successful localizations (with definable success thresholds) |
 
 
 ## Getting Started
 ### For Inference and Evaluation
-All utilities for inference and evaluation are provided by the `headset_localization` package.
-The dependencies to run the `headset_localization` package are provided in the `env_3090.yml` file.
+All utilities for inference and evaluation are provided by the `headset_localization` package. The dependencies to run the `headset_localization` package are provided in the `env_3090.yml` file.
+
 ```bash
 # Create environment (RTX23090, CUDA 12.2)
 conda env create -f env_3090.yml -p ./env
@@ -114,7 +117,8 @@ print(base_t_cam)
 For detailed usage examples including evaluation refer to the notebooks in the `notebooks` folder, especially `notebooks/Quickstart.ipynb`. Some notebooks require the `fr2/desk` dataset in a `./tum_datasets` folder. Download: https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download.
 
 #### For dataset creation only
-To create your own dataset the following dependencies, which don't require CUDA, need to be installed.
+To create your own dataset, the following dependencies, which don't require CUDA, need to be installed.
+
 ```bash
 cd data_gathering
 conda env create -f environment.yml -p ./data_gather_env
@@ -126,8 +130,7 @@ For example usage refer to `notebooks/DataGathering.ipynb`.
 
 
 ## License
-For the licences please refer to the conda installation process and the License agreements of the installed repos in `external/*`.
-
+TODO
 
 ## File Formats
 Different datasets and environment representations can directly be created from folders, this section defines the file formats.
