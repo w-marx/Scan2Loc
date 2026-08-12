@@ -1,14 +1,8 @@
 # AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline
 
------
 
-For gaze based HRI in scanned desktop environments, using AR-Headsets it is necessary to locate the headset in the environment.
-This repo offers a comprehensive data collection and performance evaluation pipeline for marker-free localization of a rgb-camera's within a robot-scanned workspaces.
-Furthermore it offers three inference ready localizers: a baseline PnP approach using keypoint matching, a PnP+L variant that refines estimates with line features, and a PnP+Ellipsoids variant leveraging object bounding boxes. 
-
------
-
-## Provided Functionalities:
+## Overview
+This repo provides an complete benchmark pipeline for evaluating localization in robot scanned workspaces. In detail it offers the following:
 
 #### Datasets
 Multiple desktop datasets are provided in the `example_datasets` folder. Consisting of multiple scenes and matching `.vrs` recordings in them.
@@ -17,7 +11,7 @@ Multiple desktop datasets are provided in the `example_datasets` folder. Consist
 The scripts in the `data_gathering` folder along with the `shared` package allows the creation of new datasets. A guide on this is provided in `notebooks/DataGathering.ipynb`. 
 
 #### Three Inference ready Localizers
-This repo offers three families of inference ready localizers. The first relying on PnP solutions provided by `LoMa`, `LightGlue` or `E-LoFTR`. The second uses lines to refine the PnP solution and the third ellipsoid bounding boxes.
+Furthermore it offers three inference ready localizers: a baseline PnP approach using keypoint matching, a PnP+L variant that refines estimates with line features, and a PnP+Ellipsoids variant leveraging object bounding boxes. 
 
 #### Evaluation Framework
 The `headset_localization` package can be used to evaluate those localizers on new datasets and to finetune them.
