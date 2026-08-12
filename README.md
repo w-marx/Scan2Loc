@@ -46,9 +46,9 @@ This script also installs MapAnything (https://github.com/facebookresearch/map-a
 ```
 bash install_pose_pred_dependencies.sh 
 ```
-For usage examples refer to `notebooks/Quickstart.ipynb`.
+For usage examples refer to `notebooks`, especially`notebooks/Quickstart.ipynb`. Some notebooks require the `fr2/desk` dataset in a `./tum_datasets` folder. Download: https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download.
 
-For the licences refer to the conda installation process and the License agreements of the installed repos in `external/*`.
+For the licences please refer to the conda installation process and the License agreements of the installed repos in `external/*`.
 
 ## File Formats
 Different datasets and environment representations can directly be created from folders, this section defines the file formats.
