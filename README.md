@@ -36,7 +36,7 @@ Create new robot-scanned datasets with:
 - Hand-eye calibration and ground truth trajectory generation via fiducial markers
 - Direct dataset creation using Meta Aria glasses
 
-A guide on this is provided in `notebooks/DataGathering.ipynb`.
+A guide on this is provided in [`DataGathering.ipynb`](./notebooks/DataGathering.ipynb).
 
 
 ## Localization
@@ -75,7 +75,7 @@ The [`headset_localization`](./headset_localization) package provides comprehens
 
 ## Getting Started
 ### For Inference and Evaluation
-All utilities for inference and evaluation are provided by the `headset_localization` package. The dependencies to run the `headset_localization` package are provided in the `env_3090.yml` file.
+All utilities for inference and evaluation are provided by the [`headset_localization`](./headset_localization) package. The dependencies to run the package are provided in the [`env_3090.yml`](./env_3090.yml) file.
 
 ```bash
 # Create environment (RTX23090, CUDA 12.2)
@@ -83,11 +83,11 @@ conda env create -f env_3090.yml -p ./env
 conda activate ./env
 ```
 Note: Other CUDA versions / GPUs may require different libarary versions.  
-The `headset_localization` package can then be installed using the `install_pose_pred_dependencies.sh` script into any environment. 
+The `headset_localization` package can then be installed using the [`install_pose_pred_dependencies.sh`](./install_pose_pred_dependencies.sh) script into any environment. 
 ```bash
 bash install_pose_pred_dependencies.sh 
 ```
-This script also installs MapAnything (https://github.com/facebookresearch/map-anything.git), LightGlue (https://github.com/cvg/LightGlue.git), LoMa (https://github.com/davnords/LoMa.git). Both the LightGlue and LoMa installations are optional and only necessary if you wish to use them.
+This script also installs [MapAnything](https://github.com/facebookresearch/map-anything.git), [LightGlue](https://github.com/cvg/LightGlue.git) and [LoMa](https://github.com/davnords/LoMa.git). Both the LightGlue and LoMa installations are optional and only necessary if you wish to use them.
 
 
 Using a localizer to predict the pose of a camera in a scanned environment (inference only):
@@ -114,7 +114,7 @@ base_t_cam = localizer.est_base_t_cam2(query_image)
 print(base_t_cam)
 ```
 
-For detailed usage examples including evaluation refer to the notebooks in the `notebooks` folder, especially `notebooks/Quickstart.ipynb`. Some notebooks require the `fr2/desk` dataset in a `./tum_datasets` folder. Download: https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download.
+For detailed usage examples including evaluation refer to the [notebooks](./notebooks), especially [`Quickstart.ipynb`](./notebooks/Quickstart.ipynb). Some notebooks require the `fr2/desk` dataset in a `./tum_datasets` folder [Download](https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download).
 
 #### For dataset creation only
 To create your own dataset, the following dependencies, which don't require CUDA, need to be installed.
@@ -126,7 +126,7 @@ conda activate ./data_gather_env
 pip install -e ../shared
 ```
 This environment needs access to a working [deoxys](https://github.com/UT-Austin-RPL/deoxys_control) installation to be able to control a Franka Panda Emika robot.
-For example usage refer to `notebooks/DataGathering.ipynb`.
+For example usage refer to [DataGathering.ipynb](./notebooks/DataGathering.ipynb).
 
 
 ## License
