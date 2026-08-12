@@ -1,6 +1,11 @@
-# Scan2Loc 
-### AR-Headset-Localization-in-Robot-Scanned-Workspaces-A-Benchmark-Pipeline
----
+<div align="center">
+  
+# Scan2Loc
+  
+### AR Headset Localization in Robot Scanned Workspaces
+
+**A Benchmark Pipeline**
+</div>
 
 ## Overview
 **Scan2Loc** provides a complete benchmark pipeline for evaluating marker-free AR headset localization in robot-scanned workspaces. This repository accompanies the bachelor thesis *"AR Headset Localization in Robot Scanned Workspaces: A Benchmark Pipeline"*.
@@ -36,7 +41,7 @@ Create new robot-scanned datasets with:
 - Hand-eye calibration and ground truth trajectory generation via fiducial markers
 - Direct dataset creation using Meta Aria glasses
 
-A guide on this is provided in [`DataGathering.ipynb`](./notebooks/DataGathering.ipynb).
+**Guide**: [`DataGathering.ipynb`](./notebooks/DataGathering.ipynb).
 
 
 ## Localization
@@ -132,7 +137,7 @@ For example usage refer to [DataGathering.ipynb](./notebooks/DataGathering.ipynb
 
 
 ## License
-TODO
+This project is licensed under the **Apache License, Version 2.0**. See the [LICENSE](./LICENSE) file for details.
 
 ## File Formats
 Different datasets and environment representations can directly be created from folders, this section defines the file formats.
