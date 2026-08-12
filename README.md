@@ -12,9 +12,10 @@ The scripts in the `data_gathering` folder along with the `shared` package allow
 ### Three Inference ready Localizers
 Furthermore it offers three inference ready localizer families:
 
-**PnP Localizer**: using simple PnP for localization, this repo offers direct support for LightGlue, LoMa and E-LoFTR.
-**PnP+L Localizer**: using PnP for localization and refines it using lines.
-**Ellipsoid Localizer**: leveraging ellipse-ellipsoid bounding boxes to refine the localization.
+**PnP Localizer**: using simple PnP for localization, this repo offers direct support for LightGlue, LoMa and E-LoFTR. <br>
+**PnP+L Localizer**: using PnP for localization and refines it using lines. <br>
+**Ellipsoid Localizer**: leveraging ellipse-ellipsoid bounding boxes to refine the localization. <br>
+
 
 
 ### Evaluation Framework
@@ -23,7 +24,7 @@ The `headset_localization` package can be used to evaluate those localizers on n
 ## Getting Started
 #### For dataset creation
 To create your own dataset the following dependencies need to be installed:
-```
+```bash
 cd data_gathering
 conda env create -f environment.yml -p ./data_gather_env
 conda activate ./data_gather_env
@@ -35,16 +36,41 @@ For example usage refer to `notebooks/DataGathering.ipynb`.
 #### For Inference and Evaluation
 All utilities for inference and evaluation are provided by the `headset_localization` package.
 The dependencies to run the `headset_localization` package are provided in the `env_3090.yml` file. Those work on a NVIDIA GeForce RTX 3090 with CUDA 12.2 . Other CUDA versions and graphics cards might require different library versions.
-```
+```bash
 conda env create -f env_3090.yml -p ./env
 conda activate ./env
 ```
 The `headset_localization` package can then be installed using the `install_pose_pred_dependencies.sh` script into any environment. 
 This script also installs MapAnything (https://github.com/facebookresearch/map-anything.git), LightGlue (https://github.com/cvg/LightGlue.git), LoMa (https://github.com/davnords/LoMa.git). Both the LightGlue and LoMa installations are optional and only necessary if you wish to use them.
-```
+```bash
 bash install_pose_pred_dependencies.sh 
 ```
-For usage examples refer to `notebooks`, especially`notebooks/Quickstart.ipynb`. Some notebooks require the `fr2/desk` dataset in a `./tum_datasets` folder. Download: https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download.
+
+Using a localizer to predict the pose of a camera in a scanned environment (inference only):
+```python
+from headset_localization import HeadsetRecording, Scanned3dEnvironment, PnPLocalizer
+from shared import CompleteRobotScan
+
+headset_data = HeadsetRecording.from_vrs_file("../example_datasets/small_aruco1_sitting_20fps.vrs")
+
+workspace_reconstruction = Scanned3dEnvironment.from_gathered_robot_data(
+    robot_data = CompleteRobotScan.from_folder("../example_datasets/example_small_aruco1")
+)
+
+localizer = PnPLocalizer(
+    cam2_intrinsic_mtx=headset_data.intrinsic_cam_mtx,
+    cam1_bgr_images=workspace_reconstruction.robot_bgr_images,
+    cam1_xyz_images=workspace_reconstruction.robot_xyz_images,
+)
+
+INDEX = 30
+query_image = headset_data.bgr_image_s[INDEX]
+
+base_t_cam = localizer.est_base_t_cam2(query_image)
+print(base_t_cam)
+```
+
+For detailed usage examples including evaluation refer to `notebooks`, especially`notebooks/Quickstart.ipynb`. Some notebooks require the `fr2/desk` dataset in a `./tum_datasets` folder. Download: https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download.
 
 For the licences please refer to the conda installation process and the License agreements of the installed repos in `external/*`.
 
