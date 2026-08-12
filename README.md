@@ -16,8 +16,8 @@
 |---------|-------------|
 | **Datasets** | Desktop datasets with `.vrs` recordings + TUM-RGBD integration |
 | **Dataset Creation** | Scripts for generating new robot-scanned environments |
-| **Three Localizers** | PnP, PnP+L (lines), and Ellipsoid-based refinement |
-| **Evaluation Suite** | ATE/RPE metrics, timing analysis, and gaze-intersection error |
+| **Three Localizers** | PnP, PnP+Lines, and Ellipsoid-based refinement |
+| **Evaluation Suite** | ATE/RPE metrics, time analysis, and gaze-intersection error |
 
 
 ## Datasets
