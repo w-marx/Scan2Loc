@@ -87,7 +87,7 @@ All utilities for inference and evaluation are provided by the [`headset_localiz
 conda env create -f env_3090.yml -p ./env
 conda activate ./env
 ```
-Note: Other CUDA versions / GPUs may require different libarary versions.
+Note: Other CUDA versions / GPUs may require different library versions.
 
 
 The `headset_localization` package can then be installed using the [`install_pose_pred_dependencies.sh`](./install_pose_pred_dependencies.sh) script into any environment. 
@@ -138,6 +138,10 @@ For example usage refer to [DataGathering.ipynb](./notebooks/DataGathering.ipynb
 
 ## License
 This project is licensed under the **Apache License, Version 2.0**. See the [LICENSE](./LICENSE) file for details.
+
+This project depends on [MapAnything](https://github.com/facebookresearch/map-anything.git), [LightGlue](https://github.com/cvg/LightGlue.git) and [LoMa](https://github.com/davnords/LoMa.git). Their licenses are available under `./external/[repo]/Licence` after installation.
+This project also depends on various Python packages installed via Conda and pip.
+**Note:** Conda installes GPL/AGPL-licensed packages `pillow_heif`, `plyfile`, `ultralytics`. You are responsible for reviewing and complying with their license terms if you choose to use them.
 
 ## File Formats
 Different datasets and environment representations can directly be created from folders, this section defines the file formats.
