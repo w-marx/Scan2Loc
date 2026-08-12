@@ -1,5 +1,5 @@
 import matplotlib
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from dataclasses import dataclass
@@ -399,6 +399,12 @@ class VideoGenerator:
         self.figsize = figsize
         self.use_second_3d_axis = use_second_3d_axis
         self.figsize_3d = figsize_3d
+
+        matplotlib.use('Agg')
+        import importlib
+        import matplotlib.pyplot as plt
+        importlib.reload(plt)
+
  
 
     def start_new_frame(self)->FeatureDrawing:
@@ -443,5 +449,3 @@ class VideoGenerator:
         
         out.release()
         print(f"Video saved to {location}")
-
-
