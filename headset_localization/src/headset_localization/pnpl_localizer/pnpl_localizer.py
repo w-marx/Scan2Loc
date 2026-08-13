@@ -247,7 +247,7 @@ class PnPLLocalizer(HeadsetLocalizer):
         self.cam1_xyz_images = cam1_xyz_images
         self.cam1_bgr_images = cam1_bgr_images
 
-        self.cam2_line_generator = None
+        self.cam2_line_generator = cam2_line_generator
         if cam2_line_generator is None:
             self.cam2_line_generator = cam1_line_generator
 
@@ -413,8 +413,8 @@ class PnPLLocalizer(HeadsetLocalizer):
                 lines_img1=matched_lines_img1_2d,
                 bgr_img2=cam2_rgb_image,
                 lines_img2=matched_lines_img2_2d,
-                lines_img1_unmatched=self.lines_4_images_cam1[idx],
-                lines_img2_unmatched = lines_img2
+                #lines_img1_unmatched=self.lines_4_images_cam1[idx],
+                #lines_img2_unmatched = lines_img2
             )
             plt.show()
 

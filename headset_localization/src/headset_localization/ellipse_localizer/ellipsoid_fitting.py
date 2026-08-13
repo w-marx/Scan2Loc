@@ -150,7 +150,7 @@ class LeastShellDistanceEllipsoidFitter(EllipsoidFitter):
             visualize:bool = False, 
             use_cnvx_hull:bool = True,
             adam_config:AdamConfig = AdamConfig(learning_rate=0.001, max_itterations=1000),
-            size_penalty:float = 0.95,
+            size_penalty:float = 0.05,
             delta_pose_mapping:Literal["rpy", "se3_exp"] = "se3_exp",
             distance_p_norm: Literal['-inf', 'inf'] | int = 1,
             size_p_norm: Literal['-inf', 'inf'] | int = 1,
@@ -240,7 +240,7 @@ class LeastShellDistanceEllipsoidFitter(EllipsoidFitter):
                 abc=params[6:]
             )
             return (
-                (1-self.size_penalty)* torch.linalg.norm(distances, ord = self.distance_p_norm) 
+                (1-self.size_penalty)* torch.linalg.norm(distances/points_torch.shape[0], ord = self.distance_p_norm) 
                 + self.size_penalty * torch.linalg.norm(params[6:], ord = self.size_p_norm)
             )
 
