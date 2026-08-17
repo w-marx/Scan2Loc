@@ -156,7 +156,7 @@ class HeadsetRecording:
             headset_folder = f"{location}/headset/{str(i).zfill(padding)}"
             os.makedirs(headset_folder, exist_ok=True)
 
-            cv2.imwrite(f"{headset_folder}/rgb.png", self.bgr_image_s[i])
+            cv2.imwrite(f"{headset_folder}/rgb.png", self.bgr_image_s[i], [cv2.IMWRITE_PNG_COMPRESSION, 6])
 
             if self.robot_base_t_headset_s[i] is not None:
                 with open(f"{headset_folder}/label.json", 'w') as f:
