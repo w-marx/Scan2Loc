@@ -12,7 +12,6 @@ from deoxys.utils.log_utils import get_deoxys_example_logger
 
 logger = get_deoxys_example_logger()
 
-
 class JointPositionRecorder:
     def __init__(self, output_location):
         self.output_location = output_location
@@ -59,9 +58,12 @@ if __name__ == "__main__":
     keyboard_thread.start()
 
     while recorder.running:
-        if len(robot_interface._state_buffer) > 0:
-            recorder.last_q = robot_interface.last_q
-            #print(f"Current Robot joint: {np.round(robot_interface.last_q, 8)}")
-        time.sleep(0.2)
+        print(f"last eef: {robot_interface.last_eef_pose}")
+        recorder.last_q = robot_interface.last_q
+        if recorder.last_q is not None:
+            print(f"Current Robot joint: {np.round(robot_interface.last_q, 6)}")
+        else:
+            print(f"Current Robot joint: {recorder.last_q}")
+        time.sleep(1.0)
     
     robot_interface.close()
