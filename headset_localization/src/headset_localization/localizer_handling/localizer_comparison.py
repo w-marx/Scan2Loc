@@ -511,7 +511,8 @@ class NPredictors1DatasetGrader:
             invert_y:bool = True,
             plot_legend:bool = True,
             plot_names:bool = True,
-            adjust_texts:bool = True
+            adjust_texts:bool = True,
+            in_plot_text_size:int = 10
         ):
         data = []
 
@@ -550,7 +551,8 @@ class NPredictors1DatasetGrader:
             full_name_key = "Predictor",
             plot_legend = plot_legend,
             plot_names = plot_names,
-            adjust_texts = adjust_texts
+            adjust_texts = adjust_texts,
+            in_plot_text_size = in_plot_text_size,
         )
     
     
@@ -666,7 +668,7 @@ class NPredictors1DatasetGrader:
         )
 
 
-    def plot_time_series_error(self, ax:Axes, error_type:TimeSeriesErrorType, use_log_scale:bool = False, fmt = ".1f"):
+    def plot_time_series_error(self, ax:Axes, error_type:TimeSeriesErrorType, use_log_scale:bool = False, fmt = ".1f", write_avg:bool = True):
         data = []
         for gpp, grader in zip(self.gradable_pose_predictors, self.graders):
             error_dict = {frame: error for frame, error in error_type.calculator(grader)}
@@ -674,7 +676,7 @@ class NPredictors1DatasetGrader:
             only_error_s = [error for _, error in error_type.calculator(grader)]
             avg_error = format_optional(np.mean(only_error_s), fmt=fmt)
 
-            predictor_name = f"{gpp.c_name} (avg: {avg_error})"
+            predictor_name = f"{gpp.c_name} (avg: {avg_error})" if write_avg else f"{gpp.c_name}"
 
 
             for frame in range(self.headset_data.n_frames):
@@ -728,7 +730,7 @@ class NPredictors1DatasetGrader:
 
             ax.set_title(error_name, fontweight='bold')
             ax.set_xlabel(f'Error {error_unit}')
-            ax.set_ylabel('Density' if error_idx == 0 else '', fontsize=9)
+            ax.set_ylabel('Density' if error_idx == 0 else '')
 
             if symmetric:
                 ax.set_xlim(-x_limit, x_limit)
@@ -737,7 +739,6 @@ class NPredictors1DatasetGrader:
         axs[0].legend(
             [Patch(facecolor=color_palette[i], label=gpp.c_name) for i, gpp in enumerate(self.gradable_pose_predictors)], 
             [gpp.c_name for gpp in self.gradable_pose_predictors],
-            title='Localizers'
         )
         plt.tight_layout()
         plt.show()

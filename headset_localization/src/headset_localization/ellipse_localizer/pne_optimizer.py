@@ -352,4 +352,6 @@ def visualize_multiple_pne_optimizer_losses(ax: Axes, optimizers: list[PnEOptimi
              estimator="mean", errorbar="se", ax=ax, err_kws={'alpha':se_alpha})
         if use_log_scale:
             ax.set_yscale("log")
+        
+        ax.legend()
     
