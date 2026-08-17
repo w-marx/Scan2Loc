@@ -1,0 +1,8 @@
+{
+    "marker_type": "Aruco",
+    "marker_side_length": 0.1,
+    "aruco_marker_dictionary": "6X6_250",
+    "board_size": null,
+    "square_size": null,
+    "min_fraction_of_markers": 1.0
+}
