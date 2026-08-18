@@ -139,7 +139,7 @@ For example usage refer to [DataGathering.ipynb](./notebooks/DataGathering.ipynb
 
 
 ## License
-This project is licensed under the **Apache License, Version 2.0**. See the [LICENSE](./LICENSE) file for details.
+This project is licensed under the **GNU Affero General Public License v3.0**. See the [LICENSE](./LICENSE) file for details.
 
 This project depends on [MapAnything](https://github.com/facebookresearch/map-anything.git), [LightGlue](https://github.com/cvg/LightGlue.git) and [LoMa](https://github.com/davnords/LoMa.git). Their licenses are available under `./external/[repo]/Licence` after installation.
 
