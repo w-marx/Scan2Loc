@@ -142,8 +142,8 @@ For example usage refer to [DataGathering.ipynb](./notebooks/DataGathering.ipynb
 This project is licensed under the **Apache License, Version 2.0**. See the [LICENSE](./LICENSE) file for details.
 
 This project depends on [MapAnything](https://github.com/facebookresearch/map-anything.git), [LightGlue](https://github.com/cvg/LightGlue.git) and [LoMa](https://github.com/davnords/LoMa.git). Their licenses are available under `./external/[repo]/Licence` after installation.
-This project also depends on various Python packages installed via Conda and pip.
-**Note:** Conda installes GPL/AGPL-licensed packages `pillow_heif`, `plyfile`, `ultralytics`. You are responsible for reviewing and complying with their license terms if you choose to use them.
+
+This project also depends on various Python packages installed via Conda and pip. Dependencies have their own licenses; please refer to their repositories.
 
 ## File Formats
 Different datasets and environment representations can directly be created from folders, this section defines the file formats.
