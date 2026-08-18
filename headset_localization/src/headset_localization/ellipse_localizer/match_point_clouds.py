@@ -47,7 +47,7 @@ def match_point_clouds(
             pc_color = bgr_images[imgidx][mask > 0]
             object_avg_colors.append(np.mean(pc_color, axis = 0))
 
-    if len(object_avg_colors) < 1 or len(object_avg_colors) < 1:
+    if len(object_avg_colors) < 1 or len(object_avg_centers) < 1:
         return [[]]
 
     valid_mask = np.ones((n, n), dtype=bool)
