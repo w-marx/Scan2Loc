@@ -170,7 +170,7 @@ def scanned_3d_environment_and_headset_recording_from_tum(
         robot_base_t_robot_camera_s=sync_world_t_cam_s[robot_mask],
         robot_bgr_images=sync_bgr_images[robot_mask],
         robot_depth_images=sync_depth_images[robot_mask],
-        intrinsic_camera_matrix=INTRINSIC_FREIBURG_MATRICES[rgb_camera_name],
+        intrinsic_camera_matrix=INTRINSIC_FREIBURG_MATRICES[rgb_camera_name].copy(),
         image_gen_config=xyz_image_generation_config,
         icp_config=xyz_image_alginment_config
     )
@@ -178,7 +178,7 @@ def scanned_3d_environment_and_headset_recording_from_tum(
     robot_env = Scanned3dEnvironment(
         name=f"{os.path.basename(folder)}_robot_env",
         robot_bgr_images=np.array(robot_bgr_images),
-        robot_bgr_intrinsics=robot_intrinsics,
+        robot_bgr_intrinsics=robot_intrinsics.copy(),
         robot_xyz_images=np.array(robot_xyz_images),
         robot_base_t_robot_camera_s=sync_world_t_cam_s[robot_mask]
     )
@@ -187,7 +187,7 @@ def scanned_3d_environment_and_headset_recording_from_tum(
     headset_data = HeadsetRecording(
         name=f"{os.path.basename(folder)}_headset_data",
         bgr_image_s=sync_bgr_images[headset_mask],
-        intrinsic_cam_mtx=INTRINSIC_FREIBURG_MATRICES[rgb_camera_name],
+        intrinsic_cam_mtx=INTRINSIC_FREIBURG_MATRICES[rgb_camera_name].copy(),
         robot_base_t_headset_s=list(sync_world_t_cam_s[headset_mask])
     )
 
