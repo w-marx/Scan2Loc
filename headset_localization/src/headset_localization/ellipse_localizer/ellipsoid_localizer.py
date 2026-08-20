@@ -138,48 +138,6 @@ def image_to_primal_conics(
 
     return np.array(primal_conic_s)    
 
-
-def visualize_pose_prediction(
-        fd:FeatureDrawing,
-        base_t_ellipsoid_s:np.ndarray,
-        dual_quadratics:np.ndarray,
-        cam_t_base:np.ndarray,
-        intrinsic_mtx:np.ndarray,
-        obs_gaussians_sigma_mu_s:np.ndarray,
-        proj_match_indices:list[int],
-        obs_match_indices:list[int],
-        headset_intrinsic_mat:np.ndarray
-    ):
-    """
-    :param fd: The feature drawing with the axis to draw upon and the style guide
-    :param dual_quadratics: The dual quadratics to project (Nx4x4)
-    :param cam_t_base: The 4x4 SE3 cam-T_base matrix
-    :param intrinsic_mtx: The 3x3 intrinsic matrix
-    :param obs_gaussians_sigma_mu_s: Mx2x3 array of gaussians: [[sigma_0 | mu_0], ...]
-    :param proj_match_indices: List of length n, where dual_quadratics[proj_match_indices[i]] ~ obs_gaussians_sigma_mu_s[obs_match_indices[i]]
-    :param obs_match_indices: List of length n
-    """
-    primal_quadratics = np.linalg.inv(dual_quadratics)
-
-    proj_primal_conincals = project_primal_quadratics_to_primal_conicals(
-        primal_quadratics=primal_quadratics,
-        cam_t_base=cam_t_base,
-        intrinsic_mtx=intrinsic_mtx
-    )
-    proj_mu_s, proj_sigma_s = primal_conics_to_gaussian_ellipses(proj_primal_conincals)
-    proj_sigma_mu_s = gauss_ellipse_batch_tuple_to_mat_batch(mu_s=proj_mu_s, sigma_s=proj_sigma_s)
-
-    fd.visualize_ellipsoid_features(
-        observed_gaussians=obs_gaussians_sigma_mu_s, 
-        projected_gaussians=proj_sigma_mu_s,
-        proj_match_indices=proj_match_indices,
-        obs_match_indices=obs_match_indices,
-        base_t_ellipsoid_s = base_t_ellipsoid_s,
-        primal_quadratic_s=primal_quadratics,
-        base_t_cam=np.linalg.inv(cam_t_base),
-        headset_intrinsic_mat = headset_intrinsic_mat
-    )
-
     
 
 class EllipsoidLocalizer(HeadsetLocalizer):
@@ -441,16 +399,29 @@ class EllipsoidLocalizer(HeadsetLocalizer):
 
         if fd is not None:
             obs_gauss_ellipses_rs = rescale_gaussians(obs_gauss_ellipses, old_res=img_size_new, new_res=(w_orig, h_orig))
-            visualize_pose_prediction(
-                fd=fd,
-                base_t_ellipsoid_s=self.base_t_ellipsoid_s,
-                dual_quadratics=np.linalg.inv(self.primal_quadratic_s),
-                cam_t_base=cam2_t_base_opt if cam2_t_base_opt is not None else rough_cam_t_base,
-                intrinsic_mtx=self.cam2_intrinsic_mtx,
-                obs_gaussians_sigma_mu_s=obs_gauss_ellipses_rs,
+            cam2_t_base = cam2_t_base_opt if cam2_t_base_opt is not None else rough_cam_t_base
+            
+            primal_quadratics = self.primal_quadratic_s
+
+            proj_primal_conincals = project_primal_quadratics_to_primal_conicals(
+                primal_quadratics=primal_quadratics,
+                cam_t_base=cam2_t_base,
+                intrinsic_mtx=self.cam2_intrinsic_mtx
+            )
+            proj_mu_s, proj_sigma_s = primal_conics_to_gaussian_ellipses(proj_primal_conincals)
+            proj_sigma_mu_s = gauss_ellipse_batch_tuple_to_mat_batch(mu_s=proj_mu_s, sigma_s=proj_sigma_s)
+
+            fd.visualize_localizer(
+                robot_img_rgb=None,
+                headset_img_rgb=cam2_bgr_image,
+                observed_gaussians=obs_gauss_ellipses_rs, 
+                projected_gaussians=proj_sigma_mu_s,
                 proj_match_indices=list(proj_match_idx_s),
                 obs_match_indices=list(obs_match_idx_s),
-                headset_intrinsic_mat = self.cam2_intrinsic_mtx
+                base_t_ellipsoid_s = self.base_t_ellipsoid_s,
+                primal_quadratic_s=primal_quadratics,
+                base_t_cam=np.linalg.inv(cam2_t_base),
+                headset_intrinsic_mat = self.cam2_intrinsic_mtx,
             )
 
         return cam2_t_base_opt

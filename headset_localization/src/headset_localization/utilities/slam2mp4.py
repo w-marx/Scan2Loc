@@ -1,5 +1,4 @@
 import matplotlib
-#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from dataclasses import dataclass
@@ -7,7 +6,8 @@ import cv2
 import logging
 from io import BytesIO
 from PIL import Image
-from mpl_toolkits.mplot3d import Axes3D        
+import open3d as o3d
+from typing import Any
 from shared.se3_utilities import rotational_difference, translational_difference
 
 @dataclass(frozen=True, kw_only=True)
@@ -31,6 +31,17 @@ class FeatureStyleConfig:
     ellipsoid_3d_plot_extent_around_intersection:float = 0.3
 
     overlay_font_size:int = 10
+    show_bg_point_cloud:bool = True
+    show_bg_point_cloud_colored:bool = True
+    use_headset_viewpoint:bool = True
+    line_widht_3d:float = 20
+
+    show_3d_points:bool = True
+    points_3d_size:float = 0.008
+
+    line_pnpl_radius_3d:float = 0.01
+    line_pne_use_cylinders:bool = True
+    line_pnpe_radius_3d:float = 0.002
 
 
 class InfoCard():
@@ -62,6 +73,82 @@ class InfoCard():
         return "\n".join(lines) if lines else ""
 
 
+def lines_3d_for_o3d(lines3d:np.ndarray, colors:np.ndarray, radius:float = 0.005, resolution = 6)->list[Any]:
+    """
+    :param lines3d: Nx6 line array
+    :param colors: Nx3 colors
+    """
+    directions = lines3d[:, 3:]-lines3d[:, :3]
+    lengths = np.linalg.norm(directions, axis=1)
+
+    directions_norm = directions/np.linalg.norm(directions, axis=1, keepdims=True)
+    mid_points = lines3d[:, :3] + directions/2
+
+    to_vis = []
+
+    for i, _ in enumerate(lines3d):
+        if lengths[i] < 1e-6:
+            continue
+
+        cylinder = o3d.geometry.TriangleMesh.create_cylinder(
+            radius=radius,
+            height=lengths[i],
+            resolution=resolution
+        )
+        z_axis = np.array([0, 0, 1])
+        rotation_axis = np.cross(z_axis, directions_norm[i])
+        rotation_angle = np.arccos(np.clip(np.dot(z_axis, directions_norm[i]), -1, 1))
+    
+        if np.linalg.norm(rotation_axis) > 1e-6:
+            rotation_axis = rotation_axis / np.linalg.norm(rotation_axis)
+            R = o3d.geometry.TriangleMesh.get_rotation_matrix_from_axis_angle(
+                rotation_axis * rotation_angle
+            )
+            cylinder.rotate(R, center=[0, 0, 0])
+    
+        cylinder.translate(mid_points[i])
+        cylinder.paint_uniform_color(colors[i, :3])
+        to_vis.append(cylinder)
+
+    return to_vis
+
+
+def create_ellipsoid_cylinder_lineset(
+    base_t_ellipsoid:np.ndarray, 
+    primal_quadratic:np.ndarray,
+    ellipsoid_resolution:int = 20,
+    cylinder_resolution:int = 6,
+    cylinder_radius:float = 0.001,
+    color:np.ndarray = np.array([0, 0, 0, 0])
+):
+    from ..ellipse_localizer.ellipsoid_utilities_numpy import sample_points_in_primal_quadratic
+
+    world_points = sample_points_in_primal_quadratic(
+        base_t_ellipsoid=base_t_ellipsoid, primal_quadratic=primal_quadratic, resolution=ellipsoid_resolution
+    )
+
+    lines = []
+
+    for i in range(ellipsoid_resolution):
+        for j in range(ellipsoid_resolution):
+            start_idx = i * ellipsoid_resolution + j
+            end_idx = i * ellipsoid_resolution + (j + 1) % ellipsoid_resolution
+            lines.append(np.concatenate([world_points[start_idx], world_points[end_idx]]))
+
+
+    for j in range(ellipsoid_resolution):
+        for i in range(ellipsoid_resolution - 1):
+            start_idx = i * ellipsoid_resolution + j
+            end_idx = (i + 1) * ellipsoid_resolution + j
+            lines.append(np.concatenate([world_points[start_idx], world_points[end_idx]]))
+    
+    return lines_3d_for_o3d(
+        lines3d=np.array(lines),
+        colors=np.tile(color, (len(lines),1)),
+        radius=cylinder_radius,
+        resolution=cylinder_resolution
+    )
+
 
 class FeatureDrawing:
     def __init__(
@@ -69,22 +156,45 @@ class FeatureDrawing:
             style_config: FeatureStyleConfig = FeatureStyleConfig(),
             figsize = (12, 6),
             provide_second_3d_axis:bool = False,
-            figsize_3d = (6,6)
+            figsize_3d:tuple[int, int] = (600,600),
+            bgr_images:np.ndarray | None = None,
+            xyz_images:np.ndarray | None = None
         ) -> None:
 
         fig, ax = plt.subplots(figsize = figsize, frameon = False)
         self.fig = fig
         self.ax = ax
-
-        if provide_second_3d_axis:
-            self.fig3D = plt.figure(figsize=figsize_3d, frameon=False)
-            self.ax3D = self.fig3D.add_subplot(111, projection='3d')
-        else:
-            self.fig3D, self.ax3D = None, None
-
-        self.ax.axis('off')
         self.sc = style_config
 
+
+        if provide_second_3d_axis:
+            self.o3d_vis = o3d.visualization.Visualizer()
+            w, h = figsize_3d
+
+            self.o3d_vis.create_window(window_name='Open3D', width= w, height= h, visible = False)
+            # Add scene geometry
+            coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
+            self.o3d_vis.add_geometry(coord_frame)
+
+            if self.sc.show_bg_point_cloud and xyz_images is not None:
+                world_points = xyz_images.reshape(-1,3)
+                no_nan_mask = np.isfinite(world_points).all(axis=-1)
+
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(world_points[no_nan_mask])
+
+                if self.sc.show_bg_point_cloud_colored and bgr_images is not None:
+                    world_colors = bgr_images.reshape(-1,3).astype(np.float32)[:, ::-1]/255
+                    pcd.colors = o3d.utility.Vector3dVector(world_colors[no_nan_mask])
+
+                self.o3d_vis.add_geometry(pcd)
+
+
+            self.curr_geoms = []
+        else:
+            self.o3d_vis = None
+
+        self.ax.axis('off')
         plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
         self.ax.margins(0, 0)
         self.ax.set_position([0, 0, 1, 1])
@@ -94,7 +204,109 @@ class FeatureDrawing:
         self.map_headset_img_coordinates = None
 
 
-    def set_images(self, robot_img_rgb:np.ndarray, headset_img_rgb:np.ndarray):
+    def visualize_localizer(
+        self,
+        headset_img_rgb:np.ndarray, 
+        robot_img_rgb:np.ndarray | None = None, 
+
+        # PnP
+        points1:np.ndarray | None = None, 
+        points2:np.ndarray | None = None,
+        points1_3d:np.ndarray | None = None,
+
+        # PnP+L
+        robot_lines_2d:np.ndarray | None = None,
+        headset_lines_2d:np.ndarray | None = None,
+        robot_lines_3d:np.ndarray | None = None,
+
+        # Ellipsoid
+        observed_gaussians:np.ndarray | None = None,
+        projected_gaussians:np.ndarray | None = None,
+        proj_match_indices:list[int] | None = None,
+        obs_match_indices:list[int] | None = None,
+        base_t_ellipsoid_s:np.ndarray | None = None,
+        primal_quadratic_s:np.ndarray | None = None,
+
+        # 3D
+        base_t_cam:np.ndarray | None = None,
+        headset_intrinsic_mat:np.ndarray | None = None,
+    ):
+        if self.map_robot_img_coordinates is None or self.map_headset_img_coordinates is None and robot_img_rgb is not None:
+            self._set_images(robot_img_rgb=robot_img_rgb, headset_img_rgb=headset_img_rgb)
+
+        if points1 is not None and points2 is not None:
+            self._plot_matched_points(points1=points1, points2=points2)
+
+        if robot_lines_2d is not None and headset_lines_2d is not None:
+            self._visualize_line_features(robot_lines_2d=robot_lines_2d, headset_lines_2d=headset_lines_2d)
+
+        if all([x is not None for x in [obs_match_indices, observed_gaussians, projected_gaussians, proj_match_indices, obs_match_indices]]):
+            n = len(obs_match_indices)
+            colors = plt.cm.jet(np.linspace(0,1, n))
+            self._visualize_ellipsoid_features(
+                observed_gaussians=observed_gaussians,
+                projected_gaussians=projected_gaussians,
+                proj_match_indices=proj_match_indices,
+                obs_match_indices= obs_match_indices,
+                colors= colors
+            )
+
+
+        if self.o3d_vis is None:
+            return
+        
+        from ..ellipse_localizer.ellipsoid_utilities_numpy import create_ellipsoid_lineset
+        
+        to_vis_3d = []
+    
+        if points1_3d is not None and self.sc.show_3d_points:
+            colors = plt.cm.jet(np.linspace(0,1, points1_3d.shape[0]))
+            for i, p3d in enumerate(points1_3d):
+                sphere = o3d.geometry.TriangleMesh.create_sphere(radius=self.sc.points_3d_size)
+                sphere.paint_uniform_color(colors[i, :3])
+                to_vis_3d.append(sphere)
+                sphere.translate(p3d)
+                to_vis_3d.append(sphere)
+
+        if robot_lines_3d is not None:
+            colors_lines = plt.cm.jet(np.linspace(0,1, robot_lines_3d.shape[0]))
+            to_vis_3d += lines_3d_for_o3d(robot_lines_3d, colors= colors_lines)
+
+
+        if all([x is not None for x in [primal_quadratic_s, base_t_ellipsoid_s, proj_match_indices]]):
+            if self.sc.line_pne_use_cylinders:
+                for i, idx in enumerate(proj_match_indices):
+                    meshes = create_ellipsoid_cylinder_lineset(
+                        base_t_ellipsoid = base_t_ellipsoid_s[idx],
+                        primal_quadratic = primal_quadratic_s[idx],
+                        ellipsoid_resolution=10,
+                        cylinder_radius=self.sc.line_pnpe_radius_3d,
+                        color=colors[i][:3]
+                    )
+                    to_vis_3d += meshes
+            else:
+                for i, idx in enumerate(proj_match_indices):
+                    lineset = create_ellipsoid_lineset(
+                        base_t_ellipsoid = base_t_ellipsoid_s[idx],
+                        primal_quadratic = primal_quadratic_s[idx],
+                        resolution=10
+                    )
+                    lineset.paint_uniform_color(colors[i][:3])
+                    to_vis_3d.append(lineset)
+
+
+        self._replace_geometry(
+            geometries=to_vis_3d, 
+            base_t_cam=base_t_cam, 
+            headset_intrinsic_mat=headset_intrinsic_mat, 
+            headset_image_size=(headset_img_rgb.shape[1], headset_img_rgb.shape[0])
+        )
+
+
+
+
+
+    def _set_images(self, robot_img_rgb:np.ndarray, headset_img_rgb:np.ndarray):
         h1,w1 = robot_img_rgb.shape[:2]
         h2,w2 = headset_img_rgb.shape[:2]
 
@@ -124,10 +336,8 @@ class FeatureDrawing:
         self.canvas_height = cnvs_h
 
 
-    def plot_matched_points(
+    def _plot_matched_points(
             self, 
-            robot_img_rgb:np.ndarray, 
-            headset_img_rgb:np.ndarray, 
             points1:np.ndarray, 
             points2:np.ndarray,
         ):
@@ -140,9 +350,6 @@ class FeatureDrawing:
         assert points1.ndim == 2 and points1.shape[-1] == 2, f"invalid 2d points shape: {points1.shape}"
         assert points2.ndim == 2 and points2.shape[-1] == 2, f"invalid 2d points shape: {points2.shape}"
         assert points1.shape == points2.shape, f"Incompatible shapes for matched: {points1.shape} != {points2.shape}"
-
-        if self.map_robot_img_coordinates is None or self.map_headset_img_coordinates is None:
-            self.set_images(robot_img_rgb=robot_img_rgb, headset_img_rgb=headset_img_rgb)
 
         colors = plt.cm.jet(np.linspace(0,1, points1.shape[0]))
 
@@ -160,7 +367,7 @@ class FeatureDrawing:
         self.ax.axis('off')
 
 
-    def visualize_line_features(
+    def _visualize_line_features(
         self,
         robot_lines_2d:np.ndarray,
         headset_lines_2d:np.ndarray, 
@@ -196,16 +403,62 @@ class FeatureDrawing:
         return mod_gauss
     
 
-    def visualize_ellipsoid_features(
+    def set_camera3d_viewpoint(
+        self,
+        base_t_cam:np.ndarray | None = None,
+        headset_intrinsic_mat:np.ndarray | None = None,
+        image_size:tuple[int, int] | None = None
+    ):
+        if base_t_cam is None or headset_intrinsic_mat is None or self.sc.use_headset_viewpoint is None or image_size is None:
+            return
+        
+        view_control = self.o3d_vis.get_view_control()
+        camera_params = view_control.convert_to_pinhole_camera_parameters()
+
+        camera_params.extrinsic = np.linalg.inv(base_t_cam)
+
+        K = headset_intrinsic_mat
+        w, h = image_size
+        camera_params.intrinsic = o3d.camera.PinholeCameraIntrinsic(w, h, K[0, 0], K[1, 1], K[0, 2], K[1, 2])
+    
+        view_control.convert_from_pinhole_camera_parameters(camera_params)      
+
+    def _replace_geometry(
+            self,
+            geometries:list[Any],
+            base_t_cam:np.ndarray | None = None,
+            headset_intrinsic_mat:np.ndarray | None = None,
+            headset_image_size:tuple[int, int] | None = None
+    ):
+        if self.o3d_vis is None:
+            return
+
+        for geom in self.curr_geoms:
+            self.o3d_vis.remove_geometry(geom)
+            self.curr_geoms.clear()
+
+        for geom in geometries:
+                self.o3d_vis.add_geometry(geom)
+                self.curr_geoms.append(geom)
+
+
+        if self.sc.use_headset_viewpoint:
+            self.set_camera3d_viewpoint(
+                base_t_cam=base_t_cam,
+                headset_intrinsic_mat=headset_intrinsic_mat,
+                image_size=headset_image_size
+            )
+        self.o3d_vis.poll_events()
+        self.o3d_vis.update_renderer()
+
+
+    def _visualize_ellipsoid_features(
         self,
         observed_gaussians:np.ndarray,
         projected_gaussians:np.ndarray,
         proj_match_indices:list[int],
         obs_match_indices:list[int],
-        base_t_ellipsoid_s:np.ndarray | None = None,
-        primal_quadratic_s:np.ndarray | None = None,
-        base_t_cam:np.ndarray | None = None,
-        headset_intrinsic_mat:np.ndarray | None = None
+        colors:np.ndarray,
     ):
         from ..ellipse_localizer.ellipsoid_utilities_numpy import gaussian_ellipse_s_to_matplotlib_ellipse_s
 
@@ -213,8 +466,6 @@ class FeatureDrawing:
         mod_projected_gaussians = self.transform_gaussians(projected_gaussians)
 
         # Plot matched ones
-        n = len(obs_match_indices)
-        colors = plt.cm.jet(np.linspace(0,1, n))
         proj_ellipses_matched = gaussian_ellipse_s_to_matplotlib_ellipse_s(
             gaussian_ellipse_s=mod_projected_gaussians[proj_match_indices],
             colors=colors,
@@ -250,92 +501,12 @@ class FeatureDrawing:
             width=0.005
         )
 
-        if self.fig3D is not None and self.ax3D is not None and primal_quadratic_s is not None and base_t_ellipsoid_s is not None and base_t_cam is not None:
-            for i, idx in enumerate(proj_match_indices):
-
-                axis_length = 0.2
-                self.ax3D.quiver(*np.array([0,0,0]), *np.array([axis_length, 0, 0]), color='r', arrow_length_ratio=0.1, label='X')
-                self.ax3D.quiver(*np.array([0,0,0]), *np.array([0, axis_length, 0]), color='g', arrow_length_ratio=0.1, label='Y')
-                self.ax3D.quiver(*np.array([0,0,0]), *np.array([0, 0, axis_length]), color='b', arrow_length_ratio=0.1, label='Z')
-
-                self.plot_ellipsoid_wireframe_matplotlib(
-                    self.ax3D, base_t_ellipsoid=base_t_ellipsoid_s[idx], 
-                    primal_quadratic=primal_quadratic_s[idx], 
-                    color = colors[i]
-                )
-
-                # Set camera position:
-                extend = self.sc.ellipsoid_3d_plot_extent_around_intersection
-                middle = base_t_cam[:3,3]
-                if np.abs(base_t_cam[2,3]) < 1e-6 or np.abs(base_t_cam[2,2]) < 1e-6:
-                    origin, direction = base_t_cam[:3, 3], base_t_cam[:3, 2]
-                    t = -origin[:3, 3] / direction[:3, 2]
-                    middle = origin + t * direction
-
-                self.ax3D.set_xlim(middle[0]-extend, middle[0]+extend)
-                self.ax3D.set_ylim(middle[1]-extend, middle[1]+extend)
-                self.ax3D.set_zlim(middle[2]-extend, middle[2]+extend)
-                
-                look_dir = -base_t_cam[:3, 2] 
-                elev = np.degrees(np.arcsin(look_dir[2] / np.linalg.norm(look_dir)))
-                azim = np.degrees(np.arctan2(look_dir[1], look_dir[0]))
-                self.ax3D.view_init(elev=elev, azim=azim)
-                self.ax3D.axis('off')
-
-
-    @staticmethod
-    def plot_ellipsoid_wireframe_matplotlib(
-        ax3d: Axes3D,
-        base_t_ellipsoid: np.ndarray, 
-        primal_quadratic: np.ndarray,
-        color: tuple[float, float, float] | str = "blue",
-        resolution: int = 10,
-        alpha: float = 0.7,
-        linewidth: float = 1.0,
-    ):
-        from ..ellipse_localizer.ellipsoid_utilities_numpy import sample_points_in_primal_quadratic
-
-        world_points = sample_points_in_primal_quadratic(
-            base_t_ellipsoid=base_t_ellipsoid, 
-            primal_quadratic=primal_quadratic, 
-            resolution=resolution
-        )
-        
-        lines = []
-
-        for i in range(resolution):
-            for j in range(resolution):
-                start_idx = i * resolution + j
-                end_idx = i * resolution + (j + 1) % resolution
-                lines.append([start_idx, end_idx])
-
-        for j in range(resolution):
-            for i in range(resolution - 1):
-                start_idx = i * resolution + j
-                end_idx = (i + 1) * resolution + j
-                lines.append([start_idx, end_idx])
-
-        for s_idx, end_idx in lines:
-            ax3d.plot(
-                world_points[[s_idx, end_idx], 0],
-                world_points[[s_idx, end_idx], 1],
-                world_points[[s_idx, end_idx], 2],
-                color=color,
-                alpha=alpha,
-                linewidth=linewidth,
-            )
-
-
 
     def add_info_overlay(self, info_card: InfoCard) -> None:
         text = info_card.format_text()
         if text:
-            self.ax.text(
-                10, 30, text,
-                fontsize=self.sc.overlay_font_size,
-                color='white',
-                fontweight='bold',
-                family='monospace',
+            self.ax.text(10, 30, text,fontsize=self.sc.overlay_font_size,
+                color='white', fontweight='bold', family='monospace',
                 bbox=dict(
                     boxstyle='round,pad=0.5',
                     facecolor='black',
@@ -352,25 +523,23 @@ class FeatureDrawing:
         self.fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
         buf.seek(0)
         
-        image = Image.open(buf)
+        image = Image.open(buf).convert('RGB')
         image_array = np.array(image)
         
         # Render 3D image
-        if self.ax3D is not None and self.fig3D is not None:
-            buf_3d = BytesIO()
-            self.fig3D.savefig(buf_3d, format='png', bbox_inches='tight', pad_inches=0)
-            buf_3d.seek(0)
-            image_3d = Image.open(buf_3d)
-            image_array_3d = np.array(image_3d)
+        if self.o3d_vis is not None:
+            image_array_3d = self.o3d_vis.capture_screen_float_buffer(do_render=True)
+            image_array_3d = (np.asarray(image_array_3d) * 255).astype(np.uint8)
+
         else:
             image_array_3d = None
 
         # Combine both images
         if image_array_3d is not None:
             h1, _ = image_array.shape[:2]
-            h2, _ = image_array_3d.shape[:2]
+            h2, w2 = image_array_3d.shape[:2]
             resize_ratio = h1/h2
-            image_array_3d = cv2.resize(image_array_3d, (h2, int(h2*resize_ratio)), interpolation=cv2.INTER_LINEAR)
+            image_array_3d = cv2.resize(image_array_3d, (int(w2*resize_ratio), int(round(h2*resize_ratio))), interpolation=cv2.INTER_LINEAR)
             combined = np.hstack([image_array, image_array_3d])
         else:
             combined = image_array
@@ -380,9 +549,12 @@ class FeatureDrawing:
     
     def close(self) -> None:
         plt.close(self.fig)
-        if self.fig3D is not None:
-            plt.close(self.fig3D)
-
+        if self.o3d_vis is not None:
+            for geom in self.curr_geoms:
+                    self.o3d_vis.remove_geometry(geom)
+            self.curr_geoms.clear()
+            self.o3d_vis.destroy_window()
+            self.o3d_vis = None
 
 class VideoGenerator:
     def __init__(
@@ -391,7 +563,9 @@ class VideoGenerator:
             fps:int = 5,
             figsize:tuple[int, int] = (20, 10),
             use_second_3d_axis:bool = False,
-            figsize_3d:tuple[int, int] = (10, 10),
+            figsize_3d:tuple[int, int] = (600, 600),
+            scan_bgr_images:np.ndarray | None = None,
+            scan_xyz_images:np.ndarray | None = None
         ) -> None:
         self.style_config = style_config
         self.fps = fps
@@ -401,12 +575,14 @@ class VideoGenerator:
         self.use_second_3d_axis = use_second_3d_axis
         self.figsize_3d = figsize_3d
 
+        self.scan_bgr_images = scan_bgr_images
+        self.scan_xyz_images = scan_xyz_images
+
         matplotlib.use('Agg')
         import importlib
         import matplotlib.pyplot as plt
         importlib.reload(plt)
 
- 
 
     def start_new_frame(self)->FeatureDrawing:
         if self.current_feature_drawer is not None:
@@ -416,7 +592,9 @@ class VideoGenerator:
             style_config=self.style_config,
             figsize=self.figsize,
             provide_second_3d_axis=self.use_second_3d_axis,
-            figsize_3d=self.figsize_3d
+            figsize_3d=self.figsize_3d,
+            bgr_images=self.scan_bgr_images,
+            xyz_images=self.scan_xyz_images
         )
 
         return self.current_feature_drawer

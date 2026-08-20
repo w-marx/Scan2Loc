@@ -116,20 +116,23 @@ class ExtractAndMatchWrapper:
             )
 
             if fd is not None:
+
                 if est_base_t_cam_and_points is not None:
-                    _, best_image_points_cam1, best_image_points_cam2, _, inlier_indices = est_base_t_cam_and_points
-                    fd.plot_matched_points(
+                    b_t_c, best_image_points_cam1, best_image_points_cam2, points1_3d, inlier_indices = est_base_t_cam_and_points
+                    fd.visualize_localizer(
                         robot_img_rgb=cv2.cvtColor(self.cam1_bgr_images_for_vis[idx], code=cv2.COLOR_BGR2RGB),
                         headset_img_rgb=cam2_rgb_image,
                         points1=best_image_points_cam1[inlier_indices],
-                        points2=best_image_points_cam2[inlier_indices]
+                        points2=best_image_points_cam2[inlier_indices],
+                        points1_3d=points1_3d[inlier_indices],
+                        base_t_cam=b_t_c,
+                        headset_intrinsic_mat=self.cam2_mtx
                     )
                 else:
-                    fd.set_images(
+                    fd.visualize_localizer(
                         robot_img_rgb=cv2.cvtColor(self.cam1_bgr_images_for_vis[idx], code=cv2.COLOR_BGR2RGB),
                         headset_img_rgb=cam2_rgb_image
                     )
-
 
             self.sheduler.adjust(idx, est_base_t_cam_and_points is not None)
             number_tries += 1
