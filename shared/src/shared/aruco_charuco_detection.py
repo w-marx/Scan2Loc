@@ -172,7 +172,7 @@ class MarkerDetector(ABC):
         if config.marker_type == "Charuco":
             return CharucoDetector(config)
         if config.marker_type == "Aruco_Field":
-            return CharucoDetector(config)
+            return ArucoFieldDetector(config)
         raise Exception("Unknown marker detector config")
 
 
@@ -248,10 +248,6 @@ class CharucoDetector(MarkerDetector):
     def __init__(self,config:MarkerDetectionConfig):
         super().__init__(config=config)
         self.min_number_of_markers = config.min_fraction_of_markers * (config.board_size[0] * config.board_size[1]) * 0.5
-
-        if config.marker_type != "Charuco":
-            print(f"Charuco detector called with non Charuco marker (ignore if you are using an Aruco Field)")
-            return
 
         self.board = cv2.aruco.CharucoBoard(
             config.board_size, config.square_size, config.marker_side_length, cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY_OPTIONS[config.aruco_marker_dictionary])
@@ -343,7 +339,7 @@ class CharucoDetector(MarkerDetector):
         return self.marker_remover.remove_area(np.array(images), hulls)
 
 
-class ArucoFieldDetector(CharucoDetector):
+class ArucoFieldDetector(MarkerDetector):
     def __init__(self, config: MarkerDetectionConfig):
         super().__init__(config)
 
@@ -352,21 +348,71 @@ class ArucoFieldDetector(CharucoDetector):
         )
         detector_params = cv2.aruco.DetectorParameters()
         detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        self.detector = cv2.aruco.ArucoDetector(
+            self.aruco_marker_dictionary,
+            detector_params
+        )
+
+        self.min_number_of_markers = config.min_fraction_of_markers * len(self.config.rel_marker_field_locations)
 
         marker_points = np.array(
             [[-1, 1, 0], [1, 1, 0], [1, -1, 0], [-1, -1, 0]]) * 0.5 * self.config.marker_side_length
 
         markers_points = np.array([
             marker_points + np.array([x_offset, y_offset, 0])
-            for _, x_offset, y_offset in self.id_and_rel_pos
+            for _, x_offset, y_offset in self.config.rel_marker_field_locations
         ])
 
-        self.board = cv2.aruco.CharucoBoard(
-            config.board_size, config.square_size, config.marker_side_length, cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY_OPTIONS[config.aruco_marker_dictionary])
+        self.board = cv2.aruco.Board(
+            markers_points,
+            self.aruco_marker_dictionary,
+            np.array([id for id, _, _ in self.config.rel_marker_field_locations], dtype=np.int32)
         )
 
-        detector_params = cv2.aruco.DetectorParameters()
-        detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-        self.detector = cv2.aruco.Board(
-            markers_points, self.aruco_marker_dictionary, np.array([id for id, _, _ in self.id_and_rel_pos])
-        )
+    def get_camera_t_marker(self, images:list[np.ndarray], camera_matrix:np.ndarray, distortion_coefficients:list[float]|None = None)->list[np.ndarray | None]:
+        camera_t_marker_field = []
+        for index, image in enumerate(images):
+            corners, marker_ids, rejected = self.detector.detectMarkers(image)
+            object_points, image_points = self.board.matchImagePoints(corners, marker_ids)
+
+            if len(object_points) < 4 or  marker_ids is None or len(marker_ids) < self.min_number_of_markers:
+                camera_t_marker_field.append(None)
+                continue
+
+            success, rvec, tvec, inliers = cv2.solvePnPRansac(
+                object_points,
+                image_points,
+                camera_matrix,
+                np.array(([0,0,0,0,0] if distortion_coefficients is None else distortion_coefficients)),
+                iterationsCount=200,
+                reprojectionError=2.0,
+                confidence=0.999,
+                flags=cv2.SOLVEPNP_ITERATIVE
+            )
+
+            if not success:
+                camera_t_marker_field.append(None)
+                continue
+
+            rvec, tvec = cv2.solvePnPRefineLM(
+                object_points,
+                image_points,
+                camera_matrix,
+                np.array(([0,0,0,0,0] if distortion_coefficients is None else distortion_coefficients)),
+                rvec,
+                tvec
+            )
+
+            camera_t_marker_field.append(assemble_homogeneous_matrix(rvec=rvec, tvec=tvec))
+        return camera_t_marker_field
+
+    def remove_markers(self, images:list[np.ndarray]) ->list[np.ndarray]:
+        masked_images = []
+        for image in images:
+            marker_corners, marker_ids, reject_candidates = self.detector.detectMarkers(image)
+            image_copy = image.copy()
+            if marker_corners:
+                for corners in marker_corners:
+                    image_copy = self.marker_remover.remove_area(np.array([image_copy]), [corners.reshape(4,2).astype(np.int32)])[0]
+            masked_images.append(image_copy)
+        return masked_images
