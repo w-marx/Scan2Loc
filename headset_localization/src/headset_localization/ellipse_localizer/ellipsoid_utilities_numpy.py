@@ -798,5 +798,6 @@ def match_gaussians_hungarian_on_wasserstein(
             observed_sigma_mu_s=obs_sigma_mu_s,
             observed_matched_idx_s=obs_matched_idx_s
         )
+        ax.axis('off')
         plt.show()
     return proj_matched_idx_s, obs_matched_idx_s

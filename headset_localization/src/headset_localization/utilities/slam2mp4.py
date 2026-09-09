@@ -9,6 +9,7 @@ from PIL import Image
 import open3d as o3d
 from typing import Any
 from shared.se3_utilities import rotational_difference, translational_difference
+from .cylinder_lines_o3d import lines_3d_for_o3d
 
 @dataclass(frozen=True, kw_only=True)
 class FeatureStyleConfig:
@@ -20,6 +21,7 @@ class FeatureStyleConfig:
     point_alpha:float = 0.8
     arrow_alpha:float = 0.6
     line_widht:int = 1
+    show_ellipsoid_reprojection:bool = True
 
     connection_line_thickness:int = 1
     connection_line_alpha:float = 0.5
@@ -43,6 +45,9 @@ class FeatureStyleConfig:
     line_pne_use_cylinders:bool = True
     line_pnpe_radius_3d:float = 0.002
 
+    show_info_card:bool = True
+    rotate_robot_image:bool = True
+
 
 class InfoCard():
     def __init__(
@@ -63,54 +68,14 @@ class InfoCard():
         if self.predicted_base_t_cam is not None and self.actual_base_t_cam is not None:
             t_error = translational_difference(self.predicted_base_t_cam, self.actual_base_t_cam)
             r_error = rotational_difference(self.predicted_base_t_cam, self.actual_base_t_cam)        
-            lines.append(f"Translation Error: {t_error*1000:.2f} mm")
-            lines.append(f"Rotation Error: {np.rad2deg(r_error):.3f} deg")
+            lines.append(f"Translation Error: {t_error*1000:07.1f} mm")
+            lines.append(f"Rotation Error: {np.rad2deg(r_error):06.1f} deg")
         else:
             lines.append(f"Translation Error: unknown")
             lines.append(f"Rotation Error: unknown")
         lines += self.additional_info
 
         return "\n".join(lines) if lines else ""
-
-
-def lines_3d_for_o3d(lines3d:np.ndarray, colors:np.ndarray, radius:float = 0.005, resolution = 6)->list[Any]:
-    """
-    :param lines3d: Nx6 line array
-    :param colors: Nx3 colors
-    """
-    directions = lines3d[:, 3:]-lines3d[:, :3]
-    lengths = np.linalg.norm(directions, axis=1)
-
-    directions_norm = directions/np.linalg.norm(directions, axis=1, keepdims=True)
-    mid_points = lines3d[:, :3] + directions/2
-
-    to_vis = []
-
-    for i, _ in enumerate(lines3d):
-        if lengths[i] < 1e-6:
-            continue
-
-        cylinder = o3d.geometry.TriangleMesh.create_cylinder(
-            radius=radius,
-            height=lengths[i],
-            resolution=resolution
-        )
-        z_axis = np.array([0, 0, 1])
-        rotation_axis = np.cross(z_axis, directions_norm[i])
-        rotation_angle = np.arccos(np.clip(np.dot(z_axis, directions_norm[i]), -1, 1))
-    
-        if np.linalg.norm(rotation_axis) > 1e-6:
-            rotation_axis = rotation_axis / np.linalg.norm(rotation_axis)
-            R = o3d.geometry.TriangleMesh.get_rotation_matrix_from_axis_angle(
-                rotation_axis * rotation_angle
-            )
-            cylinder.rotate(R, center=[0, 0, 0])
-    
-        cylinder.translate(mid_points[i])
-        cylinder.paint_uniform_color(colors[i, :3])
-        to_vis.append(cylinder)
-
-    return to_vis
 
 
 def create_ellipsoid_cylinder_lineset(
@@ -320,7 +285,8 @@ class FeatureDrawing:
         cnvs_h, cnvs_w = h2, w1_+w2+x_offset
 
         canvas = np.zeros((cnvs_h, cnvs_w, 3), dtype = np.uint8)
-        canvas[:, :w1_] = robot_img_rgb_
+
+        canvas[:, :w1_] = cv2.rotate(robot_img_rgb_, cv2.ROTATE_180) if self.sc.rotate_robot_image else robot_img_rgb_
         canvas[:, w1_+x_offset:cnvs_w] = headset_img_rgb
 
         self.ax.imshow(canvas)
@@ -328,12 +294,16 @@ class FeatureDrawing:
         self.ax.set_xlim(0, cnvs_w)
         self.ax.set_ylim(cnvs_h, 0)
 
-        self.resize_factor = resize_factor
-        self.map_robot_img_coordinates = lambda x,y: (x*resize_factor, y*resize_factor)
-        self.map_headset_img_coordinates = lambda x,y: (x+w1_+x_offset, y)
-        
         self.canvas_width = cnvs_w
         self.canvas_height = cnvs_h
+        self.resize_factor = resize_factor
+
+        if self.sc.rotate_robot_image:
+            self.map_robot_img_coordinates = lambda x,y: ((w1-x)*resize_factor, (h1-y)*resize_factor)
+        else:
+            self.map_robot_img_coordinates = lambda x,y: (x*resize_factor, y*resize_factor)
+
+        self.map_headset_img_coordinates = lambda x,y: (x+w1_+x_offset, y)
 
 
     def _plot_matched_points(
@@ -357,8 +327,8 @@ class FeatureDrawing:
             x1_, y1_ = self.map_robot_img_coordinates(x1, y1)   
             x2_, y2_ = self.map_headset_img_coordinates(x2, y2)         
 
-            self.ax.scatter(x1_, y1_, color=colors[i], s=self.sc.point_size, alpha=self.sc.point_alpha)
-            self.ax.scatter(x2_, y2_, color=colors[i], s=self.sc.point_size, alpha=self.sc.point_alpha)
+            self.ax.scatter(x1_, y1_, color=colors[i], s=self.sc.point_size**2, alpha=self.sc.point_alpha)
+            self.ax.scatter(x2_, y2_, color=colors[i], s=self.sc.point_size**2, alpha=self.sc.point_alpha)
 
             self.ax.plot([x1_, x2_], [y1_, y2_], color=colors[i],
                 linewidth=self.sc.connection_line_thickness,
@@ -468,16 +438,19 @@ class FeatureDrawing:
         # Plot matched ones
         proj_ellipses_matched = gaussian_ellipse_s_to_matplotlib_ellipse_s(
             gaussian_ellipse_s=mod_projected_gaussians[proj_match_indices],
+            line_widths=self.sc.line_widht,
             colors=colors,
             line_style=self.sc.proj_line_style
         )
         obs_ellipses_matched = gaussian_ellipse_s_to_matplotlib_ellipse_s(
             gaussian_ellipse_s=mod_observed_gaussians[obs_match_indices],
             colors=colors,
+            line_widths=self.sc.line_widht,
             line_style=self.sc.obs_line_style
         )
         for proj_e, obs_e in zip(proj_ellipses_matched, obs_ellipses_matched):
-            self.ax.add_patch(proj_e)
+            if self.sc.show_ellipsoid_reprojection:
+                self.ax.add_patch(proj_e)
             self.ax.add_patch(obs_e)
 
         self.ax.scatter(
@@ -503,6 +476,9 @@ class FeatureDrawing:
 
 
     def add_info_overlay(self, info_card: InfoCard) -> None:
+        if not self.sc.show_info_card:
+            return
+
         text = info_card.format_text()
         if text:
             self.ax.text(10, 30, text,fontsize=self.sc.overlay_font_size,

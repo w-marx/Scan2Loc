@@ -17,6 +17,7 @@ from ..data_interfaces.scanned_3d_environment import Scanned3dEnvironment
 from ..data_interfaces.headset_recording import HeadsetRecording
 
 from ..utilities.time_tracker import TimeTracker
+from ..utilities.cylinder_lines_o3d import lines_3d_for_o3d
 
 from .prediction_on_dataset import PredictionOnDataset, format_optional, fmt_mae, fmt_median, fmt_rmse, safe_mae, safe_median, safe_rmse
 from .headset_localizer import HeadsetLocalizer
@@ -744,7 +745,7 @@ class NPredictors1DatasetGrader:
         plt.show()
         
 
-    def visualize_predictions_3d(self, vis_robot_cams:bool = False):
+    def visualize_predictions_3d(self, vis_robot_cams:bool = False, line_radius = 0.002, line_res:int = 6):
         """
         Visualizes the predictions made by the predictors using open3d
         :param robot_env: RobotEnvironment or None, if not None will be added to the plot
@@ -770,11 +771,15 @@ class NPredictors1DatasetGrader:
             if len(trajectory) == 0:
                 continue
 
-            traj_line_set = o3d.geometry.LineSet()
-            traj_line_set.points = o3d.utility.Vector3dVector(np.asarray(trajectory)[:,:3,3])
-            traj_line_set.lines = o3d.utility.Vector2iVector([[j, j+1] for j in range(len(trajectory)-1)])
-            traj_line_set.paint_uniform_color(colors[i])
-            to_vis.append(traj_line_set)
+            trajectory_points = np.asarray(trajectory)[:,:3,3]
+            lines = [np.concatenate([trajectory_points[j], trajectory_points[j+1]]) for j in range(len(trajectory)-1)]
+            
+            to_vis += lines_3d_for_o3d(
+                lines3d=np.array(lines),
+                colors=np.tile(colors[i], (len(lines),1)),
+                radius=line_radius,
+                resolution=line_res
+            )
 
         o3d.visualization.draw_geometries(to_vis, f"Predicted trajectories visualisation")
 
