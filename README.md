@@ -148,7 +148,7 @@ python read_joint.py
 ```
 Optional usage with hpyerparameters:
 ```bash
-python read_joint.py --interface-cfg "charmander.yml" --controller-cfg "joint-position-controller.yml" --folder "./positions.csv"
+python read_joint.py --interface-cfg "charmander.yml" --folder "./positions.csv"
 ```
 
 
