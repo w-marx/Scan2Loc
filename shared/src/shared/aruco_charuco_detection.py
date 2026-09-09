@@ -17,19 +17,21 @@ ARUCO_DICTIONARY_OPTIONS = {
 @dataclass(frozen=True, kw_only=True)
 class MarkerDetectionConfig:
     """
-    Specifies the marker type to build an marker detector
-    :param marker_type: 'Aruco'/'Charuco' or None are currently supported
+    Specifies the marker type to build a marker detector
+    :param marker_type: 'Aruco'/'Charuco'/'Aruco_Field' or None are currently supported
     :param marker_side_length: The side length of the marker in meters
     :param aruco_marker_dictionary: The dictionary of the Aruco marker, as a string of the form "MxM_N", e.g. "5X5_250"
     :param board_size: The number of squares along each axis for charuco boards
     :param min_fraction_of_markers: The min fraction of markers on a charuco board to return a prediction
+    :param rel_marker_field_locations: The relative locations and id of the multiple markers in the marker field [(id, x_offset_m, y_offset_m), ...]
     """
-    marker_type:Literal["Aruco", "Charuco"] | None = "Aruco"
+    marker_type:Literal["Aruco", "Charuco", "Aruco_Field"] | None = "Aruco"
     marker_side_length:float = 0.0725
     aruco_marker_dictionary:str = "6X6_250"
     board_size:list[int] | None = None
     square_size:float|None = None
     min_fraction_of_markers:float=1.0
+    rel_marker_field_locations:None | list[tuple[int, float, float]]= None
 
     def __post_init__(self):
         assert self.marker_type is None or self.marker_type in ["Aruco", "Charuco"], f"unknown marker type: {self.marker_type}"
@@ -169,7 +171,10 @@ class MarkerDetector(ABC):
             return ArucoDetector(config)
         if config.marker_type == "Charuco":
             return CharucoDetector(config)
+        if config.marker_type == "Aruco_Field":
+            return CharucoDetector(config)
         raise Exception("Unknown marker detector config")
+
 
 class NoMarkerDetector(MarkerDetector):
     def __init__(self, config:MarkerDetectionConfig):
@@ -204,7 +209,7 @@ class ArucoDetector(MarkerDetector):
                 print(f"found more then 1 marker in image: {index}")
                 camera_t_aruco_s.append(None)
                 continue
-            
+
             if len(marker_corners) == 0:
                 camera_t_aruco_s.append(None)
                 print("nothing detected")
@@ -242,10 +247,15 @@ class ArucoDetector(MarkerDetector):
 class CharucoDetector(MarkerDetector):
     def __init__(self,config:MarkerDetectionConfig):
         super().__init__(config=config)
+        self.min_number_of_markers = config.min_fraction_of_markers * (config.board_size[0] * config.board_size[1]) * 0.5
+
+        if config.marker_type != "Charuco":
+            print(f"Charuco detector called with non Charuco marker (ignore if you are using an Aruco Field)")
+            return
+
         self.board = cv2.aruco.CharucoBoard(
             config.board_size, config.square_size, config.marker_side_length, cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY_OPTIONS[config.aruco_marker_dictionary])
         )
-        self.min_number_of_markers = config.min_fraction_of_markers * (config.board_size[0] * config.board_size[1]) * 0.5
 
         detector_params = cv2.aruco.DetectorParameters()
         detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
@@ -331,3 +341,32 @@ class CharucoDetector(MarkerDetector):
             hulls.append(hull_points)
 
         return self.marker_remover.remove_area(np.array(images), hulls)
+
+
+class ArucoFieldDetector(CharucoDetector):
+    def __init__(self, config: MarkerDetectionConfig):
+        super().__init__(config)
+
+        self.aruco_marker_dictionary = cv2.aruco.getPredefinedDictionary(
+            ARUCO_DICTIONARY_OPTIONS[self.config.aruco_marker_dictionary]
+        )
+        detector_params = cv2.aruco.DetectorParameters()
+        detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+
+        marker_points = np.array(
+            [[-1, 1, 0], [1, 1, 0], [1, -1, 0], [-1, -1, 0]]) * 0.5 * self.config.marker_side_length
+
+        markers_points = np.array([
+            marker_points + np.array([x_offset, y_offset, 0])
+            for _, x_offset, y_offset in self.id_and_rel_pos
+        ])
+
+        self.board = cv2.aruco.CharucoBoard(
+            config.board_size, config.square_size, config.marker_side_length, cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY_OPTIONS[config.aruco_marker_dictionary])
+        )
+
+        detector_params = cv2.aruco.DetectorParameters()
+        detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        self.detector = cv2.aruco.Board(
+            markers_points, self.aruco_marker_dictionary, np.array([id for id, _, _ in self.id_and_rel_pos])
+        )
