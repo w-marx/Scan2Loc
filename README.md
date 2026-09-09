@@ -135,7 +135,21 @@ conda activate ./data_gather_env
 pip install -e ../shared
 ```
 This environment needs access to a working [deoxys](https://github.com/UT-Austin-RPL/deoxys_control) installation to be able to control a Franka Panda Emika robot.
-For example usage refer to [DataGathering.ipynb](./notebooks/DataGathering.ipynb).
+For a tutorial on how to scan a workspace using deoxys and adding marker information refer to [DataGathering.ipynb](./notebooks/DataGathering.ipynb).
+
+For this a `.csv` table of joint coordinates (positions = rows, n_joints = columns) to scan at is required of which multiple are provided: [pos11](./data_gathering/pos11.csv), [positions_panda_63](./data_gathering/positions_panda_63).   
+Alternatively new ones for the Franka Panda Emika robot can be created using the script: [read_joint.py](./data_gathering/read_joint.py).   
+To do this enable hand guidance on the robot and run:   
+```bash
+conda activate ./data_gather_env
+python read_joint.py
+# press 'A'/'a' to add the current position of the robot to the .csv (multiple times)
+# press 'S'/'s' to save the csv to ./positions.csv
+```
+Optional usage with hpyerparameters:
+```bash
+python read_joint.py --interface-cfg "charmander.yml" --folder "./positions.csv"
+```
 
 
 ## License
