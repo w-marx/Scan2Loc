@@ -374,15 +374,6 @@ class ArucoFieldDetector(MarkerDetector):
         for index, image in enumerate(images):
             corners, marker_ids, rejected = self.detector.detectMarkers(image)
 
-            #import matplotlib.pyplot as plt
-            #vis = image.copy()
-            #cv2.aruco.drawDetectedMarkers(vis, corners, marker_ids)
-            #plt.figure(figsize=(10, 7))
-            #plt.imshow(cv2.cvtColor(vis, cv2.COLOR_BGR2RGB))
-            #plt.title(f"image {index}  ids={None if marker_ids is None else marker_ids.flatten().tolist()}")
-            #plt.axis("off")
-            #plt.show()
-
             object_points, image_points = self.board.matchImagePoints(corners, marker_ids)
 
             if len(object_points) < 4 or  marker_ids is None or len(marker_ids) < self.min_number_of_markers:
@@ -414,30 +405,6 @@ class ArucoFieldDetector(MarkerDetector):
             )
 
             camera_t_marker_field.append(assemble_homogeneous_matrix(rvec=rvec, tvec=tvec))
-
-            #vis = image.copy()
-            #dist = np.array([0,0,0,0,0] if distortion_coefficients is None else distortion_coefficients)
-            #reproj, _ = cv2.projectPoints(object_points, rvec, tvec, camera_matrix, dist)
-            #reproj = reproj.reshape(-1, 2)
-            #reproj_err = np.linalg.norm(reproj - image_points.reshape(-1, 2), axis=1)
-            #cv2.aruco.drawDetectedMarkers(vis, corners, marker_ids)
-            #T = camera_t_marker_field[-1]
-            #if T is not None:
-            #    cv2.drawFrameAxes(vis, camera_matrix, dist, rvec, tvec, 0.05)
-            #    for p in image_points.reshape(-1, 2):
-            #        cv2.circle(vis, tuple(np.round(p).astype(int)), 2, (0, 255, 0), -1)
-            #    for p in reproj:
-            #        cv2.circle(vis, tuple(np.round(p).astype(int)), 2, (0, 0, 255), -1)
-
-            #vis_rgb = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
-            #plt.figure(figsize=(10, 7))
-            #plt.imshow(vis_rgb)
-            #title = f"image {index}  ids={None if marker_ids is None else marker_ids.flatten().tolist()}"
-            #if reproj_err is not None:
-            #    title += f"\nreproj mean={reproj_err.mean()*1000:.2f}px  max={reproj_err.max()*1000:.2f}px"
-            #plt.title(title)
-            #plt.axis("off")
-            #plt.show()
             
         return camera_t_marker_field
 

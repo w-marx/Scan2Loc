@@ -1,0 +1,35 @@
+{
+    "marker_type": "Aruco_Field",
+    "marker_side_length": 0.08,
+    "aruco_marker_dictionary": "6X6_250",
+    "board_size": null,
+    "square_size": null,
+    "min_fraction_of_markers": 1.0,
+    "rel_marker_field_locations": [
+        [
+            10,
+            -0.055,
+            0.0985
+        ],
+        [
+            20,
+            0.055,
+            0.0985
+        ],
+        [
+            30,
+            -0.055,
+            -0.0985
+        ],
+        [
+            40,
+            0.055,
+            -0.0985
+        ],
+        [
+            50,
+            0.0,
+            0.0
+        ]
+    ]
+}
