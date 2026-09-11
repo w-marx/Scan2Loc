@@ -381,10 +381,10 @@ class ArucoFieldDetector(MarkerDetector):
                 continue
 
             success, rvec, tvec, inliers = cv2.solvePnPRansac(
-                object_points,
-                image_points,
-                camera_matrix,
-                np.array(([0,0,0,0,0] if distortion_coefficients is None else distortion_coefficients)),
+                object_points.astype(np.float32),
+                image_points.astype(np.float32),
+                camera_matrix.astype(np.float32),
+                np.array(([0,0,0,0,0] if distortion_coefficients is None else distortion_coefficients), dtype=np.float32),
                 iterationsCount=200,
                 reprojectionError=2.0,
                 confidence=0.999,
@@ -396,10 +396,10 @@ class ArucoFieldDetector(MarkerDetector):
                 continue
 
             rvec, tvec = cv2.solvePnPRefineLM(
-                object_points,
-                image_points,
-                camera_matrix,
-                np.array(([0,0,0,0,0] if distortion_coefficients is None else distortion_coefficients)),
+                object_points.astype(np.float32),
+                image_points.astype(np.float32),
+                camera_matrix.astype(np.float32),
+                np.array(([0,0,0,0,0] if distortion_coefficients is None else distortion_coefficients), dtype=np.float32),
                 rvec,
                 tvec
             )
