@@ -8,7 +8,7 @@
 </div>
 
 ## Overview
-**Scan2Loc** provides a complete benchmark pipeline for evaluating marker-free AR headset localization in robot-scanned workspaces. This repository accompanies the bachelor thesis *"AR Headset Localization in Robot Scanned Workspaces: A Benchmark Pipeline"*.
+**Scan2Loc** provides a complete benchmark pipeline for evaluating marker-free AR headset localization in robot-scanned workspaces. This repository accompanies the bachelor thesis *"AR Headset Localization in Robot Scanned Workspaces: A Benchmark Pipeline"*. The thesis is not publicly available; the repository is the released artifact.
 
 #### Key Features
 
@@ -88,7 +88,7 @@ All utilities for inference and evaluation are provided by the [`headset_localiz
 conda env create -f env_3090.yml -p ./env
 conda activate ./env
 ```
-Note: Other CUDA versions / GPUs may require different library versions.
+Note: [`env_3090.yml`](./env_3090.yml) is a reference environment and other CUDA / GPU configs may require different library versions.
 
 
 The `headset_localization` package can then be installed using the [`install_pose_pred_dependencies.sh`](./install_pose_pred_dependencies.sh) script into any environment. 
@@ -134,7 +134,7 @@ conda env create -f environment.yml -p ./data_gather_env
 conda activate ./data_gather_env
 pip install -e ../shared
 ```
-This environment needs access to a working [deoxys](https://github.com/UT-Austin-RPL/deoxys_control) installation to be able to control a Franka Panda Emika robot.
+This environment needs access to a working [deoxys](https://github.com/UT-Austin-RPL/deoxys_control) installation + Franka Setup to be able to control a Franka Panda Emika robot.
 For a tutorial on how to scan a workspace using deoxys and adding marker information refer to [DataGathering.ipynb](./notebooks/DataGathering.ipynb).
 
 For this a `.csv` table of joint coordinates (positions = rows, n_joints = columns) to scan at is required of which multiple are provided: [pos11](./data_gathering/pos11.csv), [positions_panda_63](./data_gathering/positions_panda_63).   
@@ -146,7 +146,7 @@ python read_joint.py
 # press 'A'/'a' to add the current position of the robot to the .csv (multiple times)
 # press 'S'/'s' to save the csv to ./positions.csv
 ```
-Optional usage with hpyerparameters:
+Optional usage with hyperparameters:
 ```bash
 python read_joint.py --interface-cfg "charmander.yml" --folder "./positions.csv"
 ```
@@ -204,8 +204,8 @@ marker_detector_config.json has to have the following attributes:
 
 
 The `poses.json` files have to contain the following attributes:
-- `base_t_gripper`: 4x4 transformation matrix as a row-colum nested list of floats
-- `camera_t_marker`: 4x4 transformation matrix as a row-colum nested list of floats | `null`
+- `base_t_gripper`: 4x4 transformation matrix as a row-column nested list of floats
+- `camera_t_marker`: 4x4 transformation matrix as a row-column nested list of floats | `null`
 
 
 #### Scanned 3D Environment
@@ -220,7 +220,7 @@ folder
 ```
 
 The `xyz.npy` files contain the metric 3D images (Each HxWx3).
-The `robot_base_t_robot_camera.json` contains only the 4x4 robot->robot_camera transformation matrix as a row-colum nested list of floats.
+The `robot_base_t_robot_camera.json` contains only the 4x4 robot->robot_camera transformation matrix as a row-column nested list of floats.
 
 #### Headset Recording
 
@@ -233,4 +233,20 @@ folder
         └── rgb.png
 ```
 
-The `label.json` contains only the 4x4 robot->headset ground truth transformation matrix as a row-colum nested list of floats. 
+The `label.json` contains only the 4x4 robot->headset ground truth transformation matrix as a row-column nested list of floats. 
+
+## Citation
+If you use this Project, please cite the paper below.
+
+```bibtex
+@misc{lai2026objectselectionmarkerlessgazebasedrobot,
+      title={Beyond Object Selection: Markerless Gaze-based Robot Placement at Arbitrary Positions}, 
+      author={Yuzhi Lai and William Marx and Shenghai Yuan and Peizheng Li and Zhuoyu Ran and Andreas Zell},
+      year={2026},
+      eprint={2609.00478},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2609.00478}, 
+}
+```
+
