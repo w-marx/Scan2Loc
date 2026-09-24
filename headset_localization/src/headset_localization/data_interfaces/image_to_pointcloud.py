@@ -189,8 +189,10 @@ def generate_xyz_images(
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        model = MapAnything.from_pretrained("facebook/map-anything").to(device)
-
+        # `facebook/map-anything` is CC-BY-NC-4.0 and is NOT compatible with this project's licence. But has better performance.
+        #model = MapAnything.from_pretrained("facebook/map-anything").to(device)
+        model = MapAnything.from_pretrained("facebook/map-anything-apache").to(device)
+        
         generate_xyz_images.preprocess_inputs = preprocess_inputs
         generate_xyz_images.rgb = rgb
         generate_xyz_images.device = device
