@@ -155,9 +155,10 @@ python read_joint.py --interface-cfg "charmander.yml" --folder "./positions.csv"
 ## License
 This project is licensed under the **GNU Affero General Public License v3.0**. See the [LICENSE](./LICENSE) file for details.
 
-This project depends on [MapAnything](https://github.com/facebookresearch/map-anything.git), [LightGlue](https://github.com/cvg/LightGlue.git) and [LoMa](https://github.com/davnords/LoMa.git). Their licenses are available under `./external/[repo]/Licence` after installation.
-
+This project depends on [MapAnything](https://github.com/facebookresearch/map-anything.git), [LightGlue](https://github.com/cvg/LightGlue.git) and [LoMa](https://github.com/davnords/LoMa.git). Their licenses are available under `./external/[repo]/License` after installation.
 This project also depends on various Python packages installed via Conda and pip. Dependencies have their own licenses; please refer to their repositories.
+By default, this project uses the Apache-2.0 licensed variant of MapAnything (facebook/map-anything-apache) for license compatibility with AGPL-3.0. The default MapAnything checkpoint (facebook/map-anything) is CC-BY-NC-4.0 and cannot be used in this project. If you have a non-commercial use case and want the larger model, change line 194 in [image_to_pointcloud.py](./headset_localization/src/headset_localization/data_interfaces/image_to_pointcloud.py).
+
 
 ## File Formats
 Different datasets and environment representations can directly be created from folders, this section defines the file formats.
